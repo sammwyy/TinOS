@@ -1,0 +1,10 @@
+# Editor/LSP configuration matching the freestanding kernel build.
+CompileFlags:
+  Add:
+    - -Ikernel/include
+    - -ffreestanding
+    - -nostdinc
+    - -std=gnu11
+    - -m32
+    - -Wno-unused-parameter
+  Compiler: gcc

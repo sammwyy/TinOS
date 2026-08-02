@@ -1,0 +1,18 @@
+# Build products
+build/
+
+# Compiled object / dependency files
+*.o
+*.d
+
+# Python tooling caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Report (internal notes, not source)
+REPORT.md
