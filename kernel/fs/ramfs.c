@@ -157,8 +157,8 @@ static const char help_txt[] =
 
 static const char motd_txt[] =
     "TinOS 0.1.0\n"
-    "A small graphical operating system written from scratch:\n"
-    "kernel, VGA driver, window manager, shell and filesystem.\n";
+    "A tiny, fast graphical operating system.\n"
+    "Use the start menu to open apps, and read /README.txt to get started.\n";
 
 static const char notes_txt[] =
     "shopping list\n"

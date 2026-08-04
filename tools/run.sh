@@ -4,6 +4,7 @@
 #   tools/run.sh                 graphical window, serial log to tinos-serial.log
 #   tools/run.sh --serial-stdio  serial log multiplexed onto the terminal
 #   tools/run.sh --headless      no display (used by the automated tests)
+#   tools/run.sh --vnc           no local window, serve the display over VNC
 #
 # Extra arguments are passed straight through to QEMU.
 
@@ -39,12 +40,16 @@ for arg in "$@"; do
     case "$arg" in
         --serial-stdio) serial="stdio"; shift ;;
         --headless)     display="none"; shift ;;
+        --vnc)          display="vnc"; shift ;;
         *) break ;;
     esac
 done
 
 if [[ $display == none ]]; then
     args+=(-display none)
+elif [[ $display == vnc ]]; then
+    VNC=${VNC:-0.0.0.0:100}
+    args+=(-display none -vnc "$VNC")
 fi
 args+=(-serial "$serial")
 

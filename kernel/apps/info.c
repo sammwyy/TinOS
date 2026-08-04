@@ -15,19 +15,17 @@
 /* ------------------------------------------------------------------ */
 
 static const char *const about_lines[] = {
-    "A small graphical operating system written from scratch.",
+    "TinOS " TINOS_VERSION,
+    "A tiny graphical operating system for your computer.",
     "",
-    "Implemented in this project:",
-    "  - i386 kernel booted through Multiboot2 / GRUB",
-    "  - GDT, IDT, PIC, PIT timer and CMOS clock",
-    "  - physical page allocator and kernel heap",
-    "  - VGA text console and a 1024x768x32 framebuffer driver",
-    "  - PS/2 keyboard and mouse drivers",
-    "  - window manager, taskbar and start menu",
-    "  - in-memory filesystem shared by every application",
-    "  - shell with pipelines, redirection and 32 commands",
+    "It includes a desktop with a start menu, a command",
+    "line, a file manager, a text editor and more.",
     "",
-    "Controls: Ctrl+Esc start menu, Alt+Tab switch, Alt+F4 close.",
+    "Everything here runs from memory, so the system feels",
+    "fast and responsive, just like a real desktop.",
+    "",
+    "Shortcuts: Ctrl+Esc start menu, Alt+Tab switch windows,",
+    "Alt+F4 close the current window.",
 };
 
 static void about_on_draw(window_t *win, rect_t client)
@@ -38,7 +36,7 @@ static void about_on_draw(window_t *win, rect_t client)
     widget_icon(client.x + 18, client.y + 14, 44, ICON_TINOS);
     gfx_text(client.x + 76, client.y + 22, TINOS_NAME " " TINOS_VERSION,
              COLOR_TEXT);
-    gfx_text(client.x + 76, client.y + 42, "built with gcc, ld and grub2",
+    gfx_text(client.x + 76, client.y + 42, "Lightweight and built to run on anything",
              COLOR_TEXT_DIM);
 
     int y = client.y + 88;
@@ -208,14 +206,14 @@ static window_t *launch_editor(const char *arg)
 }
 
 static const app_entry_t registry[] = {
-    { "Terminal", "shell, pipes and redirection", ICON_TERMINAL,
+    { "Terminal", "command line", ICON_TERMINAL,
       launch_terminal },
-    { "File Explorer", "browse the filesystem", ICON_FOLDER,
+    { "File Explorer", "browse files", ICON_FOLDER,
       launch_explorer },
-    { "Text Editor", "view and edit text files", ICON_EDITOR, launch_editor },
-    { "System Information", "memory, cpu, uptime", ICON_CHIP,
+    { "Text Editor", "write text", ICON_EDITOR, launch_editor },
+    { "System Information", "system details", ICON_CHIP,
       app_sysinfo_open },
-    { "About TinOS", "what this system is", ICON_INFO, app_about_open },
+    { "About TinOS", "version and info", ICON_INFO, app_about_open },
 };
 
 const app_entry_t *apps_registry(size_t *count)

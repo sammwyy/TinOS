@@ -4,6 +4,7 @@
 #  make            build the kernel and the bootable ISO image
 #  make run        build and launch TinOS in QEMU (graphical window)
 #  make run-serial launch with the kernel log multiplexed onto stdout
+#  make runvnc     launch QEMU serving the display over VNC (127.0.0.1:0)
 #  make test       build and run the host-side unit tests
 #  make check      host unit tests + automated QEMU boot/GUI test
 #  make clean      remove build products
@@ -55,7 +56,7 @@ HOST_SAN := $(shell echo 'int main(void){return 0;}' | \
 HOST_CFLAGS := -std=gnu11 -g -O1 -Wall -Wextra -Wno-unused-parameter \
                -DTINOS_HOST=1 -Ikernel/include -Itests/host $(HOST_SAN)
 
-.PHONY: all iso kernel run run-serial run-headless test check verify-reproducible clean distclean
+.PHONY: all iso kernel run run-serial run-headless runvnc test check verify-reproducible clean distclean
 
 all: $(ISO)
 
@@ -109,6 +110,10 @@ run-serial: $(ISO)
 
 run-headless: $(ISO)
 	tools/run.sh --headless
+
+# Serve the display over VNC instead of opening a local window (VNC := address)
+runvnc: $(ISO)
+	tools/run.sh --vnc
 
 # --- tests ------------------------------------------------------------
 $(HOST_BIN): $(HOST_SRCS) $(wildcard kernel/include/tinos/*.h) $(wildcard tests/host/*.h)
