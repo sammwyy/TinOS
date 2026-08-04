@@ -288,8 +288,6 @@ static void draw_glyph(int x, int y, char c, color_t fg, color_t bg,
     if (!fb.active)
         return;
     uint8_t code = (uint8_t)c;
-    if (code >= 128)
-        code = '?';
 
     rect_t r = rect_intersect(rect_make(x, y, FONT_W, FONT_H), clip);
     if (rect_empty(r))

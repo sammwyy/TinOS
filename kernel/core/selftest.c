@@ -11,6 +11,7 @@
 
 #include <tinos/arch.h>
 #include <tinos/fs.h>
+#include <tinos/gfx.h>
 #include <tinos/heap.h>
 #include <tinos/kernel.h>
 #include <tinos/mm.h>
@@ -166,6 +167,32 @@ static void test_filesystem(void)
           "the tree is gone afterwards");
 }
 
+/* The font covers ASCII plus the Latin-1 Supplement, so text carrying
+ * accented Western European letters renders instead of falling back to
+ * a placeholder glyph. */
+static void test_font(void)
+{
+    bool has_bits;
+
+    has_bits = false;
+    for (int i = 0; i < 16; i++)
+        if (font8x16['A'][i])
+            has_bits = true;
+    check(has_bits, "'A' has a non-blank glyph");
+
+    has_bits = false;
+    for (int i = 0; i < 16; i++)
+        if (font8x16[0xE9][i]) /* e-acute */
+            has_bits = true;
+    check(has_bits, "0xE9 (e-acute) has a non-blank glyph");
+
+    has_bits = false;
+    for (int i = 0; i < 16; i++)
+        if (font8x16[0xF1][i]) /* n-tilde */
+            has_bits = true;
+    check(has_bits, "0xF1 (n-tilde) has a non-blank glyph");
+}
+
 static void test_shell(void)
 {
     shell_t *sh = shell_create("/tmp");
@@ -212,6 +239,7 @@ int selftest_run(void)
     test_heap();
     test_paths();
     test_filesystem();
+    test_font();
     test_shell();
 
     uint32_t elapsed = (uint32_t)(timer_ticks() - start);

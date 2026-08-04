@@ -79,7 +79,7 @@ TinOS runs in far less.
 The GRUB menu has two entries:
 
 * **TinOS** - the normal desktop.
-* **TinOS (kernel self-test on serial)** - runs 173 in-kernel assertions over
+* **TinOS (kernel self-test on serial)** - runs 176 in-kernel assertions over
   the heap, path handling, filesystem and shell before starting the desktop
   and prints the results to the serial port.
 
@@ -324,7 +324,7 @@ make check     # the above plus a 51-check scripted QEMU session
   hostile-input fuzz list.
 
 * **In-kernel self-test** (`kernel/core/selftest.c`, second GRUB entry) runs
-  173 assertions inside the real kernel against the real heap and prints the
+  176 assertions inside the real kernel against the real heap and prints the
   result to the serial port.
 
 * **Scripted QEMU session** (`tools/qemu_test.py`) boots the ISO headless,
@@ -338,7 +338,10 @@ make check     # the above plus a 51-check scripted QEMU session
 * No windows resizing, no drag-and-drop.
 * The terminal wraps output at the width the window had when it opened; the
   window cannot be resized, so this never changes at run time.
-* Text is ASCII only (codes 0x20-0x7E plus a few UI symbols). No Unicode.
+* The font covers ASCII, a few hand-drawn UI symbols, and the Latin-1
+  Supplement (0xA0-0xFF: accented Western European letters). No Unicode
+  beyond that, and there is no keyboard layout that can type those bytes -
+  they only render if a file already contains them.
 * No networking, sound, USB, disk persistence, user accounts, SMP or
   userspace processes - all explicitly out of scope.
 * The RTC is read directly, so the taskbar clock follows the host clock via

@@ -34,7 +34,7 @@ typedef struct {
     bool      active;
 } fb_info_t;
 
-extern const uint8_t font8x16[128][16];
+extern const uint8_t font8x16[256][16];
 
 /* Mode setting ------------------------------------------------------- */
 bool             gfx_init(int width, int height);
