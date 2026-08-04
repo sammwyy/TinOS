@@ -284,6 +284,16 @@ static void editor_scroll_to_cursor(editor_t *ed)
         ed->left_column = column - (size_t)ed->cols + 1;
 }
 
+static void editor_on_resize(window_t *win, rect_t client)
+{
+    editor_t *ed = win->priv;
+    if (!ed)
+        return;
+    ed->cols = (client.w - 2 * PADDING) / FONT_W;
+    ed->rows = (client.h - STATUS_H - 2 * PADDING) / FONT_H;
+    editor_scroll_to_cursor(ed);
+}
+
 /* Maps a client-relative pixel position back to a buffer offset, the
  * inverse of the row/column layout editor_on_draw uses. */
 static size_t offset_from_xy(editor_t *ed, int lx, int ly)
@@ -570,6 +580,7 @@ static const app_class_t editor_class = {
     .on_key   = editor_on_key,
     .on_mouse = editor_on_mouse,
     .on_tick  = editor_on_tick,
+    .on_resize = editor_on_resize,
 };
 
 window_t *app_editor_open(const char *path)

@@ -39,6 +39,9 @@
 #define TASKBAR_HEIGHT 34
 #define TITLEBAR_HEIGHT 24
 #define WINDOW_BORDER 1
+#define RESIZE_GRIP 14
+#define WINDOW_MIN_W 180
+#define WINDOW_MIN_H 120
 
 /* ------------------------------------------------------------------ */
 /* Windows                                                             */
@@ -56,6 +59,10 @@ typedef struct {
     bool (*on_mouse)(window_t *w, const mouse_event_t *ev, int lx, int ly);
     /* Called once per event loop iteration; return true to request a redraw. */
     bool (*on_tick)(window_t *w);
+    /* Called after the frame changes size, so the app can recompute derived
+     * layout (columns/rows, wrap width). Optional: most apps derive their
+     * layout from the client rect on every draw and don't need this. */
+    void (*on_resize)(window_t *w, rect_t client);
 } app_class_t;
 
 struct window {

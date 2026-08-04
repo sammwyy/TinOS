@@ -97,8 +97,9 @@ The GRUB menu has two entries:
 
 The mouse (if present - QEMU provides a PS/2 mouse by default) can click the
 Start button and menu entries, focus windows, drag them by the title bar,
-press the minimise and close buttons in the title bar, and click taskbar
-buttons to raise or minimise a window.
+resize them by dragging the grip in the bottom-right corner, press the
+minimise and close buttons in the title bar, and click taskbar buttons to
+raise or minimise a window.
 
 ### Terminal
 
@@ -336,7 +337,7 @@ Three layers, all runnable:
 
 ```sh
 make test      # 267 host assertions (path, filesystem, parser, commands)
-make check     # the above plus a 58-check scripted QEMU session
+make check     # the above plus a 60-check scripted QEMU session
 ```
 
 * **Host unit tests** (`tests/host/`) compile the portable filesystem and
@@ -358,9 +359,9 @@ make check     # the above plus a 58-check scripted QEMU session
 
 ## Known limitations
 
-* No windows resizing.
-* The terminal wraps output at the width the window had when it opened; the
-  window cannot be resized, so this never changes at run time.
+* Resizing only grows or shrinks from the bottom-right corner (no dragging
+  the other three edges or corners), and toolbar buttons in the file
+  explorer aren't responsive - shrink the window enough and they clip.
 * The font covers ASCII, a few hand-drawn UI symbols, and the Latin-1
   Supplement (0xA0-0xFF: accented Western European letters). No Unicode
   beyond that, and there is no keyboard layout that can type those bytes -

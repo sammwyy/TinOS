@@ -263,6 +263,16 @@ static void term_complete(terminal_t *t)
 /* Application class                                                   */
 /* ------------------------------------------------------------------ */
 
+static void terminal_on_resize(window_t *win, rect_t client)
+{
+    terminal_t *t = win->priv;
+    if (!t)
+        return;
+    t->cols = (client.w - 2 * PADDING) / FONT_W;
+    t->rows = (client.h - 2 * PADDING) / FONT_H;
+    term_scroll_to_bottom(t);
+}
+
 static void terminal_on_open(window_t *win, const char *arg)
 {
     terminal_t *t = kcalloc(1, sizeof(terminal_t));
@@ -499,6 +509,7 @@ static const app_class_t terminal_class = {
     .on_key   = terminal_on_key,
     .on_mouse = terminal_on_mouse,
     .on_tick  = terminal_on_tick,
+    .on_resize = terminal_on_resize,
 };
 
 window_t *app_terminal_open(const char *cwd)

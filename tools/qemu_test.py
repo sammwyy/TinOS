@@ -565,6 +565,25 @@ def run_scenario(iso, shots_dir):
         c.check(bool(title) and bool(moved) and moved[0] != title[0],
                 "a window can be dragged by its title bar")
 
+        if moved:
+            mx, my = moved[0]
+            frame_x, frame_y = mx - 8, my - 4  # title text is inset in the frame
+            grip_x, grip_y = frame_x + 748 - 7, frame_y + 452 - 7
+            before_size = shot("wm-before-resize")
+            vm.mouse_drag(grip_x, grip_y, grip_x + 120, grip_y + 100)
+            after_size = shot("wm-after-resize")
+            # A taller window has more scrollback rows visible below the
+            # prompt; the prompt line itself moves down as a result.
+            before_prompt = before_size.find("tinos:")
+            after_prompt = after_size.find("tinos:")
+            c.check(bool(before_prompt) and bool(after_prompt) and
+                    after_prompt[-1][1] > before_prompt[-1][1],
+                    "dragging the resize grip grows the window")
+            vm.line("echo after-resize")
+            resized_output = shot("wm-resize-typed")
+            c.check(resized_output.has("after-resize"),
+                    "the terminal keeps working after being resized")
+
         vm.key("alt", "f4")
         closed = shot("wm-closed")
         c.check(closed.missing("tinos:/home/projects$"),

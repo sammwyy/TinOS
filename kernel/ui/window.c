@@ -31,6 +31,11 @@ static size_t exposed_count;
 static window_t *dragging;
 static int       drag_offset_x, drag_offset_y;
 
+/* Resize state: dragging the bottom-right grip. */
+static window_t *resizing;
+static int       resize_start_w, resize_start_h;
+static int       resize_start_x, resize_start_y; /* mouse position at press */
+
 rect_t wm_workspace(void)
 {
     return rect_make(0, 0, gfx_width(), gfx_height() - TASKBAR_HEIGHT);
@@ -83,6 +88,13 @@ static rect_t minimize_button_rect(const window_t *win)
     rect_t close = close_button_rect(win);
     return rect_make(close.x - BUTTON_SIZE - BUTTON_GAP, close.y, BUTTON_SIZE,
                      BUTTON_SIZE);
+}
+
+static rect_t resize_grip_rect(const window_t *win)
+{
+    return rect_make(win->frame.x + win->frame.w - RESIZE_GRIP,
+                     win->frame.y + win->frame.h - RESIZE_GRIP, RESIZE_GRIP,
+                     RESIZE_GRIP);
 }
 
 static rect_t titlebar_rect(const window_t *win)
@@ -276,6 +288,8 @@ void wm_close(window_t *win)
         return;
     if (dragging == win)
         dragging = NULL;
+    if (resizing == win)
+        resizing = NULL;
     if (win->cls->on_close)
         win->cls->on_close(win);
 
@@ -345,6 +359,13 @@ void wm_draw_window(window_t *win)
     rect_t mini  = minimize_button_rect(win);
     draw_button_glyph(close, true, focused ? COLOR_TEXT : COLOR_TEXT_DIM);
     draw_button_glyph(mini, false, focused ? COLOR_TEXT : COLOR_TEXT_DIM);
+
+    /* Resize grip: three dots stepping diagonally into the corner. */
+    rect_t  grip = resize_grip_rect(win);
+    color_t dot  = focused ? COLOR_TEXT_DIM : COLOR_BORDER;
+    for (int i = 0; i < 3; i++)
+        gfx_fill_rect(grip.x + grip.w - 4 - i * 4,
+                     grip.y + grip.h - 4 - i * 4, 2, 2, dot);
 
     /* Client area */
     rect_t client = wm_client_rect(win);
@@ -428,6 +449,30 @@ bool wm_handle_mouse(const mouse_event_t *ev)
         return true;
     }
 
+    /* Likewise for an in-progress resize. */
+    if (resizing) {
+        if (ev->released & MOUSE_LEFT) {
+            resizing = NULL;
+            return true;
+        }
+        rect_t space = wm_workspace();
+        int nw = resize_start_w + (ev->x - resize_start_x);
+        int nh = resize_start_h + (ev->y - resize_start_y);
+        nw = CLAMP(nw, WINDOW_MIN_W, space.w - resizing->frame.x);
+        nh = CLAMP(nh, WINDOW_MIN_H, space.h - resizing->frame.y);
+        if (nw != resizing->frame.w || nh != resizing->frame.h) {
+            rect_t old        = resizing->frame;
+            resizing->frame.w = nw;
+            resizing->frame.h = nh;
+            wm_expose(old);
+            wm_invalidate_rect(old);
+            wm_invalidate(resizing);
+            if (resizing->cls->on_resize)
+                resizing->cls->on_resize(resizing, wm_client_rect(resizing));
+        }
+        return true;
+    }
+
     window_t *win = window_at(ev->x, ev->y);
     if (!win)
         return false;
@@ -442,6 +487,14 @@ bool wm_handle_mouse(const mouse_event_t *ev)
         }
         if (rect_contains(minimize_button_rect(win), ev->x, ev->y)) {
             wm_toggle_minimize(win);
+            return true;
+        }
+        if (rect_contains(resize_grip_rect(win), ev->x, ev->y)) {
+            resizing       = win;
+            resize_start_w = win->frame.w;
+            resize_start_h = win->frame.h;
+            resize_start_x = ev->x;
+            resize_start_y = ev->y;
             return true;
         }
         if (rect_contains(titlebar_rect(win), ev->x, ev->y)) {
