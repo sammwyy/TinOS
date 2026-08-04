@@ -78,14 +78,26 @@ kernel: $(KERNEL)
 
 # --- bootable ISO -----------------------------------------------------
 # -d .../i386-pc keeps the image BIOS-only (no EFI payload), which is what
-# QEMU's default machine boots and keeps the ISO under 5 MiB.  The xorriso
-# arguments pin the volume timestamps; see README "Reproducibility" for the
-# part of the container that grub-mkrescue still stamps with the build time.
+# QEMU's default machine boots and keeps the ISO under 5 MiB.
+#
+# Getting a byte-identical ISO out of grub2-mkrescue takes three passes:
+#   1. -volume_date pins the primary volume descriptor's own creation/
+#      modification fields and the per-file Rock Ridge dates for anything
+#      copied from ISODIR (the "touch -t 2000..." below only fixes mtime,
+#      which is all -volume_date all_file_dates reads back).
+#   2. A second xorriso pass rewrites those same fields on the assembled
+#      image; "-boot_image any patch" keeps the existing El Torito boot
+#      catalog instead of regenerating (and thereby randomising) it.
+#   3. grub2-mkrescue's own module files still carry one field neither pass
+#      above can reach: the Rock Ridge "attribute change" timestamp, sourced
+#      from the real on-disk ctime of files copied into grub2-mkrescue's own
+#      scratch directory, which touch(1) cannot set. tools/pin_iso_dates.py
+#      patches that field directly in the finished image.
 GRUB_BIOS_DIR := $(firstword $(wildcard /usr/lib/grub/i386-pc \
                                         /usr/share/grub/i386-pc))
 GRUB_ISO_ARGS := $(if $(GRUB_BIOS_DIR),-d $(GRUB_BIOS_DIR),)
 
-$(ISO): $(KERNEL) boot/grub.cfg
+$(ISO): $(KERNEL) boot/grub.cfg tools/pin_iso_dates.py
 ifeq ($(GRUB_ISO),)
 	$(error grub2-mkrescue/grub-mkrescue not found - install grub2-tools-extra and xorriso)
 endif
@@ -96,7 +108,14 @@ endif
 	@find $(ISODIR) -exec touch -t 200001010000.00 {} +
 	$(GRUB_ISO) $(GRUB_ISO_ARGS) --compress=xz -o $@ $(ISODIR) \
 		-- -volid TINOS -volume_date all_file_dates =0 \
-		   -volume_date uuid 2000010100000000 >/dev/null 2>&1
+		   -volume_date uuid 2000010100000000 \
+		   -volume_date c 2000010100000000 \
+		   -volume_date m 2000010100000000 >/dev/null 2>&1
+	@xorriso -indev $@ -boot_image any patch -outdev $@.tmp \
+		-volume_date c 2000010100000000 -volume_date m 2000010100000000 \
+		-alter_date_r b 2000010100000000 / -- -commit >/dev/null 2>&1
+	@mv $@.tmp $@
+	@python3 tools/pin_iso_dates.py $@ >/dev/null
 	@echo "  image : $@ ($$(stat -c%s $@) bytes)"
 
 iso: $(ISO)
@@ -126,19 +145,25 @@ test: $(HOST_BIN)
 check: test $(ISO)
 	tools/qemu_test.py --iso $(ISO)
 
-# Build the kernel twice from a clean tree and compare the results.
+# Build the kernel and ISO twice from a clean tree and compare the results.
 verify-reproducible:
 	@$(MAKE) --no-print-directory clean >/dev/null
-	@$(MAKE) --no-print-directory $(KERNEL) >/dev/null
-	@first=$$(sha256sum $(KERNEL) | cut -d' ' -f1); \
+	@$(MAKE) --no-print-directory $(ISO) >/dev/null
+	@kfirst=$$(sha256sum $(KERNEL) | cut -d' ' -f1); \
+	 ifirst=$$(sha256sum $(ISO) | cut -d' ' -f1); \
+	 sleep 2; \
 	 $(MAKE) --no-print-directory clean >/dev/null; \
-	 $(MAKE) --no-print-directory $(KERNEL) >/dev/null; \
-	 second=$$(sha256sum $(KERNEL) | cut -d' ' -f1); \
-	 if [ "$$first" = "$$second" ]; then \
-	     echo "reproducible: two clean builds produced an identical kernel"; \
-	     echo "  sha256 $$first"; \
+	 $(MAKE) --no-print-directory $(ISO) >/dev/null; \
+	 ksecond=$$(sha256sum $(KERNEL) | cut -d' ' -f1); \
+	 isecond=$$(sha256sum $(ISO) | cut -d' ' -f1); \
+	 if [ "$$kfirst" = "$$ksecond" ] && [ "$$ifirst" = "$$isecond" ]; then \
+	     echo "reproducible: two clean builds produced an identical kernel and ISO"; \
+	     echo "  kernel sha256 $$kfirst"; \
+	     echo "  iso    sha256 $$ifirst"; \
 	 else \
-	     echo "NOT reproducible:"; echo "  $$first"; echo "  $$second"; \
+	     echo "NOT reproducible:"; \
+	     echo "  kernel $$kfirst / $$ksecond"; \
+	     echo "  iso    $$ifirst / $$isecond"; \
 	     exit 1; \
 	 fi
 

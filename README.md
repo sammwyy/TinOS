@@ -62,7 +62,7 @@ possibly `libgcc.i686` and `grub2-tools-extra`.
 | `make run-headless` | launch with no display (for the test driver) |
 | `make test` | build and run the host-side unit tests |
 | `make check` | host tests **and** the scripted QEMU boot/GUI test |
-| `make verify-reproducible` | build twice from clean and compare the kernel |
+| `make verify-reproducible` | build twice from clean and compare the kernel and ISO |
 | `make clean` | delete `build/` |
 
 The exact QEMU invocation (also in `tools/run.sh`):
@@ -332,11 +332,6 @@ make check     # the above plus a 51-check scripted QEMU session
 
 ## Known limitations
 
-* **Not reproducible byte-for-byte at the ISO level.** Two clean builds
-  produce an identical `build/tinos.elf` (`make verify-reproducible` proves
-  it); `grub2-mkrescue` stamps ~1.4 kB of Rock Ridge timestamps into the ISO
-  container, so the `.iso` hash differs between builds. The kernel inside is
-  the same.
 * No windows resizing, no overlap-aware partial repaint of the wallpaper
   (moving a window repaints the whole desktop), no drag-and-drop.
 * The terminal wraps output at the width the window had when it opened; the
