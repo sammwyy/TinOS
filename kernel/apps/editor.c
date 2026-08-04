@@ -15,7 +15,6 @@
 #include <tinos/string.h>
 #include <tinos/ui.h>
 
-#define EDITOR_MAX_BYTES (256 * 1024)
 #define PADDING          6
 #define STATUS_H         20
 
@@ -41,8 +40,6 @@ static bool ensure_capacity(editor_t *ed, size_t needed)
 {
     if (ed->capacity >= needed)
         return true;
-    if (needed > EDITOR_MAX_BYTES)
-        return false;
     size_t capacity = ed->capacity ? ed->capacity : 256;
     while (capacity < needed)
         capacity *= 2;
@@ -144,7 +141,7 @@ static bool editor_load(editor_t *ed)
     if (node->type != FS_FILE)
         return false;
 
-    size_t len = MIN(fs_size(node), (size_t)EDITOR_MAX_BYTES);
+    size_t len = fs_size(node);
     if (!ensure_capacity(ed, len + 1))
         return false;
     if (len)

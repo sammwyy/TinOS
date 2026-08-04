@@ -18,7 +18,6 @@
 #include <tinos/string.h>
 #include <tinos/ui.h>
 
-#define SCROLLBACK_MAX 600
 #define INPUT_MAX      512
 #define PADDING        6
 #define BLINK_MS       500
@@ -26,8 +25,9 @@
 typedef struct {
     shell_t *shell;
 
-    char  *lines[SCROLLBACK_MAX];
-    size_t line_count;
+    char  **lines;
+    size_t  line_count;
+    size_t  line_cap;
     size_t scroll; /* index of the first visible line */
 
     char   input[INPUT_MAX];
@@ -51,11 +51,15 @@ static void term_push_line(terminal_t *t, const char *text, size_t len)
     char *copy = kstrndup(text, len);
     if (!copy)
         return;
-    if (t->line_count == SCROLLBACK_MAX) {
-        kfree(t->lines[0]);
-        for (size_t i = 1; i < SCROLLBACK_MAX; i++)
-            t->lines[i - 1] = t->lines[i];
-        t->line_count--;
+    if (t->line_count == t->line_cap) {
+        size_t cap = t->line_cap ? t->line_cap * 2 : 256;
+        char **grown = krealloc(t->lines, cap * sizeof(char *));
+        if (!grown) {
+            kfree(copy);
+            return;
+        }
+        t->lines    = grown;
+        t->line_cap = cap;
     }
     t->lines[t->line_count++] = copy;
 }
@@ -291,6 +295,7 @@ static void terminal_on_close(window_t *win)
     if (!t)
         return;
     term_clear(t);
+    kfree(t->lines);
     shell_destroy(t->shell);
     kfree(t);
     win->priv = NULL;

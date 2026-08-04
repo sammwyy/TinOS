@@ -36,10 +36,6 @@ void        stream_take(stream_t *dst, stream_t *src); /* move ownership */
 /* Parsing                                                             */
 /* ------------------------------------------------------------------ */
 
-#define SH_MAX_ARGS      32
-#define SH_MAX_STAGES    8
-#define SH_MAX_SEGMENTS  8
-
 typedef enum {
     SH_REDIR_NONE = 0,
     SH_REDIR_WRITE,  /* >  */
@@ -47,11 +43,12 @@ typedef enum {
 } sh_redirect_t;
 
 typedef struct {
-    char         *argv[SH_MAX_ARGS + 1];
-    int           argc;
-    sh_redirect_t redirect;
-    char         *redirect_path;
-    char         *input_path; /* < file */
+    char         **argv;     /* heap array, argv[argc] == NULL, grows as needed */
+    int            argc;
+    int            argv_cap;
+    sh_redirect_t  redirect;
+    char          *redirect_path;
+    char          *input_path; /* < file */
 } sh_command_t;
 
 typedef enum {
@@ -62,16 +59,18 @@ typedef enum {
 } sh_join_t;
 
 typedef struct {
-    sh_command_t stages[SH_MAX_STAGES];
-    int          nstages;
-    sh_join_t    join;
+    sh_command_t *stages;    /* heap array, grows as needed */
+    int           nstages;
+    int           stages_cap;
+    sh_join_t     join;
 } sh_segment_t;
 
 typedef struct {
-    sh_segment_t segments[SH_MAX_SEGMENTS];
-    int          nsegments;
-    char        *storage; /* backing buffer owned by the parsed line */
-    char         error[96];
+    sh_segment_t *segments;  /* heap array, grows as needed */
+    int           nsegments;
+    int           segments_cap;
+    char         *storage; /* backing buffer owned by the parsed line */
+    char          error[96];
 } sh_line_t;
 
 /* Returns false and fills line->error on a syntax error. */

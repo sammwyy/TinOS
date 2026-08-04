@@ -438,6 +438,37 @@ static void test_commands(void)
     check_output(sh, "grep '^[^cd]' animals.txt", "bird3\n");
     check_output(sh, "grep '[a-c]at' animals.txt", "cat1\n");
 
+    /* Parser limits grow instead of truncating: past the old hardcoded caps
+     * (32 args, 8 pipeline stages, 8 ';'-separated commands), all still
+     * work. */
+    {
+        char big[4096];
+        char *p = big;
+        p += sprintf(p, "echo");
+        for (int i = 0; i < 60; i++)
+            p += sprintf(p, " w%d", i);
+        sh_line_t line;
+        CHECK(sh_parse(big, &line));
+        CHECK(line.segments[0].stages[0].argc == 61);
+        sh_line_free(&line);
+
+        p = big;
+        p += sprintf(p, "cat");
+        for (int i = 0; i < 20; i++)
+            p += sprintf(p, " | cat");
+        CHECK(sh_parse(big, &line));
+        CHECK(line.segments[0].nstages == 21);
+        sh_line_free(&line);
+
+        p = big;
+        p += sprintf(p, "pwd");
+        for (int i = 0; i < 20; i++)
+            p += sprintf(p, " ; pwd");
+        CHECK(sh_parse(big, &line));
+        CHECK(line.nsegments == 21);
+        sh_line_free(&line);
+    }
+
     /* Error reporting. */
     CHECK(output_contains(sh, "cat missing.txt", "no such file"));
     CHECK(output_contains(sh, "cat /home", "is a directory"));

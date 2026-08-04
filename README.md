@@ -337,8 +337,6 @@ make check     # the above plus a 51-check scripted QEMU session
 * The terminal wraps output at the width the window had when it opened; the
   window cannot be resized, so this never changes at run time.
 * Text is ASCII only (codes 0x20-0x7E plus a few UI symbols). No Unicode.
-* The scrollback holds 600 lines and the editor 256 KiB per file; both
-  truncate rather than fail.
 * No networking, sound, USB, disk persistence, user accounts, SMP or
   userspace processes - all explicitly out of scope.
 * The RTC is read directly, so the taskbar clock follows the host clock via

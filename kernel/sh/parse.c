@@ -60,6 +60,59 @@ static bool is_operator(char c)
     return c == '|' || c == '&' || c == ';' || c == '>' || c == '<';
 }
 
+/* Growth helpers: argv/stages/segments all start empty and double on demand,
+ * so a command line is only ever limited by available heap. */
+static bool ensure_argv_cap(sh_command_t *cmd, int needed)
+{
+    if (needed <= cmd->argv_cap)
+        return true;
+    int cap = cmd->argv_cap ? cmd->argv_cap * 2 : 8;
+    while (cap < needed)
+        cap *= 2;
+    char **grown = krealloc(cmd->argv, (size_t)cap * sizeof(char *));
+    if (!grown)
+        return false;
+    cmd->argv     = grown;
+    cmd->argv_cap = cap;
+    return true;
+}
+
+static bool ensure_stages_cap(sh_segment_t *segment, int needed)
+{
+    if (needed <= segment->stages_cap)
+        return true;
+    int cap = segment->stages_cap ? segment->stages_cap * 2 : 4;
+    while (cap < needed)
+        cap *= 2;
+    sh_command_t *grown =
+        krealloc(segment->stages, (size_t)cap * sizeof(sh_command_t));
+    if (!grown)
+        return false;
+    memset(grown + segment->stages_cap, 0,
+           (size_t)(cap - segment->stages_cap) * sizeof(sh_command_t));
+    segment->stages     = grown;
+    segment->stages_cap = cap;
+    return true;
+}
+
+static bool ensure_segments_cap(sh_line_t *line, int needed)
+{
+    if (needed <= line->segments_cap)
+        return true;
+    int cap = line->segments_cap ? line->segments_cap * 2 : 4;
+    while (cap < needed)
+        cap *= 2;
+    sh_segment_t *grown =
+        krealloc(line->segments, (size_t)cap * sizeof(sh_segment_t));
+    if (!grown)
+        return false;
+    memset(grown + line->segments_cap, 0,
+           (size_t)(cap - line->segments_cap) * sizeof(sh_segment_t));
+    line->segments     = grown;
+    line->segments_cap = cap;
+    return true;
+}
+
 static void arena_putc(arena_t *a, char c)
 {
     if (a->used + 1 < a->capacity)
@@ -181,19 +234,27 @@ bool sh_parse(const char *input, sh_line_t *line)
     if (ntokens == 0)
         return true; /* blank line: nothing to do, not an error */
 
+    if (!ensure_segments_cap(line, 1)) {
+        set_error(line, "out of memory");
+        return false;
+    }
     sh_segment_t *segment = &line->segments[0];
     line->nsegments       = 1;
     segment->join         = SH_JOIN_FIRST;
-    segment->nstages      = 1;
-    sh_command_t *cmd     = &segment->stages[0];
+    if (!ensure_stages_cap(segment, 1)) {
+        set_error(line, "out of memory");
+        return false;
+    }
+    segment->nstages  = 1;
+    sh_command_t *cmd = &segment->stages[0];
 
     for (int i = 0; i < ntokens; i++) {
         token_t *t = &tokens[i];
 
         switch (t->type) {
         case TOK_WORD:
-            if (cmd->argc >= SH_MAX_ARGS) {
-                set_error(line, "too many arguments (limit %d)", SH_MAX_ARGS);
+            if (!ensure_argv_cap(cmd, cmd->argc + 2)) {
+                set_error(line, "out of memory");
                 return false;
             }
             cmd->argv[cmd->argc++] = t->text;
@@ -231,9 +292,8 @@ bool sh_parse(const char *input, sh_line_t *line)
                 set_error(line, "syntax error: '|' at end of line");
                 return false;
             }
-            if (segment->nstages >= SH_MAX_STAGES) {
-                set_error(line, "pipeline too long (limit %d stages)",
-                          SH_MAX_STAGES);
+            if (!ensure_stages_cap(segment, segment->nstages + 1)) {
+                set_error(line, "out of memory");
                 return false;
             }
             cmd = &segment->stages[segment->nstages++];
@@ -248,15 +308,18 @@ bool sh_parse(const char *input, sh_line_t *line)
             }
             if (i + 1 >= ntokens)
                 return true; /* a trailing separator is harmless */
-            if (line->nsegments >= SH_MAX_SEGMENTS) {
-                set_error(line, "too many commands (limit %d)",
-                          SH_MAX_SEGMENTS);
+            if (!ensure_segments_cap(line, line->nsegments + 1)) {
+                set_error(line, "out of memory");
                 return false;
             }
-            segment          = &line->segments[line->nsegments++];
-            segment->join    = t->type == TOK_AND  ? SH_JOIN_AND
-                               : t->type == TOK_OR ? SH_JOIN_OR
-                                                   : SH_JOIN_SEQ;
+            segment       = &line->segments[line->nsegments++];
+            segment->join = t->type == TOK_AND  ? SH_JOIN_AND
+                            : t->type == TOK_OR ? SH_JOIN_OR
+                                                : SH_JOIN_SEQ;
+            if (!ensure_stages_cap(segment, 1)) {
+                set_error(line, "out of memory");
+                return false;
+            }
             segment->nstages = 1;
             cmd              = &segment->stages[0];
             break;
@@ -276,6 +339,13 @@ bool sh_parse(const char *input, sh_line_t *line)
 
 void sh_line_free(sh_line_t *line)
 {
+    for (int s = 0; s < line->nsegments; s++) {
+        sh_segment_t *seg = &line->segments[s];
+        for (int k = 0; k < seg->nstages; k++)
+            kfree(seg->stages[k].argv);
+        kfree(seg->stages);
+    }
+    kfree(line->segments);
     kfree(line->storage);
-    line->storage = NULL;
+    memset(line, 0, sizeof(*line));
 }

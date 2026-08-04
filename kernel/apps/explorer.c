@@ -18,7 +18,6 @@
 #include <tinos/string.h>
 #include <tinos/ui.h>
 
-#define MAX_ENTRIES  512
 #define TOOLBAR_H    28
 #define PATHBAR_H    24
 #define STATUS_H     22
@@ -34,8 +33,9 @@ typedef enum {
 
 typedef struct {
     char            cwd[FS_PATH_MAX];
-    fs_node_t      *entries[MAX_ENTRIES];
+    fs_node_t     **entries;
     size_t          entry_count;
+    size_t          entry_cap;
     size_t          selection;
     size_t          scroll;
     uint32_t        seen_generation;
@@ -117,8 +117,15 @@ static void explorer_rebuild(explorer_t *ex)
         for (fs_node_t *c = dir->children; c; c = c->next) {
             if (c->type != want)
                 continue;
-            if (ex->entry_count >= MAX_ENTRIES)
-                break;
+            if (ex->entry_count >= ex->entry_cap) {
+                size_t cap = ex->entry_cap ? ex->entry_cap * 2 : 64;
+                fs_node_t **grown = krealloc(ex->entries,
+                                             cap * sizeof(fs_node_t *));
+                if (!grown)
+                    break;
+                ex->entries   = grown;
+                ex->entry_cap = cap;
+            }
             ex->entries[ex->entry_count++] = c;
         }
     }
@@ -743,6 +750,9 @@ static void explorer_on_open(window_t *win, const char *arg)
 
 static void explorer_on_close(window_t *win)
 {
+    explorer_t *ex = win->priv;
+    if (ex)
+        kfree(ex->entries);
     kfree(win->priv);
     win->priv = NULL;
 }
