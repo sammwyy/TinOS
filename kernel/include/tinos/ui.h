@@ -79,9 +79,13 @@ window_t *wm_focused(void);
 void      wm_invalidate(window_t *win);
 void      wm_invalidate_all(void);
 bool      wm_any_dirty(void);
-/* True when the whole desktop must be repainted (a window moved or closed,
- * so the background behind it is stale). Clears the flag. */
+/* True when the whole desktop must be repainted (opening a window, focus or
+ * z-order changes). Clears the flag. */
 bool      wm_take_full_redraw(void);
+/* Rectangles a moved/closed/minimised window uncovered since the last call;
+ * the wallpaper (and anything else under them) needs repainting there.
+ * Returns the number written to `out` (capped at `max`) and clears them. */
+size_t    wm_take_exposed(rect_t *out, size_t max);
 void      wm_draw_window(window_t *win); /* frame + client contents */
 rect_t    wm_client_rect(const window_t *win);
 void      wm_set_title(window_t *win, const char *title);

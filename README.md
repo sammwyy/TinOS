@@ -266,10 +266,13 @@ hardcoding QEMU's 0xFD000000 or dropping to real mode for a BIOS call.
 
 **Damage-based compositing.** Drawing goes into a system-memory back buffer;
 `gfx_present()` copies only the changed rows to the adapter. Windows repaint
-when their content changes, the whole screen only when the geometry changes.
-The mouse cursor is painted on top of the finished frame and lifted off
-again, so moving the mouse uploads a few hundred pixels rather than three
-megabytes. A frame takes 1-3 ms in QEMU.
+when their content changes; moving, closing or minimising one repaints only
+the rectangle it uncovered (the wallpaper there, plus any window now exposed
+by it), not the whole desktop. A full repaint is reserved for opening a
+window or a z-order change (focus, Alt-Tab), where recomputing what is
+visible everywhere is simplest. The mouse cursor is painted on top of the
+finished frame and lifted off again, so moving the mouse uploads a few
+hundred pixels rather than three megabytes. A frame takes 1-3 ms in QEMU.
 
 **Streams, not terminals, in the shell.** Commands read and write
 `stream_t` byte buffers. That is what makes pipelines and `>` redirection
@@ -332,8 +335,7 @@ make check     # the above plus a 51-check scripted QEMU session
 
 ## Known limitations
 
-* No windows resizing, no overlap-aware partial repaint of the wallpaper
-  (moving a window repaints the whole desktop), no drag-and-drop.
+* No windows resizing, no drag-and-drop.
 * The terminal wraps output at the width the window had when it opened; the
   window cannot be resized, so this never changes at run time.
 * Text is ASCII only (codes 0x20-0x7E plus a few UI symbols). No Unicode.

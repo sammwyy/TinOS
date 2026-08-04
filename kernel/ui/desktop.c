@@ -137,11 +137,13 @@ static void cursor_restore(void)
 /* Wallpaper                                                           */
 /* ------------------------------------------------------------------ */
 
+/* Callers set the clip: the full workspace for a full repaint, or a single
+ * exposed rect when repairing the area a moved/closed/minimised window
+ * uncovered. */
 static void draw_wallpaper(void)
 {
     rect_t space = wm_workspace();
 
-    gfx_clip_reset();
     gfx_gradient_v(0, 0, space.w, space.h, COLOR_DESKTOP_TOP,
                    COLOR_DESKTOP_BOTTOM);
 
@@ -638,6 +640,7 @@ static bool rects_overlap(rect_t a, rect_t b)
 static void composite(bool full)
 {
     if (full) {
+        gfx_clip_reset();
         draw_wallpaper();
         for (window_t *w = wm_bottom(); w; w = w->above)
             wm_draw_window(w);
@@ -645,6 +648,20 @@ static void composite(bool full)
         draw_menu();
         draw_notification();
         return;
+    }
+
+    /* Repair only the rectangles a moved/closed/minimised window uncovered,
+     * instead of repainting the whole desktop. */
+    rect_t exposed[16];
+    size_t nexposed = wm_take_exposed(exposed, ARRAY_SIZE(exposed));
+    for (size_t i = 0; i < nexposed; i++) {
+        gfx_clip_push(exposed[i]);
+        draw_wallpaper();
+        gfx_clip_pop();
+        if (rects_overlap(taskbar_rect(), exposed[i]))
+            taskbar_dirty = true;
+        if (menu_open && rects_overlap(menu_rect(), exposed[i]))
+            menu_dirty = true;
     }
 
     for (window_t *w = wm_bottom(); w; w = w->above) {

@@ -21,6 +21,12 @@ static int       next_id = 1;
 static bool      any_dirty;
 static bool      full_redraw;
 
+/* Rectangles uncovered by a moved/closed/minimised window, repainted from
+ * the wallpaper up instead of the whole desktop. */
+#define WM_MAX_EXPOSED 16
+static rect_t exposed_rects[WM_MAX_EXPOSED];
+static size_t exposed_count;
+
 /* Drag state */
 static window_t *dragging;
 static int       drag_offset_x, drag_offset_y;
@@ -146,6 +152,43 @@ bool wm_take_full_redraw(void)
     return full;
 }
 
+static bool rects_overlap(rect_t a, rect_t b)
+{
+    return !rect_empty(rect_intersect(a, b));
+}
+
+/* Mark every window overlapping `r` dirty, without forcing a full repaint. */
+static void wm_invalidate_rect(rect_t r)
+{
+    for (window_t *w = bottom_window; w; w = w->above)
+        if (!w->minimized && rects_overlap(w->frame, r))
+            w->needs_redraw = true;
+    any_dirty = true;
+}
+
+/* Record that `r` is no longer covered by any window and needs repainting
+ * from the wallpaper up. Falls back to a full repaint if too many small
+ * regions pile up before the next frame is drawn. */
+static void wm_expose(rect_t r)
+{
+    if (rect_empty(r))
+        return;
+    if (exposed_count < WM_MAX_EXPOSED)
+        exposed_rects[exposed_count++] = r;
+    else
+        full_redraw = true;
+    any_dirty = true;
+}
+
+size_t wm_take_exposed(rect_t *out, size_t max)
+{
+    size_t n = exposed_count < max ? exposed_count : max;
+    for (size_t i = 0; i < n; i++)
+        out[i] = exposed_rects[i];
+    exposed_count = 0;
+    return n;
+}
+
 window_t *wm_focused(void)
 {
     /* The focused window is the topmost visible one. */
@@ -176,8 +219,9 @@ void wm_toggle_minimize(window_t *win)
     if (!win)
         return;
     if (win->minimized) {
-        wm_focus(win);
+        wm_focus(win); /* restoring changes z-order: a full repaint is simplest */
     } else {
+        rect_t old     = win->frame;
         win->minimized = true;
         /* Drop it to the bottom so the next window gets focus. */
         unlink_window(win);
@@ -188,8 +232,9 @@ void wm_toggle_minimize(window_t *win)
         bottom_window = win;
         if (!top_window)
             top_window = win;
+        wm_expose(old);
+        wm_invalidate_rect(old);
     }
-    wm_invalidate_all();
 }
 
 window_t *wm_open(const app_class_t *cls, int width, int height,
@@ -234,11 +279,14 @@ void wm_close(window_t *win)
     if (win->cls->on_close)
         win->cls->on_close(win);
 
+    rect_t old = win->frame;
     unlink_window(win);
     window_count--;
     klog("[wm  ] closed window %d '%s'\n", win->id, win->title);
     kfree(win);
-    wm_invalidate_all();
+
+    wm_expose(old);
+    wm_invalidate_rect(old);
 }
 
 /* ------------------------------------------------------------------ */
@@ -370,9 +418,12 @@ bool wm_handle_mouse(const mouse_event_t *ev)
         nx = CLAMP(nx, -dragging->frame.w + 80, space.w - 80);
         ny = CLAMP(ny, 0, space.h - TITLEBAR_HEIGHT);
         if (nx != dragging->frame.x || ny != dragging->frame.y) {
+            rect_t old        = dragging->frame;
             dragging->frame.x = nx;
             dragging->frame.y = ny;
-            wm_invalidate_all();
+            wm_expose(old);
+            wm_invalidate_rect(old);
+            wm_invalidate(dragging);
         }
         return true;
     }
