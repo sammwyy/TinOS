@@ -9,6 +9,7 @@
 #include <tinos/heap.h>
 #include <tinos/path.h>
 #include <tinos/printf.h>
+#include <tinos/regex.h>
 #include <tinos/sh.h>
 #include <tinos/string.h>
 
@@ -555,8 +556,7 @@ static int grep_buffer(stream_t *out, const char *pattern, const char *data,
         memcpy(buf, start, n);
         buf[n] = '\0';
 
-        bool hit = ignore_case ? kstrcasestr(buf, pattern) != NULL
-                               : strstr(buf, pattern) != NULL;
+        bool hit = regex_match(pattern, buf, ignore_case);
         if (hit == invert)
             continue;
         (*matches)++;

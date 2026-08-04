@@ -424,6 +424,20 @@ static void test_commands(void)
     check_output(sh, "grep -n Hello case.txt", "1:Hello\n");
     check_output(sh, "grep -v Hello case.txt", "");
 
+    /* grep regex support: '.', '*', '+', '?', '^', '$' and [classes]. */
+    check_output(sh, "echo cat1 > animals.txt", "");
+    check_output(sh, "echo dog2 >> animals.txt", "");
+    check_output(sh, "echo bird3 >> animals.txt", "");
+    check_output(sh, "grep '^cat' animals.txt", "cat1\n");
+    check_output(sh, "grep '3$' animals.txt", "bird3\n");
+    check_output(sh, "grep 'c.t' animals.txt", "cat1\n");
+    check_output(sh, "grep 'ca+t' animals.txt", "cat1\n");
+    check_output(sh, "grep 'cats?1' animals.txt", "cat1\n");
+    check_output(sh, "grep '^[bcd]' animals.txt",
+                 "cat1\ndog2\nbird3\n");
+    check_output(sh, "grep '^[^cd]' animals.txt", "bird3\n");
+    check_output(sh, "grep '[a-c]at' animals.txt", "cat1\n");
+
     /* Error reporting. */
     CHECK(output_contains(sh, "cat missing.txt", "no such file"));
     CHECK(output_contains(sh, "cat /home", "is a directory"));

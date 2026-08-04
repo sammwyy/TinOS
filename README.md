@@ -163,7 +163,7 @@ line. The required set behaves as expected:
 | `cp [-r] src... dst` | `-r` for directories, multiple sources need a directory target |
 | `mv src... dst` | rename or move; refuses to move a directory into itself |
 | `rm [-r] [-f] path...` | `-r` for directories, `-f` ignores missing files |
-| `grep [-i] [-n] [-v] [-c] pattern [file...]` | plain substring search, reads its input when no file is given |
+| `grep [-i] [-n] [-v] [-c] pattern [file...]` | regex search (`.`, `*`, `+`, `?`, `^`, `$`, `[classes]`), reads its input when no file is given |
 | `pwd` | |
 | `clear` | |
 | `help [command]` | |
@@ -336,7 +336,6 @@ make check     # the above plus a 51-check scripted QEMU session
   (moving a window repaints the whole desktop), no drag-and-drop.
 * The terminal wraps output at the width the window had when it opened; the
   window cannot be resized, so this never changes at run time.
-* `grep` matches plain substrings; there is no regular expression engine.
 * Text is ASCII only (codes 0x20-0x7E plus a few UI symbols). No Unicode.
 * The scrollback holds 600 lines and the editor 256 KiB per file; both
   truncate rather than fail.
