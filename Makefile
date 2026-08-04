@@ -146,3 +146,5 @@ clean:
 	rm -rf $(BUILD)
 
 distclean: clean
+
+-include $(DEPS)

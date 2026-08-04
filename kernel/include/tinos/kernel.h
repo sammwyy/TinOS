@@ -5,7 +5,7 @@
 #include <tinos/types.h>
 
 #define TINOS_NAME    "TinOS"
-#define TINOS_VERSION "0.1.0"
+#define TINOS_VERSION "1.0.0"
 
 #define ARRAY_SIZE(a)  (sizeof(a) / sizeof((a)[0]))
 #define MIN(a, b)      ((a) < (b) ? (a) : (b))
