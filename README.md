@@ -290,7 +290,23 @@ compiled natively and unit-tested on the host.
 desktop event loop drains the input queues, ticks the applications, redraws
 what is dirty and then `hlt`s until the next interrupt. Interrupt handlers
 only enqueue events. Applications are C structs with a vtable
-(`app_class_t`), not separate address spaces.
+(`app_class_t`), not separate address spaces. Nothing shipped needs more
+than this - there is no user-defined iteration for a command to hang in, and
+no callback in `kernel/apps/` runs longer than a screen redraw - but it is
+worth being explicit that a genuinely misbehaving callback (an infinite
+loop, a slow computation) would stall the whole desktop, since one C
+function call is the entire scheduling unit.
+
+A real fix is a preemptive scheduler, not a patch: per-task stacks, a timer
+interrupt that saves/restores context instead of just marking events
+pending, a run queue, and a decision about what "task" even means here
+(each window? each app tick?). That touches the PIT ISR
+(`kernel/arch/x86/pit.c`), the GDT/TSS setup, and the desktop event loop
+all at once, and every one of the 32 shell built-ins and 5 applications
+would need to be re-audited for what they assume about not being
+interrupted mid-callback. Given the theoretical (not observed) nature of
+the risk, that rewrite is out of proportion to attempt as an incremental
+change - it is a separate project, not a fix to fold into this one.
 
 ## Error handling
 
