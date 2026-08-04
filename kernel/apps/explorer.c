@@ -45,11 +45,19 @@ typedef struct {
     bool            blink_on;
     uint64_t        blink_at;
     int             hot_button; /* toolbar button under the mouse, or -1 */
+    bool            drag_armed; /* pressed on an already-selected row */
+    int             drag_start_x, drag_start_y;
 } explorer_t;
 
 /* The clipboard is shared by every explorer window, like a real desktop. */
 static char clipboard_path[FS_PATH_MAX];
 static bool clipboard_cut;
+
+/* Drag-and-drop state, also shared across windows: a drag started in one
+ * explorer can be dropped on a folder row in the same window or another. */
+static char drag_path[FS_PATH_MAX];
+static bool drag_active;
+#define DRAG_THRESHOLD 16 /* squared pixels before a press becomes a drag */
 
 typedef struct {
     const char *label;
@@ -664,6 +672,19 @@ static bool explorer_on_mouse(window_t *win, const mouse_event_t *ev, int lx,
 
     rect_t client = wm_client_rect(win);
 
+    if (ev->wheel) {
+        /* Negative = wheel pushed away from the user ("scroll up"). */
+        size_t rows = visible_rows(client);
+        size_t max  = ex->entry_count > rows ? ex->entry_count - rows : 0;
+        size_t step = (size_t)(3 * (ev->wheel > 0 ? ev->wheel : -ev->wheel));
+        if (ev->wheel < 0)
+            ex->scroll = ex->scroll > step ? ex->scroll - step : 0;
+        else
+            ex->scroll = MIN(ex->scroll + step, max);
+        wm_invalidate(win);
+        return true;
+    }
+
     /* Toolbar hover and clicks. */
     int hot = -1;
     if (ly < TOOLBAR_H) {
@@ -686,17 +707,59 @@ static bool explorer_on_mouse(window_t *win, const mouse_event_t *ev, int lx,
     }
 
     int list_top = TOOLBAR_H + PATHBAR_H;
-    if (ly >= list_top && (ev->pressed & MOUSE_LEFT)) {
-        size_t rows  = visible_rows(client);
-        size_t index = ex->scroll + (size_t)((ly - list_top) / ROW_H);
-        if (index < ex->entry_count && (size_t)((ly - list_top) / ROW_H) < rows) {
-            if (index == ex->selection) {
-                action_open(win, ex); /* second click opens */
-            } else {
-                ex->selection = index;
-                wm_invalidate(win);
-            }
+    size_t rows  = visible_rows(client);
+    size_t row   = (size_t)((ly - list_top) / ROW_H);
+    size_t index = ex->scroll + row;
+    bool   in_row = ly >= list_top && row < rows && index < ex->entry_count;
+
+    if (ev->pressed & MOUSE_LEFT) {
+        if (in_row && index == ex->selection) {
+            /* Pressing an already-selected row could be the start of a
+             * drag; whether it turns out to be a click is decided on
+             * release, once we know the mouse never moved far enough. */
+            ex->drag_armed   = true;
+            ex->drag_start_x = ev->x;
+            ex->drag_start_y = ev->y;
+        } else if (in_row) {
+            ex->selection = index;
+            wm_invalidate(win);
         }
+        return true;
+    }
+
+    if ((ev->buttons & MOUSE_LEFT) && ex->drag_armed && !drag_active) {
+        int mdx = ev->x - ex->drag_start_x;
+        int mdy = ev->y - ex->drag_start_y;
+        if (mdx * mdx + mdy * mdy > DRAG_THRESHOLD) {
+            fs_node_t *node = selected_node(ex);
+            if (node && fs_path(node, drag_path, sizeof(drag_path)))
+                drag_active = true;
+            else
+                ex->drag_armed = false;
+        }
+        return true;
+    }
+
+    if (ev->released & MOUSE_LEFT) {
+        if (drag_active) {
+            drag_active = false;
+            if (in_row) {
+                fs_node_t *target = ex->entries[index];
+                char       dst[FS_PATH_MAX];
+                if (target->type == FS_DIR &&
+                    fs_path(target, dst, sizeof(dst)) &&
+                    strcmp(dst, drag_path) != 0) {
+                    fs_result_t r = fs_move(fs_root(), drag_path, dst);
+                    if (r == FS_OK)
+                        desktop_notify("Moved into %s", target->name);
+                    else
+                        desktop_notify("Move failed: %s", fs_strerror(r));
+                }
+            }
+        } else if (ex->drag_armed && in_row && index == ex->selection) {
+            action_open(win, ex); /* it was a click, not a drag */
+        }
+        ex->drag_armed = false;
     }
     return true;
 }

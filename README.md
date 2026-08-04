@@ -113,6 +113,8 @@ buttons to raise or minimise a window.
 | `Ctrl+U` | clear the input line |
 | `Ctrl+C` | abandon the current line |
 
+The mouse wheel scrolls the scrollback (3 lines per notch).
+
 ### File Explorer
 
 | Key | Action |
@@ -126,14 +128,19 @@ buttons to raise or minimise a window.
 | `Ctrl+N` / `Ctrl+T` | new folder / new file |
 
 Every action also has a toolbar button. Clicking an already-selected row
-opens it. In a rename box the old name starts out selected, so typing
-replaces it; `Esc` cancels any prompt.
+opens it; clicking and dragging an already-selected row onto a folder row
+moves it there (in the same window or a different one). The mouse wheel
+scrolls the list. In a rename box the old name starts out selected, so
+typing replaces it; `Esc` cancels any prompt.
 
 ### Text editor
 
 Ordinary typing, arrow keys, `Home`/`End`, `PageUp`/`PageDown`, `Tab`,
 `Enter`, `Backspace`, `Delete`, and `Ctrl+S` to save. The title shows `*`
-while there are unsaved changes.
+while there are unsaved changes. Click and drag to select text (shown
+highlighted); `Ctrl+C`/`Ctrl+X`/`Ctrl+V` copy, cut and paste it, and typing
+over a selection replaces it. The clipboard is shared with every other
+editor window.
 
 ## Shell
 
@@ -240,7 +247,7 @@ to the nearest surviving ancestor.
 | Boot | `boot/boot.S`, `boot/linker.ld`, `boot/grub.cfg` | Multiboot2 header, stack, entry; kernel linked at 1 MiB |
 | Arch | `kernel/arch/x86/` | GDT, IDT + 48 interrupt stubs, 8259A PIC, PIT, CMOS RTC, CPUID, reboot/power-off |
 | Memory | `kernel/mm/` | bitmap page frame allocator over the Multiboot2 memory map; first-fit heap with coalescing that grows by taking new arenas from the frame allocator |
-| Devices | `kernel/dev/` | COM1 serial log, VGA text console, PCI enumeration, Bochs DISPI mode setting, PS/2 keyboard, PS/2 mouse |
+| Devices | `kernel/dev/` | COM1 serial log, VGA text console, PCI enumeration, Bochs DISPI mode setting, PS/2 keyboard, PS/2 mouse with IntelliMouse wheel support |
 | Graphics | `kernel/gfx/` | double-buffered framebuffer with dirty-rectangle upload, rectangles, lines, gradients, alpha blending, clipping stack, 8x16 bitmap font |
 | Filesystem | `kernel/fs/` | node tree, path resolution, textual path helpers |
 | Shell | `kernel/sh/` | byte streams, tokeniser/parser, execution engine, 32 built-ins |
@@ -313,7 +320,7 @@ Three layers, all runnable:
 
 ```sh
 make test      # 267 host assertions (path, filesystem, parser, commands)
-make check     # the above plus a 51-check scripted QEMU session
+make check     # the above plus a 58-check scripted QEMU session
 ```
 
 * **Host unit tests** (`tests/host/`) compile the portable filesystem and
@@ -335,7 +342,7 @@ make check     # the above plus a 51-check scripted QEMU session
 
 ## Known limitations
 
-* No windows resizing, no drag-and-drop.
+* No windows resizing.
 * The terminal wraps output at the width the window had when it opened; the
   window cannot be resized, so this never changes at run time.
 * The font covers ASCII, a few hand-drawn UI symbols, and the Latin-1

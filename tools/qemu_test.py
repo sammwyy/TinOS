@@ -393,6 +393,24 @@ def run_scenario(iso, shots_dir):
         c.check(helped.missing("archive.txt"),
                 "clear wiped the previous terminal output")
 
+        vm.line("clear")
+        vm.line("echo wheel-test-top-marker")
+        for i in range(28):
+            vm.line("echo filler %d" % i)
+        vm.line("echo wheel-test-bottom-marker")
+        bottom = shot("terminal-scrolled-bottom")
+        c.check(bottom.has("bottom-marker", tolerance=0) and
+                bottom.missing("top-marker", tolerance=0),
+                "scrollback shows the most recent line before scrolling")
+        vm.mouse_move(400, 300)
+        for _ in range(20):  # clamps at the top; more than enough to get there
+            vm.mouse_button(True, "wheel-up")
+            vm.mouse_button(False, "wheel-up")
+        scrolled = shot("terminal-scrolled-up")
+        c.check(scrolled.has("top-marker", tolerance=0) and
+                scrolled.missing("bottom-marker", tolerance=0),
+                "the mouse wheel scrolls the terminal scrollback")
+
         # ---------------------------------------------------------------
         print("\n== file explorer (opened with the mouse) ==")
         vm.mouse_click(48, 750)                       # the Start button
@@ -452,6 +470,45 @@ def run_scenario(iso, shots_dir):
         c.check(gone.missing("renamed-entry"),
                 "the deleted entry is gone from the listing")
 
+        # Drag-and-drop: create two folders and drag one onto the other.
+        vm.key("ctrl", "n")
+        vm.type("dnd-src")
+        vm.key("ret")
+        vm.key("ctrl", "n")
+        vm.type("dnd-dst")
+        vm.key("ret")
+        listed = shot("explorer-dnd-setup")
+        src_hits = listed.find("dnd-src")
+        dst_hits = listed.find("dnd-dst")
+        docs_hits = listed.find("documents")
+        c.check(bool(src_hits) and bool(dst_hits) and bool(docs_hits),
+                "two folders created for the drag-and-drop test")
+        if src_hits and dst_hits and docs_hits:
+            sx, sy = src_hits[0]
+            dx, dy = dst_hits[0]
+            qx, qy = docs_hits[0]
+            # dnd-dst is already selected right after being created (it was
+            # the last folder made); click a third, unrelated row first so
+            # the click on dnd-src below is a genuine "select" and not
+            # "select and open" (clicking an already-selected row opens it).
+            vm.mouse_click(qx + 10, qy + 6)
+            time.sleep(0.15)
+            vm.mouse_click(sx + 10, sy + 6)
+            time.sleep(0.15)
+            vm.mouse_drag(sx + 10, sy + 6, dx + 10, dy + 6)
+        dropped = shot("explorer-dnd-dropped")
+        c.check(dropped.has("Moved into dnd-dst") and dropped.missing("dnd-src"),
+                "dragging a row onto a folder moves it there")
+
+        vm.key("alt", "tab")
+        time.sleep(0.3)
+        vm.line("ls /home/dnd-dst")
+        moved = shot("terminal-sees-dnd")
+        c.check(moved.has("dnd-src"),
+                "the terminal sees the file the drag moved")
+        vm.key("alt", "tab")
+        time.sleep(0.3)
+
         # ---------------------------------------------------------------
         print("\n== text editor ==")
         vm.key("ctrl", "esc")
@@ -467,6 +524,25 @@ def run_scenario(iso, shots_dir):
         saved = shot("editor-saved")
         c.check(saved.has("Saved /README.txt"),
                 "Ctrl+S writes the file back and reports it")
+
+        # Mouse-drag text selection, then copy/paste it.
+        vm.type("\nSELECTME here")
+        marked = shot("editor-selection-source")
+        hits = marked.find("SELECTME")
+        c.check(bool(hits), "marker text is on screen to select")
+        if hits:
+            hx, hy = hits[0]
+            vm.mouse_click(hx, hy + 6)
+            vm.mouse_drag(hx, hy + 6, hx + 8 * len("SELECTME"), hy + 6)
+            vm.key("ctrl", "c")
+            vm.key("end")
+            vm.type("\npasted: ")
+            vm.key("ctrl", "v")
+        pasted = shot("editor-selection-pasted")
+        # Higher tolerance: the source occurrence sits right where the
+        # editor's line-wrap glyphs are packed tightly against each other.
+        c.check(len(pasted.find("SELECTME", tolerance=20)) >= 2,
+                "dragging selects text and Ctrl+C/Ctrl+V copies it")
 
         vm.key("alt", "f4")
         time.sleep(0.3)

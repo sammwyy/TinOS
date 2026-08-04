@@ -55,6 +55,7 @@ typedef struct {
 typedef struct {
     int     x, y;
     int     dx, dy;
+    int     wheel;    /* vertical scroll notches, positive = away from user */
     uint8_t buttons;  /* currently held    */
     uint8_t pressed;  /* newly pressed     */
     uint8_t released; /* newly released    */

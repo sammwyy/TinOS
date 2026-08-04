@@ -20,8 +20,10 @@
 static volatile mouse_event_t queue[QUEUE_SIZE];
 static volatile uint32_t      q_head, q_tail;
 
-static uint8_t packet[3];
+static uint8_t packet[4];
 static int     packet_index;
+static int     packet_size = 3;
+static bool    has_wheel;
 static int     cursor_x, cursor_y;
 static int     bound_w = 1024, bound_h = 768;
 static uint8_t buttons;
@@ -60,6 +62,24 @@ static bool mouse_command(uint8_t cmd)
     return inb(PS2_DATA) == 0xFA; /* ACK */
 }
 
+static bool mouse_set_rate(uint8_t rate)
+{
+    return mouse_command(0xF3) && mouse_command(rate);
+}
+
+static int mouse_get_id(void)
+{
+    ctrl_command(0xD4);
+    if (!wait_write())
+        return -1;
+    outb(PS2_DATA, 0xF2);
+    if (!wait_read() || inb(PS2_DATA) != 0xFA)
+        return -1;
+    if (!wait_read())
+        return -1;
+    return inb(PS2_DATA);
+}
+
 static void push_event(const mouse_event_t *ev)
 {
     uint32_t next = (q_head + 1) % QUEUE_SIZE;
@@ -84,7 +104,7 @@ static void mouse_isr(regs_t *regs)
         return;
 
     packet[packet_index++] = byte;
-    if (packet_index < 3)
+    if (packet_index < packet_size)
         return;
     packet_index = 0;
 
@@ -99,6 +119,10 @@ static void mouse_isr(regs_t *regs)
     if (flags & 0x20)
         dy -= 256;
 
+    /* Wheel mice (IntelliMouse extension) put a signed notch count, two's
+     * complement, in the 4th byte. */
+    int wheel = has_wheel ? (int)(int8_t)packet[3] : 0;
+
     int old_x = cursor_x, old_y = cursor_y;
     cursor_x += dx;
     cursor_y -= dy; /* PS/2 Y grows upwards, the screen grows downwards */
@@ -111,6 +135,7 @@ static void mouse_isr(regs_t *regs)
         .y        = cursor_y,
         .dx       = cursor_x - old_x,
         .dy       = cursor_y - old_y,
+        .wheel    = wheel,
         .buttons  = new_buttons,
         .pressed  = (uint8_t)(new_buttons & ~buttons),
         .released = (uint8_t)(buttons & ~new_buttons),
@@ -118,7 +143,7 @@ static void mouse_isr(regs_t *regs)
     };
     buttons = new_buttons;
 
-    if (ev.moved || ev.pressed || ev.released)
+    if (ev.moved || ev.pressed || ev.released || ev.wheel)
         push_event(&ev);
 }
 
@@ -150,6 +175,18 @@ static bool mouse_setup(void)
         klog("[mous] device did not acknowledge 'set defaults'\n");
         return false;
     }
+
+    /* IntelliMouse wheel handshake: three specific sample-rate writes
+     * followed by "get device ID" switches a wheel mouse into 4-byte packet
+     * mode and makes it report an ID of 3. Data reporting is still off at
+     * this point (a fresh 0xF6 reset leaves it disabled), so this is safe. */
+    if (mouse_set_rate(200) && mouse_set_rate(100) && mouse_set_rate(80) &&
+        mouse_get_id() == 3) {
+        has_wheel   = true;
+        packet_size = 4;
+        klog("[mous] wheel extension enabled\n");
+    }
+
     if (!mouse_command(0xF4)) { /* enable data reporting */
         klog("[mous] device did not acknowledge 'enable reporting'\n");
         return false;
@@ -161,6 +198,8 @@ bool mouse_init(void)
 {
     q_head = q_tail = 0;
     packet_index    = 0;
+    packet_size     = 3;
+    has_wheel       = false;
     buttons         = 0;
     cursor_x        = bound_w / 2;
     cursor_y        = bound_h / 2;

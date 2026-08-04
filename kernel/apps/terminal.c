@@ -453,9 +453,26 @@ static bool terminal_on_key(window_t *win, const key_event_t *ev)
     return true;
 }
 
+#define WHEEL_LINES 3
+
 static bool terminal_on_mouse(window_t *win, const mouse_event_t *ev, int lx,
                               int ly)
 {
+    terminal_t *t = win->priv;
+    if (!t || !ev->wheel)
+        return true;
+
+    /* PS/2 wheel Z-axis convention: negative = wheel pushed away from the
+     * user ("scroll up" = show earlier lines), positive = toward the user. */
+    size_t step = (size_t)(WHEEL_LINES * (ev->wheel > 0 ? ev->wheel : -ev->wheel));
+    if (ev->wheel < 0) {
+        t->scroll = t->scroll > step ? t->scroll - step : 0;
+    } else {
+        size_t visible = (size_t)MAX(t->rows - 1, 1);
+        size_t max     = t->line_count > visible ? t->line_count - visible : 0;
+        t->scroll      = MIN(t->scroll + step, max);
+    }
+    wm_invalidate(win);
     return true; /* clicks just focus the window */
 }
 

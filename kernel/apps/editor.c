@@ -30,7 +30,14 @@ typedef struct {
     int    cols, rows;
     bool   blink_on;
     uint64_t blink_at;
+    size_t sel_anchor;
+    bool   has_selection;
+    bool   mouse_selecting;
 } editor_t;
+
+/* Shared across editor windows, like a real desktop clipboard. */
+static char  *editor_clipboard;
+static size_t editor_clipboard_len;
 
 /* ------------------------------------------------------------------ */
 /* Buffer helpers                                                      */
@@ -119,6 +126,53 @@ static void delete_range(editor_t *ed, size_t start, size_t count)
     ed->buffer[ed->length] = '\0';
     ed->cursor             = start;
     ed->modified           = true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Selection and clipboard                                             */
+/* ------------------------------------------------------------------ */
+
+static void selection_range(const editor_t *ed, size_t *start, size_t *end)
+{
+    if (ed->sel_anchor < ed->cursor) {
+        *start = ed->sel_anchor;
+        *end   = ed->cursor;
+    } else {
+        *start = ed->cursor;
+        *end   = ed->sel_anchor;
+    }
+}
+
+static void selection_clear(editor_t *ed)
+{
+    ed->has_selection = false;
+}
+
+/* Removes the selected text, if any; cursor ends up at the start. */
+static void selection_delete(editor_t *ed)
+{
+    if (!ed->has_selection)
+        return;
+    size_t start, end;
+    selection_range(ed, &start, &end);
+    delete_range(ed, start, end - start);
+    ed->has_selection = false;
+}
+
+static void selection_copy(editor_t *ed)
+{
+    if (!ed->has_selection)
+        return;
+    size_t start, end;
+    selection_range(ed, &start, &end);
+    size_t len = end - start;
+    char  *buf = krealloc(editor_clipboard, len + 1);
+    if (!buf)
+        return;
+    memcpy(buf, ed->buffer + start, len);
+    buf[len]              = '\0';
+    editor_clipboard      = buf;
+    editor_clipboard_len  = len;
 }
 
 /* ------------------------------------------------------------------ */
@@ -230,6 +284,59 @@ static void editor_scroll_to_cursor(editor_t *ed)
         ed->left_column = column - (size_t)ed->cols + 1;
 }
 
+/* Maps a client-relative pixel position back to a buffer offset, the
+ * inverse of the row/column layout editor_on_draw uses. */
+static size_t offset_from_xy(editor_t *ed, int lx, int ly)
+{
+    int row = (ly - PADDING) / FONT_H;
+    int col = (lx - PADDING) / FONT_W;
+    if (row < 0)
+        row = 0;
+    if (col < 0)
+        col = 0;
+
+    size_t lines = total_lines(ed);
+    size_t line  = ed->top_line + (size_t)row;
+    if (line >= lines)
+        line = lines - 1;
+
+    size_t start  = offset_of_line(ed, line);
+    size_t end    = line_end(ed, start);
+    size_t column = ed->left_column + (size_t)col;
+    return MIN(start + column, end);
+}
+
+static bool editor_on_mouse(window_t *win, const mouse_event_t *ev, int lx,
+                            int ly)
+{
+    editor_t *ed = win->priv;
+    if (!ed)
+        return true;
+
+    if (ev->pressed & MOUSE_LEFT) {
+        ed->cursor          = offset_from_xy(ed, lx, ly);
+        ed->sel_anchor       = ed->cursor;
+        ed->has_selection    = false;
+        ed->mouse_selecting  = true;
+        ed->blink_on         = true;
+        ed->blink_at         = 0;
+        wm_invalidate(win);
+        return true;
+    }
+    if ((ev->buttons & MOUSE_LEFT) && ed->mouse_selecting) {
+        size_t offset = offset_from_xy(ed, lx, ly);
+        if (offset != ed->cursor) {
+            ed->cursor        = offset;
+            ed->has_selection = (ed->cursor != ed->sel_anchor);
+            wm_invalidate(win);
+        }
+        return true;
+    }
+    if (ev->released & MOUSE_LEFT)
+        ed->mouse_selecting = false;
+    return true;
+}
+
 static void editor_on_draw(window_t *win, rect_t client)
 {
     editor_t *ed = win->priv;
@@ -241,12 +348,40 @@ static void editor_on_draw(window_t *win, rect_t client)
     int x = client.x + PADDING;
     int y = client.y + PADDING;
 
+    size_t sel_start = 0, sel_end = 0;
+    if (ed->has_selection)
+        selection_range(ed, &sel_start, &sel_end);
+
     size_t offset = offset_of_line(ed, ed->top_line);
     for (int row = 0; row < ed->rows; row++) {
         if (offset > ed->length)
             break;
         size_t end = line_end(ed, offset);
         size_t len = end - offset;
+
+        if (ed->has_selection && sel_start < sel_end) {
+            size_t lo = MAX(offset, sel_start);
+            size_t hi = MIN(end, sel_end);
+            /* A selection that continues past this line's end highlights
+             * the rest of the row, hinting that it wraps to the next one. */
+            bool wraps = sel_start <= end && sel_end > end;
+            if (lo < hi || wraps) {
+                size_t col_lo = lo > offset ? lo - offset : 0;
+                size_t col_hi = wraps ? len : hi - offset;
+                if (col_hi > ed->left_column) {
+                    size_t vis_lo = col_lo > ed->left_column
+                                        ? col_lo - ed->left_column : 0;
+                    size_t vis_hi = MIN(col_hi - ed->left_column,
+                                        (size_t)ed->cols);
+                    size_t vis_w  = wraps ? (size_t)ed->cols - vis_lo
+                                          : vis_hi - vis_lo;
+                    if ((int)vis_w > 0)
+                        gfx_fill_rect(x + (int)vis_lo * FONT_W,
+                                     y + row * FONT_H, (int)vis_w * FONT_W,
+                                     FONT_H, COLOR_SELECTION);
+                }
+            }
+        }
 
         if (len > ed->left_column) {
             size_t visible = MIN(len - ed->left_column, (size_t)ed->cols);
@@ -298,23 +433,49 @@ static bool editor_on_key(window_t *win, const key_event_t *ev)
     if (!ed)
         return false;
 
-    if ((ev->mods & KMOD_CTRL) && (ev->ch == 's' || ev->ch == 'S')) {
-        editor_save(win, ed);
-        wm_invalidate(win);
-        return true;
+    if (ev->mods & KMOD_CTRL) {
+        if (ev->ch == 's' || ev->ch == 'S') {
+            editor_save(win, ed);
+            wm_invalidate(win);
+            return true;
+        }
+        if (ev->ch == 'c' || ev->ch == 'C') {
+            selection_copy(ed);
+            return true;
+        }
+        if (ev->ch == 'x' || ev->ch == 'X') {
+            selection_copy(ed);
+            selection_delete(ed);
+            editor_scroll_to_cursor(ed);
+            editor_update_title(win, ed);
+            wm_invalidate(win);
+            return true;
+        }
+        if (ev->ch == 'v' || ev->ch == 'V') {
+            selection_delete(ed);
+            if (editor_clipboard)
+                insert_text(ed, editor_clipboard, editor_clipboard_len);
+            editor_scroll_to_cursor(ed);
+            editor_update_title(win, ed);
+            wm_invalidate(win);
+            return true;
+        }
     }
 
     switch (ev->code) {
     case KEY_LEFT:
+        selection_clear(ed);
         if (ed->cursor)
             ed->cursor--;
         break;
     case KEY_RIGHT:
+        selection_clear(ed);
         if (ed->cursor < ed->length)
             ed->cursor++;
         break;
     case KEY_UP:
     case KEY_DOWN: {
+        selection_clear(ed);
         size_t line   = line_number(ed, ed->cursor);
         size_t column = ed->cursor - line_start(ed, ed->cursor);
         if (ev->code == KEY_UP && line == 0)
@@ -328,38 +489,50 @@ static bool editor_on_key(window_t *win, const key_event_t *ev)
         break;
     }
     case KEY_HOME:
+        selection_clear(ed);
         ed->cursor = line_start(ed, ed->cursor);
         break;
     case KEY_END:
+        selection_clear(ed);
         ed->cursor = line_end(ed, ed->cursor);
         break;
     case KEY_PAGEUP: {
+        selection_clear(ed);
         size_t line   = line_number(ed, ed->cursor);
         size_t target = line > (size_t)ed->rows ? line - (size_t)ed->rows : 0;
         ed->cursor    = offset_of_line(ed, target);
         break;
     }
     case KEY_PAGEDOWN: {
+        selection_clear(ed);
         size_t line   = line_number(ed, ed->cursor) + (size_t)ed->rows;
         size_t last   = total_lines(ed) - 1;
         ed->cursor    = offset_of_line(ed, MIN(line, last));
         break;
     }
     case KEY_BACKSPACE:
-        if (ed->cursor > 0)
+        if (ed->has_selection)
+            selection_delete(ed);
+        else if (ed->cursor > 0)
             delete_range(ed, ed->cursor - 1, 1);
         break;
     case KEY_DELETE:
-        delete_range(ed, ed->cursor, 1);
+        if (ed->has_selection)
+            selection_delete(ed);
+        else
+            delete_range(ed, ed->cursor, 1);
         break;
     case KEY_ENTER:
+        selection_delete(ed);
         insert_text(ed, "\n", 1);
         break;
     case KEY_TAB:
+        selection_delete(ed);
         insert_text(ed, "    ", 4);
         break;
     default:
         if (ev->ch >= 0x20 && ev->ch < 0x7F) {
+            selection_delete(ed);
             char c = ev->ch;
             insert_text(ed, &c, 1);
         } else {
@@ -395,6 +568,7 @@ static const app_class_t editor_class = {
     .on_close = editor_on_close,
     .on_draw  = editor_on_draw,
     .on_key   = editor_on_key,
+    .on_mouse = editor_on_mouse,
     .on_tick  = editor_on_tick,
 };
 
