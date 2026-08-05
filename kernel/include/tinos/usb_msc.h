@@ -20,4 +20,8 @@ typedef struct {
 bool usb_msc_init(block_device_t *device, usb_msc_transport_t *transport,
                   const char *name);
 
+/* Issue TEST UNIT READY and READ CAPACITY, then initialize the block device. */
+bool usb_msc_probe(block_device_t *device, usb_msc_transport_t *transport,
+                   const char *name);
+
 #endif /* TINOS_USB_MSC_H */

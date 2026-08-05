@@ -86,6 +86,12 @@ static bool transfer(msc_disk_t *msc, uint8_t command, uint32_t lba,
            csw.status == 0;
 }
 
+static uint32_t be32(const uint8_t *p)
+{
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | p[3];
+}
+
 static bool msc_read(block_device_t *device, uint64_t lba, void *buffer,
                      uint32_t sectors)
 {
@@ -127,4 +133,30 @@ bool usb_msc_init(block_device_t *device, usb_msc_transport_t *transport,
               name ? name : "usb0");
     *device = disk.block;
     return true;
+}
+
+bool usb_msc_probe(block_device_t *device, usb_msc_transport_t *transport,
+                   const char *name)
+{
+    if (!transport || !device || !transport->bulk_in ||
+        !transport->bulk_out || transport->block_size == 0)
+        return false;
+
+    msc_disk_t probe;
+    memset(&probe, 0, sizeof(probe));
+    probe.transport = transport;
+    if (!transfer(&probe, SCSI_TEST_UNIT_READY, 0, NULL, 0, false))
+        return false;
+
+    uint8_t capacity[8];
+    if (!transfer(&probe, SCSI_READ_CAPACITY, 0, capacity, sizeof(capacity),
+                  false))
+        return false;
+    uint32_t last_lba = be32(capacity);
+    uint32_t block_size = be32(capacity + 4);
+    if (block_size != BLOCK_SECTOR_SIZE || last_lba == UINT32_MAX)
+        return false;
+    transport->block_size = block_size;
+    transport->block_count = last_lba + 1;
+    return usb_msc_init(device, transport, name);
 }

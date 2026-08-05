@@ -11,6 +11,7 @@
 #include <tinos/async.h>
 #include <tinos/ata.h>
 #include <tinos/storage.h>
+#include <tinos/uhci.h>
 #include <tinos/virtio_blk.h>
 #include <tinos/console.h>
 #include <tinos/desktop.h>
@@ -231,6 +232,9 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     size_t bound = driver_bind_all();
     for (size_t i = 0; i < virtio_blk_count(); i++)
         storage_mount_device(virtio_blk_device(i), &mounted);
+    size_t usb_disks = uhci_usb_init();
+    for (size_t i = 0; i < usb_disks; i++)
+        storage_mount_device(uhci_usb_device(i), &mounted);
     bool network = net_init();
     if (network)
         net_async_init();
