@@ -469,6 +469,7 @@ void wm_blit_window(window_t *win)
     const fb_info_t *fb = gfx_info();
     rect_t visible = rect_intersect(win->frame,
                                     rect_make(0, 0, fb->width, fb->height));
+    visible = rect_intersect(visible, gfx_clip_current());
     if (rect_empty(visible))
         return;
     for (int y = visible.y; y < visible.y + visible.h; y++) {
