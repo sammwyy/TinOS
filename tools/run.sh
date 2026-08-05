@@ -30,6 +30,7 @@ USB_IMAGE="$USB_IMAGE" USB_SOURCE="$USB_SOURCE" tools/make_usb_image.sh
 # clock agree with the host.
 args=(
     -cdrom "$ISO"
+    -boot order=d
     -m "$MEM"
     -vga std
     -machine pc
