@@ -11,6 +11,8 @@
 
 #define FS_NAME_MAX 64
 #define FS_PATH_MAX 512
+#define TINOS_DEFAULT_USER "sammy"
+#define TINOS_DEFAULT_HOME "/users/" TINOS_DEFAULT_USER
 
 typedef enum {
     FS_FILE = 1,

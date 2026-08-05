@@ -128,7 +128,7 @@ static const char readme_txt[] =
     "\n"
     "Try this in the Terminal:\n"
     "  ls /\n"
-    "  cd /home\n"
+    "  cd " TINOS_DEFAULT_HOME "\n"
     "  echo hello > greeting.txt\n"
     "  cat greeting.txt\n"
     "  cat greeting.txt | grep hell\n"
@@ -160,12 +160,6 @@ static const char motd_txt[] =
     "A tiny, fast graphical operating system.\n"
     "Use the start menu to open apps, and read /README.txt to get started.\n";
 
-static const char notes_txt[] =
-    "shopping list\n"
-    "  - solder\n"
-    "  - more RAM\n"
-    "  - coffee\n";
-
 static void seed_file(fs_node_t *dir, const char *name, const char *text)
 {
     fs_node_t *file = node_alloc(name, FS_FILE);
@@ -190,15 +184,44 @@ void fs_init(void)
     if (!root)
         return;
 
-    fs_node_t *home   = seed_dir(root, "home");
-    fs_node_t *system = seed_dir(root, "system");
-    seed_dir(root, "tmp");
-    fs_node_t *docs = seed_dir(home, "documents");
+    fs_node_t *apps    = seed_dir(root, "apps");
+    fs_node_t *config  = seed_dir(root, "config");
+    fs_node_t *dev     = seed_dir(root, "dev");
+    fs_node_t *drive   = seed_dir(root, "drive");
+    fs_node_t *run     = seed_dir(root, "run");
+    fs_node_t *system  = seed_dir(root, "system");
+    fs_node_t *tmp     = seed_dir(root, "tmp");
+    fs_node_t *var     = seed_dir(root, "var");
+    fs_node_t *users   = seed_dir(root, "users");
+    fs_node_t *shared  = seed_dir(root, "shared");
+
+    (void)apps;
+    (void)config;
+    (void)dev;
+    (void)drive;
+    (void)run;
+    (void)tmp;
+    (void)shared;
+
+    seed_dir(system, "bin");
+    seed_dir(system, "drivers");
+    seed_dir(system, "lib");
+    seed_dir(var, "cache");
+    seed_dir(var, "lib");
+    seed_dir(var, "log");
+
+    fs_node_t *user = seed_dir(users, TINOS_DEFAULT_USER);
+    fs_node_t *apps_user = seed_dir(user, ".apps");
+    fs_node_t *data_user = seed_dir(user, ".data");
+    seed_dir(user, "documents");
+    seed_dir(user, "downloads");
+
+    (void)apps_user;
+    (void)data_user;
 
     seed_file(root, "README.txt", readme_txt);
     seed_file(system, "motd.txt", motd_txt);
     seed_file(system, "help.txt", help_txt);
-    seed_file(docs, "notes.txt", notes_txt);
 }
 
 void fs_shutdown(void)

@@ -351,7 +351,7 @@ static void do_toolbar_action(window_t *win, explorer_t *ex, int action)
         explorer_navigate(win, ex, "/");
         break;
     case BTN_HOME:
-        explorer_navigate(win, ex, "/home");
+        explorer_navigate(win, ex, TINOS_DEFAULT_HOME);
         break;
     case BTN_NEWDIR:
         begin_prompt(ex, MODE_NEW_DIR, "");
@@ -798,7 +798,8 @@ static void explorer_on_open(window_t *win, const char *arg)
     }
     win->priv      = ex;
     ex->hot_button = -1;
-    path_normalize(arg && arg[0] ? arg : "/home", ex->cwd, sizeof(ex->cwd));
+    path_normalize(arg && arg[0] ? arg : TINOS_DEFAULT_HOME, ex->cwd,
+                   sizeof(ex->cwd));
 
     fs_node_t *node = NULL;
     if (fs_resolve(fs_root(), ex->cwd, &node) != FS_OK || node->type != FS_DIR)

@@ -135,7 +135,7 @@ static int cmd_pwd(shell_t *sh, int argc, char **argv, stream_t *in,
 static int cmd_cd(shell_t *sh, int argc, char **argv, stream_t *in,
                   stream_t *out, stream_t *err)
 {
-    const char *target = argc > 1 ? argv[1] : "/home";
+    const char *target = argc > 1 ? argv[1] : TINOS_DEFAULT_HOME;
     char        resolved[FS_PATH_MAX];
 
     if (argc > 2) {

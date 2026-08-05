@@ -202,8 +202,8 @@ screen - see *Error handling*).
 | `a \|\| b` | run b only if a failed |
 
 Words honour `'single'` and `"double"` quotes and `\` escapes, and a leading
-`~` expands to the current user's directory (currently `/home` in the
-prototype; the target layout is `/users/<username>`). Error messages go to the terminal even inside a
+`~` expands to the current user's directory (the built-in default user is
+`sammy`, whose home is `/users/sammy`). Error messages go to the terminal even inside a
 pipeline, so a mistake in the middle of a pipe is still visible.
 
 The example session from the project brief works verbatim:
@@ -341,11 +341,10 @@ are case-sensitive, collapse repeated separators and `.`/`..`, and never
 allow `..` to escape the root. Applications should construct paths from the
 well-known directories above instead of hard-coding another private root.
 
-The current prototype still creates an in-memory tree under `/home` and uses
-`/home` as the default shell directory; `/users/<username>` and the protected
-mounts above are the target namespace for the next filesystem pass. This
-README describes the intended contract so new code can be written against it
-without introducing another layout.
+The current prototype creates the conventional directory tree in memory and
+initializes the default user as `sammy`. It still has no persistent storage,
+user database or permission enforcement; `/drive` and the protected mounts
+are reserved namespaces for future filesystem passes.
 
 Directories, regular files with real byte content, absolute and relative
 paths, `.` and `..`, creation, reading, writing, appending, copying (deep for

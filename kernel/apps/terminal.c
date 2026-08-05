@@ -286,7 +286,7 @@ static void terminal_on_open(window_t *win, const char *arg)
     rect_t client = wm_client_rect(win);
     t->cols       = (client.w - 2 * PADDING) / FONT_W;
     t->rows       = (client.h - 2 * PADDING) / FONT_H;
-    t->shell      = shell_create(arg && arg[0] ? arg : "/home");
+    t->shell      = shell_create(arg && arg[0] ? arg : TINOS_DEFAULT_HOME);
     if (!t->shell) {
         klog("[term] could not create a shell\n");
         return;

@@ -7,7 +7,7 @@
  *   command  := word+ ('>' word | '>>' word | '<' word)*
  *
  * Words honour single and double quotes plus backslash escapes, and a
- * leading '~' expands to /home.  Each word is copied into an arena owned by
+ * leading '~' expands to the default user's home.  Each word is copied into an arena owned by
  * the parsed line (line->storage), so argv entries stay valid until
  * sh_line_free().
  */
@@ -18,7 +18,7 @@
 #include <tinos/string.h>
 
 #define MAX_TOKENS 256
-#define HOME_DIR   "/home"
+#define HOME_DIR   TINOS_DEFAULT_HOME
 
 typedef enum {
     TOK_WORD = 0,

@@ -143,7 +143,7 @@ static void test_fs_basics(void)
     fs_node_t *root = fs_root();
     CHECK(root != NULL);
     CHECK(root->type == FS_DIR);
-    CHECK(fs_child(root, "home") != NULL);
+    CHECK(fs_child(root, "users") != NULL);
     CHECK(fs_child(root, "system") != NULL);
     CHECK(fs_child(root, "tmp") != NULL);
     CHECK(fs_child(root, "README.txt") != NULL);
@@ -154,22 +154,22 @@ static void test_fs_basics(void)
     CHECK_STR(buf, "/");
 
     fs_node_t *node = NULL;
-    CHECK(fs_resolve(root, "/home", &node) == FS_OK);
+    CHECK(fs_resolve(root, TINOS_DEFAULT_HOME, &node) == FS_OK);
     fs_path(node, buf, sizeof(buf));
-    CHECK_STR(buf, "/home");
+    CHECK_STR(buf, TINOS_DEFAULT_HOME);
 
-    CHECK(fs_resolve(root, "/home/documents/notes.txt", &node) == FS_OK);
+    CHECK(fs_resolve(root, TINOS_DEFAULT_HOME "/documents", &node) == FS_OK);
     fs_path(node, buf, sizeof(buf));
-    CHECK_STR(buf, "/home/documents/notes.txt");
-    CHECK(node->type == FS_FILE);
-    CHECK(fs_size(node) > 0);
+    CHECK_STR(buf, TINOS_DEFAULT_HOME "/documents");
+    CHECK(node->type == FS_DIR);
 
     /* Relative resolution and parent traversal. */
     fs_node_t *home = NULL;
-    CHECK(fs_resolve(root, "home", &home) == FS_OK);
-    CHECK(fs_resolve(home, "documents/../documents/notes.txt", &node) == FS_OK);
-    CHECK(fs_resolve(home, "../home/./documents", &node) == FS_OK);
-    CHECK(fs_resolve(home, "..", &node) == FS_OK && node == root);
+    CHECK(fs_resolve(root, "users/sammy", &home) == FS_OK);
+    CHECK(fs_resolve(home, "documents/../documents", &node) == FS_OK);
+    CHECK(fs_resolve(home, "../../users/./sammy/documents", &node) == FS_OK);
+    CHECK(fs_resolve(home, "..", &node) == FS_OK &&
+          node == fs_child(root, "users"));
     CHECK(fs_resolve(root, "..", &node) == FS_OK && node == root);
     CHECK(fs_resolve(root, "/missing", &node) == FS_ERR_NOENT);
     CHECK(fs_resolve(root, "/README.txt/x", &node) == FS_ERR_NOTDIR);
@@ -326,11 +326,11 @@ static void test_parser(void)
     sh_line_free(&line);
 
     CHECK(sh_parse("cd ~/documents", &line));
-    CHECK_STR(line.segments[0].stages[0].argv[1], "/home/documents");
+    CHECK_STR(line.segments[0].stages[0].argv[1], TINOS_DEFAULT_HOME "/documents");
     sh_line_free(&line);
 
     CHECK(sh_parse("echo ~", &line));
-    CHECK_STR(line.segments[0].stages[0].argv[1], "/home");
+    CHECK_STR(line.segments[0].stages[0].argv[1], TINOS_DEFAULT_HOME);
     sh_line_free(&line);
 
     /* Syntax errors are reported, not crashed on. */
@@ -359,10 +359,10 @@ static void test_commands(void)
 {
     SUITE("shell commands");
     fs_init();
-    shell_t *sh = shell_create("/home");
+    shell_t *sh = shell_create(TINOS_DEFAULT_HOME);
     CHECK(sh != NULL);
 
-    check_output(sh, "pwd", "/home\n");
+    check_output(sh, "pwd", TINOS_DEFAULT_HOME "\n");
     check_output(sh, "echo hello", "hello\n");
     check_output(sh, "echo -n hello", "hello");
     check_output(sh, "echo   spaced   out", "spaced out\n");
@@ -370,13 +370,13 @@ static void test_commands(void)
     /* Navigation. */
     check_output(sh, "cd /", "");
     check_output(sh, "pwd", "/\n");
-    check_output(sh, "cd home", "");
-    check_output(sh, "pwd", "/home\n");
-    check_output(sh, "cd ..", "");
+    check_output(sh, "cd users/sammy", "");
+    check_output(sh, "pwd", TINOS_DEFAULT_HOME "\n");
+    check_output(sh, "cd ../..", "");
     check_output(sh, "pwd", "/\n");
     CHECK(output_contains(sh, "cd /nowhere", "no such file"));
     CHECK(output_contains(sh, "cd /README.txt", "not a directory"));
-    check_output(sh, "cd /home", "");
+    check_output(sh, "cd " TINOS_DEFAULT_HOME, "");
     check_output(sh, "cd -", "");
     check_output(sh, "pwd", "/\n");
 
@@ -403,7 +403,7 @@ static void test_commands(void)
     free(text);
 
     /* The full example sequence from the project brief. */
-    check_output(sh, "cd /home", "");
+    check_output(sh, "cd " TINOS_DEFAULT_HOME, "");
     check_output(sh, "mkdir projects", "");
     check_output(sh, "cd projects", "");
     check_output(sh, "touch notes.txt", "");
@@ -471,12 +471,12 @@ static void test_commands(void)
 
     /* Error reporting. */
     CHECK(output_contains(sh, "cat missing.txt", "no such file"));
-    CHECK(output_contains(sh, "cat /home", "is a directory"));
+    CHECK(output_contains(sh, "cat " TINOS_DEFAULT_HOME, "is a directory"));
     CHECK(output_contains(sh, "mkdir", "missing operand"));
     CHECK(output_contains(sh, "cp onlyone", "missing destination"));
-    CHECK(output_contains(sh, "rm /home", "is a directory"));
+    CHECK(output_contains(sh, "rm " TINOS_DEFAULT_HOME, "is a directory"));
     CHECK(output_contains(sh, "ls -Z", "unknown option"));
-    CHECK(output_contains(sh, "mkdir /home/projects", "file exists"));
+    CHECK(output_contains(sh, "mkdir " TINOS_DEFAULT_HOME "/projects", "file exists"));
     CHECK(output_contains(sh, "mv /nope /tmp", "no such file"));
 
     /* Sequencing operators. */
@@ -513,7 +513,7 @@ static void test_commands(void)
 
     /* Completion. */
     char completed[FS_PATH_MAX];
-    check_output(sh, "cd /home", "");
+    check_output(sh, "cd " TINOS_DEFAULT_HOME, "");
     CHECK(shell_complete(sh, "proj", completed, sizeof(completed)));
     CHECK_STR(completed, "projects");
     CHECK(shell_complete(sh, "hist", completed, sizeof(completed)));
@@ -529,18 +529,18 @@ static void test_shared_state(void)
     fs_init();
 
     /* Two shells (as two terminal windows would be) see each other's work. */
-    shell_t *a = shell_create("/home");
+    shell_t *a = shell_create(TINOS_DEFAULT_HOME);
     shell_t *b = shell_create("/");
 
-    check_output(a, "mkdir /home/shared", "");
-    check_output(a, "echo from-a > /home/shared/file.txt", "");
-    check_output(b, "cat /home/shared/file.txt", "from-a\n");
-    check_output(b, "echo from-b >> /home/shared/file.txt", "");
-    check_output(a, "cat /home/shared/file.txt", "from-a\nfrom-b\n");
+    check_output(a, "mkdir " TINOS_DEFAULT_HOME "/shared", "");
+    check_output(a, "echo from-a > " TINOS_DEFAULT_HOME "/shared/file.txt", "");
+    check_output(b, "cat " TINOS_DEFAULT_HOME "/shared/file.txt", "from-a\n");
+    check_output(b, "echo from-b >> " TINOS_DEFAULT_HOME "/shared/file.txt", "");
+    check_output(a, "cat " TINOS_DEFAULT_HOME "/shared/file.txt", "from-a\nfrom-b\n");
 
     /* And the same nodes are what a file explorer would walk. */
     fs_node_t *node = NULL;
-    CHECK(fs_resolve(fs_root(), "/home/shared/file.txt", &node) == FS_OK);
+    CHECK(fs_resolve(fs_root(), TINOS_DEFAULT_HOME "/shared/file.txt", &node) == FS_OK);
     CHECK(fs_size(node) == strlen("from-a\nfrom-b\n"));
 
     shell_destroy(a);
@@ -577,8 +577,8 @@ static void test_robustness(void)
 
     /* The tree must still be intact and usable. */
     CHECK(fs_root() != NULL);
-    CHECK(fs_child(fs_root(), "home") != NULL);
-    check_output(sh, "cd /home", "");
+    CHECK(fs_child(fs_root(), "users") != NULL);
+    check_output(sh, "cd " TINOS_DEFAULT_HOME, "");
     check_output(sh, "echo still-works > /tmp/ok.txt", "");
     check_output(sh, "cat /tmp/ok.txt", "still-works\n");
 

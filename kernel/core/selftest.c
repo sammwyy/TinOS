@@ -225,7 +225,8 @@ static void test_filesystem(void)
 {
     fs_node_t *node = NULL;
 
-    check(fs_resolve(fs_root(), "/home", &node) == FS_OK, "/home exists");
+    check(fs_resolve(fs_root(), TINOS_DEFAULT_HOME, &node) == FS_OK,
+          TINOS_DEFAULT_HOME " exists");
     check(fs_resolve(fs_root(), "/system/motd.txt", &node) == FS_OK,
           "/system/motd.txt exists");
     check(fs_resolve(fs_root(), "/nope", &node) == FS_ERR_NOENT,

@@ -257,7 +257,7 @@ static window_t *launch_terminal(const char *arg)
 
 static window_t *launch_explorer(const char *arg)
 {
-    return app_explorer_open(arg ? arg : "/home");
+    return app_explorer_open(arg ? arg : TINOS_DEFAULT_HOME);
 }
 
 static window_t *launch_editor(const char *arg)
