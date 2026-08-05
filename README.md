@@ -324,7 +324,9 @@ blocking operation.
 the small driver model (`kernel/core/driver.c`). Drivers register a match and
 probe callback, and the model binds each device to at most one matching
 driver. PCI helpers expose command/status, IRQ routing, BARs and bus-master
-enablement; no network driver is included yet.
+enablement. `kernel/mm/dma.c` exposes physically contiguous DMA buffers behind
+an API that can later absorb virtual-to-physical mappings. No network driver
+is included yet.
 
 Preemption is deliberately still a separate step: the PIT must save and
 restore a thread context instead of only marking events pending, and the
