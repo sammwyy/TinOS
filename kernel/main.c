@@ -10,6 +10,7 @@
 #include <tinos/arch.h>
 #include <tinos/async.h>
 #include <tinos/audio.h>
+#include <tinos/codec.h>
 #include <tinos/ata.h>
 #include <tinos/storage.h>
 #include <tinos/uhci.h>
@@ -186,6 +187,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     e1000_driver_register();
     virtio_blk_driver_register();
     audio_driver_register();
+    audio_codecs_init();
     boot_step("Memory manager online");
     boot_note("Asynchronous worker runtime online");
     boot_note("Kernel thread scheduler online (private stacks, PIT preemption)");
