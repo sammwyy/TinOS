@@ -14,6 +14,7 @@ typedef struct {
 bool audio_stream_start(const audio_format_t *format);
 size_t audio_stream_write(const int16_t *samples, size_t frames);
 void audio_stream_pause(bool paused);
+void audio_stream_drain(void);
 void audio_stream_stop(void);
 size_t audio_stream_queued_frames(void);
 size_t audio_stream_capacity_frames(void);

@@ -102,7 +102,16 @@ static void player_playback_worker(void *arg)
             continue;
         }
         size_t n = audio_decoder_read(p->decoder, buffer, 512);
-        if (!n) { p->eof = true; break; }
+        if (!n) {
+            audio_stream_drain();
+            while (audio_stream_queued_frames() && !thread_cancelled() &&
+                   !p->closing) {
+                audio_poll();
+                thread_yield();
+            }
+            p->eof = !thread_cancelled() && !p->closing;
+            break;
+        }
         size_t written = audio_stream_write(buffer, n);
         p->decoded += written;
         if (!written) {
