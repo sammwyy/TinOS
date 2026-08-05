@@ -89,6 +89,26 @@ static bool fat32_file_next(fat32_file_backend_t *file, uint32_t cluster,
     return true;
 }
 
+static bool fat32_file_batch(fat32_file_backend_t *file, uint32_t cluster,
+                             uint32_t sector_index, uint32_t limit,
+                             uint8_t *cache, uint32_t *cache_lba,
+                             bool *cache_valid, uint32_t *batch)
+{
+    *batch = MIN(limit, file->sectors_per_cluster - sector_index);
+    uint32_t scan = cluster;
+    while (*batch < limit) {
+        uint32_t next;
+        if (!fat32_file_next(file, scan, cache, cache_lba, cache_valid, &next))
+            return false;
+        if (next != scan + 1 || next >= file->cluster_count + 2)
+            break;
+        scan = next;
+        *batch += MIN(limit - *batch,
+                      (uint32_t)file->sectors_per_cluster);
+    }
+    return true;
+}
+
 static bool fat32_file_read(const fs_node_t *node, size_t offset,
                             void *buffer, size_t length)
 {
@@ -130,10 +150,13 @@ static bool fat32_file_read(const fs_node_t *node, size_t offset,
             done += count;
             in_cluster += count;
         } else {
-            uint32_t batch = MIN((uint32_t)FAT_READ_BATCH,
-                                 file->sectors_per_cluster -
-                                 (uint32_t)sector_index);
-            batch = MIN(batch, (uint32_t)(remaining / BLOCK_SECTOR_SIZE));
+            uint32_t limit = MIN((uint32_t)FAT_READ_BATCH,
+                                 (uint32_t)(remaining / BLOCK_SECTOR_SIZE));
+            uint32_t batch;
+            if (!fat32_file_batch(file, cluster, (uint32_t)sector_index,
+                                  limit, fat_cache, &fat_cache_lba,
+                                  &fat_cache_valid, &batch))
+                return false;
             if (!block_read(file->device, lba, (uint8_t *)buffer + done,
                             batch))
                 return false;
@@ -141,13 +164,13 @@ static bool fat32_file_read(const fs_node_t *node, size_t offset,
             done += bytes;
             in_cluster += bytes;
         }
-        if (in_cluster == cluster_bytes && done < length) {
+        while (in_cluster >= cluster_bytes && done < length) {
             if (guard++ > file->cluster_count)
                 return false;
             if (!fat32_file_next(file, cluster, fat_cache, &fat_cache_lba,
                                  &fat_cache_valid, &cluster))
                 return false;
-            in_cluster = 0;
+            in_cluster -= cluster_bytes;
         }
     }
     return true;
