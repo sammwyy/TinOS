@@ -12,6 +12,7 @@
 #include <tinos/console.h>
 #include <tinos/desktop.h>
 #include <tinos/driver.h>
+#include <tinos/e1000.h>
 #include <tinos/fs.h>
 #include <tinos/gfx.h>
 #include <tinos/heap.h>
@@ -176,6 +177,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     thread_init();
     ktimer_init();
     driver_model_init();
+    e1000_driver_register();
     boot_step("Memory manager online");
     boot_note("Asynchronous worker runtime online");
     boot_note("Kernel thread scheduler online (private stacks, PIT preemption)");

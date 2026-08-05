@@ -31,6 +31,8 @@ args=(
     -machine pc
     -rtc base=localtime
     -name "TinOS"
+    -netdev user,id=tinosnet
+    -device e1000,netdev=tinosnet
 )
 
 display="default"
