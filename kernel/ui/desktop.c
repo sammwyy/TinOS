@@ -991,7 +991,6 @@ void desktop_run(void)
         async_run(8);
         thread_run(4);
         ktimer_poll(4);
-        net_poll();
 
         /* --- keyboard --- */
         key_event_t key;

@@ -219,6 +219,8 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     size_t devices = pci_scan();
     size_t bound = driver_bind_all();
     bool network = net_init();
+    if (network)
+        net_async_init();
     boot_step("PCI bus scanned, %u devices", (uint32_t)devices);
     boot_note("Driver model online: %u devices, %u drivers bound",
               (uint32_t)device_count(), (uint32_t)bound);

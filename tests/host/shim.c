@@ -135,3 +135,13 @@ bool net_http_get(const char *host, const char *path, char *response,
     (void)host; (void)path; (void)response; (void)capacity;
     (void)timeout_ms; return false;
 }
+bool net_async_init(void) { return false; }
+uint32_t net_async_submit(net_job_kind_t kind, const char *target,
+                          const char *path)
+{
+    (void)kind; (void)target; (void)path; return 0;
+}
+bool net_async_take_result(net_job_result_t *result)
+{
+    (void)result; return false;
+}

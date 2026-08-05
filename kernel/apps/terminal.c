@@ -12,6 +12,7 @@
 #include <tinos/gfx.h>
 #include <tinos/heap.h>
 #include <tinos/kernel.h>
+#include <tinos/net.h>
 #include <tinos/path.h>
 #include <tinos/printf.h>
 #include <tinos/sh.h>
@@ -492,13 +493,22 @@ static bool terminal_on_tick(window_t *win)
     if (!t)
         return false;
 
+    net_job_result_t result;
+    bool network_output = false;
+    while (net_async_take_result(&result)) {
+        term_write(t, result.text, strlen(result.text));
+        network_output = true;
+    }
+    if (network_output)
+        term_scroll_to_bottom(t);
+
     uint64_t now = timer_ticks();
     if (now >= t->blink_at) {
         t->blink_on = !t->blink_on;
         t->blink_at = now + BLINK_MS;
         return win == wm_focused();
     }
-    return false;
+    return network_output;
 }
 
 static const app_class_t terminal_class = {

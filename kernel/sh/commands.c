@@ -1129,12 +1129,9 @@ static int cmd_ping(shell_t *sh, int argc, char **argv, stream_t *in,
 {
     if (argc != 2) { stream_puts(err, "usage: ping <address|hostname>\n"); return 2; }
     if (!net_available() || !net_config()->configured) { stream_puts(err, "ping: network is not configured\n"); return 1; }
-    uint32_t address;
-    if (!net_parse_address(argv[1], &address) && !net_dns_lookup(argv[1], &address, 3000)) { stream_printf(err, "ping: cannot resolve %s\n", argv[1]); return 1; }
-    uint32_t elapsed;
-    if (!net_ping(address, 1000, &elapsed)) { stream_printf(err, "ping: timeout waiting for %s\n", argv[1]); return 1; }
-    char formatted[20]; net_format_address(address, formatted, sizeof(formatted));
-    stream_printf(out, "reply from %s (%s): time=%u ms\n", argv[1], formatted, elapsed);
+    uint32_t id = net_async_submit(NET_JOB_PING, argv[1], NULL);
+    if (!id) { stream_puts(err, "ping: network worker queue is full\n"); return 1; }
+    stream_printf(out, "ping: request %u queued\n", id);
     return 0;
 }
 
@@ -1143,10 +1140,9 @@ static int cmd_nslookup(shell_t *sh, int argc, char **argv, stream_t *in,
 {
     if (argc != 2) { stream_puts(err, "usage: nslookup <hostname>\n"); return 2; }
     if (!net_available() || !net_config()->configured) { stream_puts(err, "nslookup: network is not configured\n"); return 1; }
-    uint32_t address;
-    if (!net_dns_lookup(argv[1], &address, 3000)) { stream_printf(err, "nslookup: %s: no address found\n", argv[1]); return 1; }
-    char formatted[20]; net_format_address(address, formatted, sizeof(formatted));
-    stream_printf(out, "Name: %s\nAddress: %s\n", argv[1], formatted);
+    uint32_t id = net_async_submit(NET_JOB_DNS, argv[1], NULL);
+    if (!id) { stream_puts(err, "nslookup: network worker queue is full\n"); return 1; }
+    stream_printf(out, "nslookup: request %u queued\n", id);
     return 0;
 }
 
@@ -1174,15 +1170,10 @@ static int cmd_httpget(shell_t *sh, int argc, char **argv, stream_t *in,
         stream_puts(err, "httpget: network is not configured\n");
         return 1;
     }
-    char response[2048];
-    if (!net_http_get(argv[1], argc == 3 ? argv[2] : "/", response,
-                      sizeof(response), 5000)) {
-        stream_puts(err, "httpget: request failed or timed out\n");
-        return 1;
-    }
-    stream_puts(out, response);
-    if (response[0] && response[strlen(response) - 1] != '\n')
-        stream_putc(out, '\n');
+    uint32_t id = net_async_submit(NET_JOB_HTTP, argv[1],
+                                   argc == 3 ? argv[2] : "/");
+    if (!id) { stream_puts(err, "httpget: network worker queue is full\n"); return 1; }
+    stream_printf(out, "httpget: request %u queued\n", id);
     return 0;
 }
 
