@@ -112,6 +112,12 @@ isr_common:
     call    isr_dispatch
     addl    $4, %esp
 
+    /* The dispatcher returns the frame selected for iret. */
+    testl   %eax, %eax
+    jz      1f
+    movl    %eax, %esp
+1:
+
     popl    %eax                /* restore data segments */
     movw    %ax, %ds
     movw    %ax, %es

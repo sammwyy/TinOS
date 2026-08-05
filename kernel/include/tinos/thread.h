@@ -1,14 +1,14 @@
 /* Kernel threads.
  *
- * Threads have private kernel stacks and are scheduled cooperatively for now.
- * A thread must call thread_yield() or thread_sleep() to give the desktop and
- * other workers time to run. The context-switch ABI is intentionally small so
- * the PIT can provide preemption in a later step.
+ * Threads have private kernel stacks and support both voluntary scheduling and
+ * PIT-driven preemption. Blocking operations still need to use the scheduler
+ * APIs so that a worker can sleep without holding up the kernel.
  */
 #ifndef TINOS_THREAD_H
 #define TINOS_THREAD_H
 
 #include <tinos/kernel.h>
+#include <tinos/arch.h>
 #include <tinos/types.h>
 
 #define THREAD_MAX       32
@@ -56,5 +56,7 @@ kernel_thread_t *thread_current(void);
 size_t thread_run(size_t budget);
 size_t thread_active(void);
 uint64_t thread_next_wakeup(void);
+
+regs_t *thread_preempt(regs_t *frame);
 
 #endif /* TINOS_THREAD_H */

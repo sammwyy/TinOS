@@ -311,10 +311,11 @@ and `kernel/arch/x86/context.S` provide real kernel threads with private
 stacks. Async tasks and threads are both run outside interrupt handlers, and
 the desktop gives each subsystem a bounded scheduling budget. Threads can
 call `thread_yield()`, `thread_sleep()` and `thread_exit()`; networking can
-therefore use a blocking-looking worker API without blocking the GUI. The
-current scheduler is cooperative, so a thread must yield voluntarily.
+therefore use a blocking-looking worker API without blocking the GUI. The PIT
+can preempt a running worker, while explicit yields and blocking calls
+remain available for predictable hand-off points.
 
-`kernel/core/sync.c` supplies cooperative mutexes and auto-reset events.
+`kernel/core/sync.c` supplies scheduler-aware mutexes and auto-reset events.
 `kmutex_lock()` and `kevent_wait()` put the current worker in a blocked state
 instead of spinning; an unlock or signal wakes it. Interrupt handlers should
 only publish data and wake a worker, never acquire a mutex or execute a

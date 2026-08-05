@@ -177,8 +177,8 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     ktimer_init();
     driver_model_init();
     boot_step("Memory manager online");
-    boot_note("Asynchronous worker runtime online (cooperative mode)");
-    boot_note("Kernel thread scheduler online (private stacks, cooperative)");
+    boot_note("Asynchronous worker runtime online");
+    boot_note("Kernel thread scheduler online (private stacks, PIT preemption)");
     boot_note("%u MiB usable in %u regions, %u MiB free",
               (uint32_t)(pmm_total_bytes() / (1024 * 1024)),
               (uint32_t)pmm_region_count(),

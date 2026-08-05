@@ -17,9 +17,13 @@ struct kernel_thread {
     thread_entry_fn entry;
     void *arg;
     uint64_t wake_at;
+    regs_t irq_frame;
+    regs_t *irq_frame_ptr;
+    bool irq_frame_valid;
     uint32_t id;
     thread_state_t state;
     bool used;
+    bool started;
     bool detached;
     bool cancel_requested;
     int exit_status;
@@ -32,11 +36,16 @@ struct kernel_thread {
 
 extern void arch_context_switch(thread_context_t *from,
                                 const thread_context_t *to);
+extern void arch_resume_irq(void);
+extern void arch_resume_context(void);
 
 static kernel_thread_t threads[THREAD_MAX];
 static thread_context_t scheduler_context;
 static kernel_thread_t *current;
 static uint32_t next_id;
+static bool preemption_enabled;
+static bool scheduler_switching;
+thread_context_t *thread_irq_resume_context;
 
 static void context_return(void)
 {
@@ -61,9 +70,16 @@ void thread_init(void)
     memset(&scheduler_context, 0, sizeof(scheduler_context));
     current = NULL;
     next_id = 1;
+    preemption_enabled = false;
+    scheduler_switching = false;
+    thread_irq_resume_context = NULL;
 }
 
-static void thread_bootstrap(void) { context_return(); }
+static void thread_bootstrap(void)
+{
+    scheduler_switching = false;
+    context_return();
+}
 
 void thread_wait_queue_init(thread_wait_queue_t *queue)
 {
@@ -128,7 +144,18 @@ kernel_thread_t *thread_spawn(const char *name, thread_entry_fn entry,
             next_id = 1;
         thread->state = THREAD_READY;
         thread->used = true;
+        thread->started = false;
         thread->detached = false;
+        thread->irq_frame.ds = GDT_KERNEL_DATA;
+        thread->irq_frame.int_no = 32;
+        thread->irq_frame.err_code = 0;
+        thread->irq_frame.eip = (uint32_t)(uintptr_t)thread_bootstrap;
+        thread->irq_frame.cs = GDT_KERNEL_CODE;
+        thread->irq_frame.eflags = 0x202;
+        thread->irq_frame.useresp = 0;
+        thread->irq_frame.ss = GDT_KERNEL_DATA;
+        thread->irq_frame_ptr = &thread->irq_frame;
+        thread->irq_frame_valid = true;
         thread_wait_queue_init(&thread->joiners);
         copy_name(thread->name, name);
 
@@ -147,6 +174,7 @@ void thread_yield(void)
 {
     if (!current)
         return;
+    current->irq_frame_valid = false;
     current->state = THREAD_READY;
     switch_to_scheduler();
 }
@@ -155,6 +183,7 @@ void thread_sleep(uint32_t milliseconds)
 {
     if (!current)
         return;
+    current->irq_frame_valid = false;
     current->wake_at = timer_ticks() + milliseconds;
     current->state = THREAD_SLEEPING;
     switch_to_scheduler();
@@ -164,6 +193,7 @@ void thread_block(void)
 {
     if (!current)
         return;
+    current->irq_frame_valid = false;
     current->state = THREAD_BLOCKED;
     switch_to_scheduler();
 }
@@ -173,6 +203,7 @@ void thread_block_on(thread_wait_queue_t *queue)
     if (!current) {
         return;
     }
+    current->irq_frame_valid = false;
     current->wait_next = NULL;
     current->waiting_on = queue;
     if (queue->tail)
@@ -287,6 +318,7 @@ size_t thread_run(size_t budget)
     uint64_t now = timer_ticks();
     if (budget == 0 || current)
         return 0;
+    preemption_enabled = true;
 
     for (size_t i = 0; i < ARRAY_SIZE(threads) && ran < budget; i++) {
         kernel_thread_t *thread = &threads[i];
@@ -302,7 +334,10 @@ size_t thread_run(size_t budget)
 
         current = thread;
         thread->state = THREAD_RUNNING;
+        thread->started = true;
+        scheduler_switching = true;
         arch_context_switch(&scheduler_context, &thread->context);
+        scheduler_switching = false;
         current = NULL;
         ran++;
 
@@ -312,6 +347,65 @@ size_t thread_run(size_t budget)
         }
     }
     return ran;
+}
+
+static void prepare_irq_resume(kernel_thread_t *thread)
+{
+    uint32_t *slot = (uint32_t *)(thread->stack + THREAD_STACK_SIZE);
+    --slot;
+    *slot = (uint32_t)(uintptr_t)thread->irq_frame_ptr;
+    thread->context.esp = (uint32_t)(uintptr_t)slot;
+    thread->context.eip = (uint32_t)(uintptr_t)arch_resume_irq;
+}
+
+static void prepare_cooperative_frame(kernel_thread_t *thread)
+{
+    memset(&thread->irq_frame, 0, sizeof(thread->irq_frame));
+    thread->irq_frame.ds = GDT_KERNEL_DATA;
+    thread->irq_frame.int_no = 32;
+    thread->irq_frame.eip = (uint32_t)(uintptr_t)arch_resume_context;
+    thread->irq_frame.cs = GDT_KERNEL_CODE;
+    thread->irq_frame.eflags = 0x002;
+    thread->irq_frame.ss = GDT_KERNEL_DATA;
+    thread->irq_frame_ptr = &thread->irq_frame;
+    thread_irq_resume_context = &thread->context;
+}
+
+/* Timer IRQ entry point. The caller restores the returned frame with iret. */
+regs_t *thread_preempt(regs_t *frame)
+{
+    if (!preemption_enabled || scheduler_switching || !current ||
+        current->state != THREAD_RUNNING)
+        return frame;
+
+    kernel_thread_t *old = current;
+    kernel_thread_t *next = NULL;
+
+    for (size_t i = 0; i < ARRAY_SIZE(threads); i++) {
+        kernel_thread_t *candidate = &threads[i];
+        if (candidate->used && candidate != old &&
+            candidate->state == THREAD_READY) {
+            next = candidate;
+            break;
+        }
+    }
+    if (!next) {
+        return frame;
+    }
+
+    old->irq_frame_ptr = frame;
+    old->irq_frame_valid = true;
+    prepare_irq_resume(old);
+    old->state = THREAD_READY;
+
+    current = next;
+    next->state = THREAD_RUNNING;
+    if (!next->started || !next->irq_frame_valid) {
+        prepare_cooperative_frame(next);
+        next->irq_frame_valid = false;
+    }
+    next->started = true;
+    return next->irq_frame_ptr;
 }
 
 size_t thread_active(void)

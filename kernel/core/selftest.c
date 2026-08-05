@@ -26,6 +26,8 @@
 static int checks;
 static int failures;
 static volatile uint32_t thread_probe;
+static volatile uint32_t preempt_a_running;
+static volatile uint32_t preempt_interleaved;
 
 static void check(bool condition, const char *what)
 {
@@ -173,6 +175,39 @@ static void test_sync_and_queue(void)
     check(ksemaphore_try_wait(&semaphore), "semaphore wakes token capacity");
 }
 
+static void preempt_a_entry(void *arg)
+{
+    UNUSED(arg);
+    preempt_a_running = 1;
+    for (volatile uint32_t i = 0; i < 10000000u; i++)
+        ;
+    preempt_a_running = 0;
+}
+
+static void preempt_b_entry(void *arg)
+{
+    UNUSED(arg);
+    if (preempt_a_running)
+        preempt_interleaved = 1;
+}
+
+static void test_preemption(void)
+{
+    preempt_a_running = 0;
+    preempt_interleaved = 0;
+    kernel_thread_t *a = thread_spawn("preempt-a", preempt_a_entry, NULL);
+    kernel_thread_t *b = thread_spawn("preempt-b", preempt_b_entry, NULL);
+    check(a && b, "preemption test creates workers");
+    for (int i = 0; i < 2000 && thread_active(); i++) {
+        thread_run(8);
+        timer_sleep(1);
+    }
+    check(preempt_interleaved != 0,
+          "PIT preempts a worker before it voluntarily yields");
+    check(a && thread_join(a) == 0, "preemption worker A joins");
+    check(b && thread_join(b) == 0, "preemption worker B joins");
+}
+
 static void test_paths(void)
 {
     char buf[128];
@@ -298,6 +333,7 @@ int selftest_run(void)
     test_heap();
     test_threads();
     test_sync_and_queue();
+    test_preemption();
     test_paths();
     test_filesystem();
     test_font();

@@ -4,6 +4,7 @@
 #include <tinos/io.h>
 #include <tinos/kernel.h>
 #include <tinos/string.h>
+#include <tinos/thread.h>
 
 #define IDT_ENTRIES 256
 
@@ -120,7 +121,7 @@ void irq_uninstall(int irq)
 }
 
 /* Called from isr_common with a pointer to the saved register frame. */
-void isr_dispatch(regs_t *regs)
+regs_t *isr_dispatch(regs_t *regs)
 {
     if (regs->int_no < 32) {
         const char *name = exception_names[regs->int_no];
@@ -147,11 +148,14 @@ void isr_dispatch(regs_t *regs)
             if (!(isr_reg & (1 << (irq & 7)))) {
                 if (irq == 15)
                     pic_send_eoi(2); /* still EOI the master for the slave */
-                return;
+                return regs;
             }
         }
         if (irq_handlers[irq])
             irq_handlers[irq](regs);
         pic_send_eoi(irq);
+        if (irq == 0)
+            return thread_preempt(regs);
     }
+    return regs;
 }

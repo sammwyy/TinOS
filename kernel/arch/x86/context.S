@@ -11,7 +11,8 @@ arch_context_switch:
     movl  %esi, 4(%eax)
     movl  %edi, 8(%eax)
     movl  %ebp, 12(%eax)
-    movl  %esp, 16(%eax)
+    leal  4(%esp), %ecx
+    movl  %ecx, 16(%eax)
     movl  (%esp), %ecx
     movl  %ecx, 20(%eax)
 
@@ -22,3 +23,32 @@ arch_context_switch:
     movl  16(%edx), %esp
     jmp   *20(%edx)
 .size arch_context_switch, . - arch_context_switch
+
+.global arch_resume_context
+.type arch_resume_context, @function
+arch_resume_context:
+    movl  thread_irq_resume_context, %eax
+    movl  0(%eax), %ebx
+    movl  4(%eax), %esi
+    movl  8(%eax), %edi
+    movl  12(%eax), %ebp
+    movl  16(%eax), %esp
+    sti
+    jmp   *20(%eax)
+.size arch_resume_context, . - arch_resume_context
+
+.global arch_resume_irq
+.type arch_resume_irq, @function
+arch_resume_irq:
+    movl  (%esp), %eax
+    movl  %eax, %esp
+    popl  %eax
+    movw  %ax, %ds
+    movw  %ax, %es
+    movw  %ax, %fs
+    movw  %ax, %gs
+    popa
+    /* Drop the synthetic vector and error-code words before iret. */
+    addl  $8, %esp
+    iret
+.size arch_resume_irq, . - arch_resume_irq
