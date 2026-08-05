@@ -38,6 +38,8 @@ typedef struct fs_node fs_node_t;
 typedef bool (*fs_read_at_fn)(const fs_node_t *node, size_t offset,
                               void *buffer, size_t length);
 typedef void (*fs_backend_release_fn)(void *backend);
+typedef struct fs_io_request fs_io_request_t;
+typedef void (*fs_io_complete_fn)(fs_io_request_t *request, void *arg);
 
 struct fs_node {
     char            name[FS_NAME_MAX];
@@ -104,6 +106,14 @@ fs_result_t fs_write_path(fs_node_t *cwd, const char *path, const void *data,
 const uint8_t *fs_data(const fs_node_t *file);
 bool fs_read_at(const fs_node_t *file, size_t offset, void *buffer,
                 size_t length);
+fs_io_request_t *fs_read_all_async(const fs_node_t *file,
+                                   fs_io_complete_fn complete, void *arg);
+void fs_io_poll(void);
+void fs_io_cancel(fs_io_request_t *request);
+bool fs_io_ok(const fs_io_request_t *request);
+const uint8_t *fs_io_data(const fs_io_request_t *request);
+size_t fs_io_size(const fs_io_request_t *request);
+void fs_io_release(fs_io_request_t *request);
 size_t         fs_size(const fs_node_t *file);
 
 /* Recursive size of a directory (or the file size for a file). */

@@ -6,13 +6,16 @@
 #include <tinos/kernel.h>
 #include <tinos/printf.h>
 #include <tinos/string.h>
+#include <tinos/thread.h>
 #include <tinos/ui.h>
 
 #define PLAYER_MAX_TRACKS 64
 #define PLAYER_PATH_MAX  FS_PATH_MAX
 #define PLAYER_H 30
 
-typedef enum { PLAYER_STOPPED, PLAYER_PLAYING, PLAYER_PAUSED, PLAYER_ERROR } player_state_t;
+typedef enum {
+    PLAYER_STOPPED, PLAYER_LOADING, PLAYER_PLAYING, PLAYER_PAUSED, PLAYER_ERROR
+} player_state_t;
 typedef struct {
     char path[PLAYER_PATH_MAX];
     char name[FS_NAME_MAX];
@@ -27,6 +30,12 @@ typedef struct {
     player_state_t state;
     char message[96];
     int hot;
+    kernel_thread_t *loader;
+    audio_decoder_t *loaded_decoder;
+    const audio_codec_t *loaded_codec;
+    audio_format_t loaded_format;
+    uint64_t loaded_total;
+    bool load_ok;
 } media_player_t;
 
 static bool supported(const char *name)
@@ -59,36 +68,48 @@ static void player_stop_decoder(media_player_t *p)
     p->decoder = NULL; p->codec = NULL; p->decoded = 0;
 }
 
+static void player_load_worker(void *arg)
+{
+    media_player_t *p = arg;
+    fs_node_t *node = NULL;
+    if (fs_resolve(fs_root(), p->tracks[p->current].path, &node) == FS_OK &&
+        node->type == FS_FILE && !thread_cancelled()) {
+        p->loaded_decoder = audio_decoder_open(
+            p->tracks[p->current].path, fs_data(node), fs_size(node),
+            &p->loaded_format, &p->loaded_total, &p->loaded_codec);
+        p->load_ok = p->loaded_decoder != NULL;
+    }
+    thread_exit();
+}
+
 static bool player_load(media_player_t *p, size_t index)
 {
     if (index >= p->count) return false;
+    if (p->loader) return false;
     fs_node_t *node = NULL;
     if (fs_resolve(fs_root(), p->tracks[index].path, &node) != FS_OK)
         return false;
     player_stop_decoder(p);
     p->current = index;
-    p->decoder = audio_decoder_open(p->tracks[index].path, fs_data(node),
-                                    fs_size(node), &p->format, &p->total,
-                                    &p->codec);
-    if (!p->decoder) {
-        strlcpy(p->message, "Unsupported or malformed audio file",
-                sizeof(p->message));
-        p->state = PLAYER_ERROR;
-        return false;
-    }
-    if (!audio_stream_start(&p->format)) {
-        strlcpy(p->message, "AC'97 audio output is unavailable",
-                sizeof(p->message));
-        p->state = PLAYER_ERROR;
-        return false;
-    }
+    p->loaded_decoder = NULL;
+    p->loaded_codec = NULL;
+    p->loaded_total = 0;
+    p->load_ok = false;
     p->message[0] = '\0';
-    p->state = PLAYER_PLAYING;
+    p->state = PLAYER_LOADING;
+    p->loader = thread_spawn("audio-load", player_load_worker, p);
+    if (!p->loader) {
+        strlcpy(p->message, "Unable to start audio loader", sizeof(p->message));
+        p->state = PLAYER_ERROR;
+        return false;
+    }
     return true;
 }
 
 static void player_next(media_player_t *p)
 {
+    if (p->loader)
+        return;
     if (p->count && !player_load(p, (p->current + 1) % p->count))
         p->state = PLAYER_ERROR;
 }
@@ -111,13 +132,26 @@ static void player_on_open(window_t *win, const char *arg)
 static void player_on_close(window_t *win)
 {
     media_player_t *p = win->priv;
-    if (p) { player_stop_decoder(p); kfree(p); }
+    if (p) {
+        if (p->loader) {
+            thread_cancel(p->loader);
+            while (thread_state(p->loader) != THREAD_DEAD)
+                thread_run(1);
+            thread_join(p->loader);
+            p->loader = NULL;
+        }
+        if (p->loaded_decoder)
+            audio_decoder_close(p->loaded_decoder);
+        player_stop_decoder(p);
+        kfree(p);
+    }
     win->priv = NULL;
 }
 
 static const char *state_name(player_state_t state)
 {
     return state == PLAYER_PLAYING ? "Playing" :
+           state == PLAYER_LOADING ? "Loading" :
            state == PLAYER_PAUSED ? "Paused" :
            state == PLAYER_ERROR ? "Error" : "Stopped";
 }
@@ -211,6 +245,45 @@ static bool player_on_mouse(window_t *win, const mouse_event_t *ev, int x, int y
 static bool player_on_tick(window_t *win)
 {
     media_player_t *p = win->priv;
+    if (p && p->loader && p->state != PLAYER_LOADING) {
+        if (thread_state(p->loader) == THREAD_DEAD) {
+            thread_join(p->loader);
+            p->loader = NULL;
+            if (p->loaded_decoder)
+                audio_decoder_close(p->loaded_decoder);
+            p->loaded_decoder = NULL;
+            return true;
+        }
+        return false;
+    }
+    if (p && p->state == PLAYER_LOADING) {
+        if (!p->loader || thread_state(p->loader) != THREAD_DEAD)
+            return true;
+        thread_join(p->loader);
+        p->loader = NULL;
+        if (!p->load_ok) {
+            strlcpy(p->message, "Unsupported or malformed audio file",
+                    sizeof(p->message));
+            p->state = PLAYER_ERROR;
+            return true;
+        }
+        p->decoder = p->loaded_decoder;
+        p->codec = p->loaded_codec;
+        p->format = p->loaded_format;
+        p->total = p->loaded_total;
+        p->loaded_decoder = NULL;
+        p->loaded_codec = NULL;
+        if (!audio_stream_start(&p->format)) {
+            strlcpy(p->message, "AC'97 audio output is unavailable",
+                    sizeof(p->message));
+            audio_decoder_close(p->decoder);
+            p->decoder = NULL;
+            p->state = PLAYER_ERROR;
+            return true;
+        }
+        p->state = PLAYER_PLAYING;
+        return true;
+    }
     if (!p || p->state != PLAYER_PLAYING || !p->decoder) return false;
     int16_t buffer[512 * 2];
     if (audio_stream_queued_frames() > 6144) return false;

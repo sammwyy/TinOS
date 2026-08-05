@@ -1004,6 +1004,7 @@ void desktop_run(void)
          * here would make the desktop appear frozen even though interrupts
          * remain enabled. */
         thread_run(1);
+        fs_io_poll();
         ktimer_poll(4);
 
         /* --- keyboard --- */

@@ -34,6 +34,9 @@ typedef struct {
     size_t sel_anchor;
     bool   has_selection;
     bool   mouse_selecting;
+    bool   loading;
+    window_t *window;
+    fs_io_request_t *load_request;
 } editor_t;
 
 /* Shared across editor windows, like a real desktop clipboard. */
@@ -188,24 +191,29 @@ static void editor_update_title(window_t *win, editor_t *ed)
     wm_set_title(win, title);
 }
 
-static bool editor_load(editor_t *ed)
+static void editor_loaded(fs_io_request_t *request, void *arg)
 {
-    fs_node_t *node = NULL;
-    if (fs_resolve(fs_root(), ed->path, &node) != FS_OK)
-        return false;
-    if (node->type != FS_FILE)
-        return false;
-
-    size_t len = fs_size(node);
-    if (!ensure_capacity(ed, len + 1))
-        return false;
+    editor_t *ed = arg;
+    size_t len = fs_io_size(request);
+    if (!fs_io_ok(request) || !ensure_capacity(ed, len + 1)) {
+        ed->loading = false;
+        desktop_notify("%s could not be opened", ed->path);
+        fs_io_release(request);
+        ed->load_request = NULL;
+        wm_invalidate(ed->window);
+        return;
+    }
     if (len)
-        memcpy(ed->buffer, fs_data(node), len);
-    ed->length         = len;
+        memcpy(ed->buffer, fs_io_data(request), len);
+    ed->length = len;
     ed->buffer[len]    = '\0';
     ed->cursor         = 0;
     ed->modified       = false;
-    return true;
+    ed->loading = false;
+    ed->load_request = NULL;
+    fs_io_release(request);
+    editor_update_title(ed->window, ed);
+    wm_invalidate(ed->window);
 }
 
 static void editor_save(window_t *win, editor_t *ed)
@@ -241,6 +249,7 @@ static void editor_on_open(window_t *win, const char *arg)
         return;
     }
     win->priv = ed;
+    ed->window = win;
     path_normalize(arg && arg[0] ? arg : "/untitled.txt", ed->path,
                    sizeof(ed->path));
 
@@ -248,7 +257,10 @@ static void editor_on_open(window_t *win, const char *arg)
     ed->cols      = (client.w - 2 * PADDING) / FONT_W;
     ed->rows      = (client.h - TOOLBAR_H - STATUS_H - 2 * PADDING) / FONT_H;
 
-    if (!editor_load(ed)) {
+    fs_node_t *node = NULL;
+    if (fs_resolve(fs_root(), ed->path, &node) != FS_OK ||
+        node->type != FS_FILE ||
+        !(ed->load_request = fs_read_all_async(node, editor_loaded, ed))) {
         if (!ensure_capacity(ed, 64)) {
             klog("[edit] out of memory for the edit buffer\n");
             return;
@@ -256,6 +268,8 @@ static void editor_on_open(window_t *win, const char *arg)
         ed->length    = 0;
         ed->buffer[0] = '\0';
         desktop_notify("%s could not be opened", ed->path);
+    } else {
+        ed->loading = true;
     }
     editor_update_title(win, ed);
 }
@@ -265,6 +279,10 @@ static void editor_on_close(window_t *win)
     editor_t *ed = win->priv;
     if (!ed)
         return;
+    if (ed->load_request) {
+        fs_io_cancel(ed->load_request);
+        fs_io_release(ed->load_request);
+    }
     kfree(ed->buffer);
     kfree(ed);
     win->priv = NULL;
@@ -413,6 +431,12 @@ static void editor_on_draw(window_t *win, rect_t client)
         toolbar_x += r.w + 3;
     }
 
+    if (ed->loading) {
+        gfx_text(client.x + PADDING, client.y + TOOLBAR_H + PADDING,
+                 "Loading file...", COLOR_TEXT_DIM);
+        return;
+    }
+
     int x = client.x + PADDING;
     int y = client.y + TOOLBAR_H + PADDING;
 
@@ -500,6 +524,8 @@ static bool editor_on_key(window_t *win, const key_event_t *ev)
     editor_t *ed = win->priv;
     if (!ed)
         return false;
+    if (ed->loading)
+        return true;
 
     if (ev->mods & KMOD_CTRL) {
         if (ev->ch == 's' || ev->ch == 'S') {

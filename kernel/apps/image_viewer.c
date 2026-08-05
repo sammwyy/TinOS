@@ -9,6 +9,9 @@ typedef struct {
     image_t image;
     char error[64];
     bool loaded;
+    fs_io_request_t *request;
+    char extension[16];
+    window_t *window;
 } image_viewer_t;
 
 static void image_extension(const char *path, char *out, size_t size)
@@ -22,6 +25,8 @@ static void image_extension(const char *path, char *out, size_t size)
     strlcpy(out, dot + 1, size);
 }
 
+static void image_viewer_loaded(fs_io_request_t *request, void *arg);
+
 static void image_viewer_on_open(window_t *win, const char *arg)
 {
     image_viewer_t *viewer = kcalloc(1, sizeof(*viewer));
@@ -30,6 +35,7 @@ static void image_viewer_on_open(window_t *win, const char *arg)
         return;
     }
     win->priv = viewer;
+    viewer->window = win;
 
     fs_node_t *node = NULL;
     if (!arg) {
@@ -41,22 +47,41 @@ static void image_viewer_on_open(window_t *win, const char *arg)
         strlcpy(viewer->error, "File not found", sizeof(viewer->error));
         return;
     }
-    char extension[16];
-    image_extension(arg, extension, sizeof(extension));
-    image_result_t result = image_decode(fs_data(node), fs_size(node),
-                                         extension, &viewer->image);
-    if (result != IMAGE_OK)
-        strlcpy(viewer->error, image_result_string(result),
-                sizeof(viewer->error));
-    else
-        viewer->loaded = true;
+    image_extension(arg, viewer->extension, sizeof(viewer->extension));
+    viewer->request = fs_read_all_async(node, image_viewer_loaded, viewer);
+    if (!viewer->request)
+        strlcpy(viewer->error, "Unable to start file read", sizeof(viewer->error));
     wm_set_title(win, node->name);
+}
+
+static void image_viewer_loaded(fs_io_request_t *request, void *arg)
+{
+    image_viewer_t *viewer = arg;
+    if (!fs_io_ok(request)) {
+        strlcpy(viewer->error, "Unable to read file", sizeof(viewer->error));
+    } else {
+        image_result_t result = image_decode(fs_io_data(request),
+                                             fs_io_size(request),
+                                             viewer->extension, &viewer->image);
+        if (result != IMAGE_OK)
+            strlcpy(viewer->error, image_result_string(result),
+                    sizeof(viewer->error));
+        else
+            viewer->loaded = true;
+    }
+    fs_io_release(request);
+    viewer->request = NULL;
+    wm_invalidate(viewer->window);
 }
 
 static void image_viewer_on_close(window_t *win)
 {
     image_viewer_t *viewer = win->priv;
     if (viewer) {
+        if (viewer->request) {
+            fs_io_cancel(viewer->request);
+            fs_io_release(viewer->request);
+        }
         image_destroy(&viewer->image);
         kfree(viewer);
     }
@@ -69,7 +94,9 @@ static void image_viewer_on_draw(window_t *win, rect_t client)
     gfx_fill_rect(client.x, client.y, client.w, client.h, RGB(0x24, 0x28, 0x31));
     if (!viewer || !viewer->loaded) {
         if (viewer)
-            widget_text_centered(client, viewer->error, COLOR_DANGER);
+            widget_text_centered(client, viewer->request ? "Loading..." :
+                                viewer->error, viewer->request ? COLOR_TEXT :
+                                COLOR_DANGER);
         return;
     }
 

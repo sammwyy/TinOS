@@ -45,6 +45,7 @@ static kernel_thread_t *current;
 static uint32_t next_id;
 static bool preemption_enabled;
 static bool scheduler_switching;
+static size_t scheduler_cursor;
 thread_context_t *thread_irq_resume_context;
 
 static void context_return(void)
@@ -72,6 +73,7 @@ void thread_init(void)
     next_id = 1;
     preemption_enabled = false;
     scheduler_switching = false;
+    scheduler_cursor = 0;
     thread_irq_resume_context = NULL;
 }
 
@@ -320,8 +322,9 @@ size_t thread_run(size_t budget)
         return 0;
     preemption_enabled = true;
 
-    for (size_t i = 0; i < ARRAY_SIZE(threads) && ran < budget; i++) {
-        kernel_thread_t *thread = &threads[i];
+    for (size_t scan = 0; scan < ARRAY_SIZE(threads) && ran < budget; scan++) {
+        size_t index = (scheduler_cursor + scan) % ARRAY_SIZE(threads);
+        kernel_thread_t *thread = &threads[index];
         if (!thread->used)
             continue;
         if (thread->state == THREAD_SLEEPING) {
@@ -340,6 +343,7 @@ size_t thread_run(size_t budget)
         scheduler_switching = false;
         current = NULL;
         ran++;
+        scheduler_cursor = (index + 1) % ARRAY_SIZE(threads);
 
         if (thread->state == THREAD_DEAD && thread->detached) {
             kfree(thread->stack);
