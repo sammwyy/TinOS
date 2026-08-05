@@ -207,7 +207,8 @@ a file created in the terminal appears in the file explorer, and vice versa.
 ### Built-in commands
 
 ```
-about     cat       cd        clear     cp        crash     date      echo
+about     beep      cat       cd        clear     cp        crash     date
+doremi    echo
 edit      exit      explorer  free      grep      head      help      history
 ls        mkdir     mv        pwd       reboot    rm        shutdown  sort
 stat      sysinfo   tail      touch     tree      uname     uptime    wc
@@ -231,6 +232,8 @@ line. The required set behaves as expected:
 | `pwd` | |
 | `clear` | |
 | `help [command]` | |
+| `beep [frequency] [milliseconds]` | test the PC speaker (defaults to 880 Hz for 120 ms) |
+| `doremi` | play the hardcoded AC'97 PCM test melody |
 
 Extras: `tree`, `wc`, `head`, `tail`, `sort`, `stat`, `free`, `date`,
 `uptime`, `uname -a`, `sysinfo`, `history`, `edit <file>` and

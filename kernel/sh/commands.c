@@ -7,6 +7,8 @@
  */
 
 #include <tinos/heap.h>
+#include <tinos/audio.h>
+#include <tinos/speaker.h>
 #include <tinos/path.h>
 #include <tinos/printf.h>
 #include <tinos/net.h>
@@ -506,6 +508,44 @@ static int cmd_echo(shell_t *sh, int argc, char **argv, stream_t *in,
     }
     if (newline)
         stream_putc(out, '\n');
+    return 0;
+}
+
+static int cmd_doremi(shell_t *sh, int argc, char **argv, stream_t *in,
+                      stream_t *out, stream_t *err)
+{
+    if (argc != 1) {
+        usage_error(err, "doremi");
+        return 2;
+    }
+    if (!audio_available()) {
+        stream_puts(err, "doremi: AC'97 audio device is unavailable\n");
+        return 1;
+    }
+    if (!audio_play_doremi()) {
+        stream_puts(err, "doremi: playback failed\n");
+        return 1;
+    }
+    stream_puts(out, "doremi: played the test melody\n");
+    return 0;
+}
+
+static int cmd_beep(shell_t *sh, int argc, char **argv, stream_t *in,
+                    stream_t *out, stream_t *err)
+{
+    if (argc > 3) {
+        usage_error(err, "beep");
+        return 2;
+    }
+    uint32_t frequency = argc > 1 ? (uint32_t)katoi(argv[1]) : 880;
+    uint32_t duration = argc > 2 ? (uint32_t)katoi(argv[2]) : 120;
+    if (!frequency || !duration || (argc > 1 && katoi(argv[1]) < 1) ||
+        (argc > 2 && katoi(argv[2]) < 1)) {
+        stream_puts(err, "beep: frequency and duration must be positive\n");
+        return 2;
+    }
+    speaker_beep(frequency, duration);
+    stream_printf(out, "beep: %u Hz for %u ms\n", frequency, duration);
     return 0;
 }
 
@@ -1180,6 +1220,8 @@ static int cmd_httpget(shell_t *sh, int argc, char **argv, stream_t *in,
 static const sh_command_def_t commands[] = {
     { "about",    "about",
       "show the About window",                       cmd_about },
+    { "beep",     "beep [frequency] [milliseconds]",
+      "test the PC speaker",                         cmd_beep },
     { "cat",      "cat [file...]",
       "print file contents (or the piped input)",    cmd_cat },
     { "cd",       "cd [directory|-]",
@@ -1192,6 +1234,8 @@ static const sh_command_def_t commands[] = {
       "trigger a fault to show the panic screen",    cmd_crash },
     { "date",     "date",
       "show the current date and time",              cmd_date },
+    { "doremi",   "doremi",
+      "play the AC'97 audio test melody",            cmd_doremi },
     { "echo",     "echo [-n] text...",
       "write text to the output",                    cmd_echo },
     { "edit",     "edit <file>",

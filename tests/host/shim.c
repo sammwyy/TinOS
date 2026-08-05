@@ -9,12 +9,30 @@
 
 #include <tinos/fs.h>
 #include <tinos/heap.h>
+#include <tinos/audio.h>
+#include <tinos/speaker.h>
 #include <tinos/net.h>
 #include <tinos/sh.h>
 
 /* --- heap ---------------------------------------------------------- */
 
 static size_t live_allocations;
+
+bool audio_available(void)
+{
+    return false;
+}
+
+bool audio_play_doremi(void)
+{
+    return false;
+}
+
+void speaker_beep(uint32_t frequency, uint32_t duration_ms)
+{
+    (void)frequency;
+    (void)duration_ms;
+}
 
 void *kmalloc(size_t size)
 {

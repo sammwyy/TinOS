@@ -364,6 +364,8 @@ static void test_commands(void)
 
     check_output(sh, "pwd", TINOS_DEFAULT_HOME "\n");
     check_output(sh, "echo hello", "hello\n");
+    check_output(sh, "beep 440 1", "beep: 440 Hz for 1 ms\n");
+    check_output(sh, "doremi", "doremi: AC'97 audio device is unavailable\n");
     check_output(sh, "echo -n hello", "hello");
     check_output(sh, "echo   spaced   out", "spaced out\n");
 
