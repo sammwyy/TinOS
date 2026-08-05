@@ -3,6 +3,7 @@
 #include <tinos/fs.h>
 #include <tinos/gfx.h>
 #include <tinos/heap.h>
+#include <tinos/io.h>
 #include <tinos/kernel.h>
 #include <tinos/printf.h>
 #include <tinos/string.h>
@@ -12,6 +13,9 @@
 #define PLAYER_MAX_TRACKS 64
 #define PLAYER_PATH_MAX  FS_PATH_MAX
 #define PLAYER_H 30
+#define PLAYER_PCM_FRAMES 65536u
+#define PLAYER_PREBUFFER_FRAMES 8192u
+#define PLAYER_DECODE_FRAMES 512u
 
 typedef enum {
     PLAYER_STOPPED, PLAYER_LOADING, PLAYER_PLAYING, PLAYER_PAUSED, PLAYER_ERROR
@@ -31,12 +35,19 @@ typedef struct {
     char message[96];
     int hot;
     kernel_thread_t *loader;
+    kernel_thread_t *decode_worker;
     kernel_thread_t *playback;
+    int16_t *pcm;
+    uint32_t pcm_read;
+    uint32_t pcm_write;
+    volatile uint32_t pcm_queued;
+    volatile uint32_t workers;
     audio_decoder_t *loaded_decoder;
     const audio_codec_t *loaded_codec;
     audio_format_t loaded_format;
     uint64_t loaded_total;
     bool load_ok;
+    volatile bool decode_done;
     bool eof;
     bool closing;
 } media_player_t;
@@ -64,11 +75,38 @@ static void player_collect(media_player_t *p, fs_node_t *node)
         if (child->name[0] != '.') player_collect(p, child);
 }
 
+static void player_release_decoder(media_player_t *p)
+{
+    if (p->decoder) audio_decoder_close(p->decoder);
+    kfree(p->pcm);
+    p->pcm = NULL;
+    p->pcm_read = p->pcm_write = p->pcm_queued = 0;
+    p->decoder = NULL; p->codec = NULL; p->decoded = 0;
+}
+
 static void player_stop_decoder(media_player_t *p)
 {
     audio_stream_stop();
-    if (p->decoder) audio_decoder_close(p->decoder);
-    p->decoder = NULL; p->codec = NULL; p->decoded = 0;
+    player_release_decoder(p);
+}
+
+static void player_destroy(media_player_t *p)
+{
+    if (p->loaded_decoder)
+        audio_decoder_close(p->loaded_decoder);
+    player_release_decoder(p);
+    kfree(p);
+}
+
+static void player_worker_done(media_player_t *p)
+{
+    bool saved = irq_save();
+    if (p->workers)
+        p->workers--;
+    bool destroy = p->closing && p->workers == 0;
+    irq_restore(saved);
+    if (destroy)
+        player_destroy(p);
 }
 
 static void player_load_worker(void *arg)
@@ -82,55 +120,88 @@ static void player_load_worker(void *arg)
             &p->loaded_total, &p->loaded_codec);
         p->load_ok = p->loaded_decoder != NULL;
     }
-    if (p->closing) {
-        if (p->loaded_decoder)
-            audio_decoder_close(p->loaded_decoder);
-        kfree(p);
+    player_worker_done(p);
+    thread_exit();
+}
+
+static void player_decode_worker(void *arg)
+{
+    media_player_t *p = arg;
+    while (!thread_cancelled() && !p->closing && p->decoder) {
+        uint32_t queued = p->pcm_queued;
+        if (PLAYER_PCM_FRAMES - queued < PLAYER_DECODE_FRAMES) {
+            thread_yield();
+            continue;
+        }
+        size_t count = MIN((uint32_t)PLAYER_DECODE_FRAMES,
+                           PLAYER_PCM_FRAMES - p->pcm_write);
+        size_t n = audio_decoder_read(p->decoder,
+                                      p->pcm + p->pcm_write * 2, count);
+        if (!n)
+            break;
+        bool saved = irq_save();
+        p->pcm_write = (p->pcm_write + (uint32_t)n) % PLAYER_PCM_FRAMES;
+        p->pcm_queued += (uint32_t)n;
+        irq_restore(saved);
     }
+    p->decode_done = true;
+    player_worker_done(p);
     thread_exit();
 }
 
 static void player_playback_worker(void *arg)
 {
     media_player_t *p = arg;
-    int16_t buffer[512 * 2];
-    while (!thread_cancelled() && !p->closing && p->decoder) {
-        size_t capacity = audio_stream_capacity_frames();
-        if (audio_stream_queued_frames() + 512 > capacity) {
+    bool prebuffered = false;
+    while (!thread_cancelled() && !p->closing) {
+        uint32_t queued = p->pcm_queued;
+        if (!prebuffered) {
+            if (queued < PLAYER_PREBUFFER_FRAMES && !p->decode_done) {
+                thread_yield();
+                continue;
+            }
+            prebuffered = true;
+        }
+        if (!queued) {
+            if (p->decode_done)
+                break;
+            thread_yield();
+            continue;
+        }
+        size_t count = MIN((uint32_t)PLAYER_DECODE_FRAMES, queued);
+        count = MIN(count, PLAYER_PCM_FRAMES - p->pcm_read);
+        if (audio_stream_queued_frames() + count >
+            audio_stream_capacity_frames()) {
             audio_poll();
             thread_yield();
             continue;
         }
-        size_t n = audio_decoder_read(p->decoder, buffer, 512);
-        if (!n) {
-            audio_stream_drain();
-            while (audio_stream_queued_frames() && !thread_cancelled() &&
-                   !p->closing) {
-                audio_poll();
-                thread_yield();
-            }
-            p->eof = !thread_cancelled() && !p->closing;
-            break;
-        }
-        size_t written = audio_stream_write(buffer, n);
+        size_t written = audio_stream_write(p->pcm + p->pcm_read * 2, count);
+        if (!written)
+            continue;
+        bool saved = irq_save();
+        p->pcm_read = (p->pcm_read + (uint32_t)written) % PLAYER_PCM_FRAMES;
+        p->pcm_queued -= (uint32_t)written;
+        irq_restore(saved);
         p->decoded += written;
-        if (!written) {
+    }
+    if (!thread_cancelled() && !p->closing && p->decode_done) {
+        audio_stream_drain();
+        while (audio_stream_queued_frames() && !thread_cancelled() &&
+               !p->closing) {
             audio_poll();
             thread_yield();
         }
+        p->eof = !thread_cancelled() && !p->closing;
     }
-    if (p->closing) {
-        if (p->decoder) audio_decoder_close(p->decoder);
-        audio_stream_stop();
-        kfree(p);
-    }
+    player_worker_done(p);
     thread_exit();
 }
 
 static bool player_load(media_player_t *p, size_t index)
 {
-    if (index >= p->count || p->loader || p->playback) return false;
-    if (p->loader) return false;
+    if (index >= p->count || p->loader || p->decode_worker || p->playback)
+        return false;
     fs_node_t *node = NULL;
     if (fs_resolve(fs_root(), p->tracks[index].path, &node) != FS_OK)
         return false;
@@ -140,6 +211,7 @@ static bool player_load(media_player_t *p, size_t index)
     p->loaded_codec = NULL;
     p->loaded_total = 0;
     p->load_ok = false;
+    p->decode_done = false;
     p->eof = false;
     p->message[0] = '\0';
     p->state = PLAYER_LOADING;
@@ -149,12 +221,13 @@ static bool player_load(media_player_t *p, size_t index)
         p->state = PLAYER_ERROR;
         return false;
     }
+    p->workers++;
     return true;
 }
 
 static void player_next(media_player_t *p)
 {
-    if (p->loader || p->playback)
+    if (p->loader || p->decode_worker || p->playback)
         return;
     if (p->count && !player_load(p, (p->current + 1) % p->count))
         p->state = PLAYER_ERROR;
@@ -178,48 +251,31 @@ static void player_on_open(window_t *win, const char *arg)
 static void player_on_close(window_t *win)
 {
     media_player_t *p = win->priv;
-    if (p) {
-        if (p->loader) {
-            if (thread_state(p->loader) == THREAD_DEAD) {
-                thread_join(p->loader);
-                p->loader = NULL;
-                if (p->loaded_decoder)
-                    audio_decoder_close(p->loaded_decoder);
-                player_stop_decoder(p);
-                kfree(p);
-                win->priv = NULL;
-                return;
-            } else {
-                p->closing = true;
-                thread_cancel(p->loader);
-                thread_detach(p->loader);
-                audio_stream_stop();
-                win->priv = NULL;
-                return;
-            }
-        }
-        if (p->playback) {
-            if (thread_state(p->playback) == THREAD_DEAD) {
-                thread_join(p->playback);
-                p->playback = NULL;
-                player_stop_decoder(p);
-                kfree(p);
-                win->priv = NULL;
-                return;
-            }
-            p->closing = true;
-            thread_cancel(p->playback);
-            thread_detach(p->playback);
-            audio_stream_stop();
-            win->priv = NULL;
-            return;
-        }
-        if (p->loaded_decoder)
-            audio_decoder_close(p->loaded_decoder);
-        player_stop_decoder(p);
-        kfree(p);
-    }
     win->priv = NULL;
+    if (!p)
+        return;
+
+    bool saved = irq_save();
+    p->workers++;
+    p->closing = true;
+    irq_restore(saved);
+    audio_stream_stop();
+    kernel_thread_t **threads[] = {
+        &p->loader, &p->decode_worker, &p->playback,
+    };
+    for (size_t i = 0; i < ARRAY_SIZE(threads); i++) {
+        kernel_thread_t *thread = *threads[i];
+        if (!thread)
+            continue;
+        if (thread_state(thread) == THREAD_DEAD)
+            thread_join(thread);
+        else {
+            thread_cancel(thread);
+            thread_detach(thread);
+        }
+        *threads[i] = NULL;
+    }
+    player_worker_done(p);
 }
 
 static const char *state_name(player_state_t state)
@@ -307,7 +363,10 @@ static bool player_on_mouse(window_t *win, const mouse_event_t *ev, int x, int y
         } else if (x < 220) {
             audio_stream_stop();
             p->state = PLAYER_STOPPED;
-            if (!p->playback) player_stop_decoder(p);
+            if (p->decode_worker) thread_cancel(p->decode_worker);
+            if (p->playback) thread_cancel(p->playback);
+            if (!p->decode_worker && !p->playback)
+                player_stop_decoder(p);
         }
         else if (p->count) player_next(p);
         wm_invalidate(win); return true;
@@ -323,13 +382,22 @@ static bool player_on_mouse(window_t *win, const mouse_event_t *ev, int x, int y
 static bool player_on_tick(window_t *win)
 {
     media_player_t *p = win->priv;
+    if (p && p->decode_worker &&
+        thread_state(p->decode_worker) == THREAD_DEAD) {
+        thread_join(p->decode_worker);
+        p->decode_worker = NULL;
+    }
     if (p && p->playback && thread_state(p->playback) == THREAD_DEAD) {
         thread_join(p->playback);
         p->playback = NULL;
+    }
+    if (p && !p->decode_worker && !p->playback && p->decoder) {
         if (p->eof && p->state == PLAYER_PLAYING) {
             player_stop_decoder(p);
             player_next(p);
         } else if (p->state == PLAYER_STOPPED) {
+            player_stop_decoder(p);
+        } else if (p->state == PLAYER_ERROR) {
             player_stop_decoder(p);
         }
         wm_invalidate(win);
@@ -362,6 +430,16 @@ static bool player_on_tick(window_t *win)
         p->total = p->loaded_total;
         p->loaded_decoder = NULL;
         p->loaded_codec = NULL;
+        p->pcm = kmalloc(PLAYER_PCM_FRAMES * 2u * sizeof(*p->pcm));
+        if (!p->pcm) {
+            strlcpy(p->message, "Unable to allocate audio buffer",
+                    sizeof(p->message));
+            player_stop_decoder(p);
+            p->state = PLAYER_ERROR;
+            return true;
+        }
+        p->pcm_read = p->pcm_write = p->pcm_queued = 0;
+        p->decode_done = false;
         if (!audio_stream_start(&p->format)) {
             strlcpy(p->message, "AC'97 audio output is unavailable",
                     sizeof(p->message));
@@ -370,14 +448,27 @@ static bool player_on_tick(window_t *win)
             p->state = PLAYER_ERROR;
             return true;
         }
-        p->state = PLAYER_PLAYING;
+        p->decode_worker = thread_spawn("audio-decode",
+                                        player_decode_worker, p);
+        if (!p->decode_worker) {
+            strlcpy(p->message, "Unable to start audio decoder",
+                    sizeof(p->message));
+            player_stop_decoder(p);
+            p->state = PLAYER_ERROR;
+            return true;
+        }
+        p->workers++;
         p->playback = thread_spawn("audio-play", player_playback_worker, p);
         if (!p->playback) {
             strlcpy(p->message, "Unable to start audio playback",
                     sizeof(p->message));
-            player_stop_decoder(p);
+            thread_cancel(p->decode_worker);
+            audio_stream_stop();
             p->state = PLAYER_ERROR;
+            return true;
         }
+        p->workers++;
+        p->state = PLAYER_PLAYING;
         return true;
     }
     if (!p || p->state != PLAYER_PLAYING || !p->decoder) return false;
