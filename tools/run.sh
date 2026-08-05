@@ -15,11 +15,15 @@ cd "$(dirname "$0")/.."
 ISO=${ISO:-build/tinos.iso}
 MEM=${MEM:-256}
 QEMU=${QEMU:-qemu-system-i386}
+USB_IMAGE=${USB_IMAGE:-build/tinos-usb.img}
+USB_SOURCE=${USB_SOURCE:-build/usb-root}
 
 if [[ ! -f $ISO ]]; then
     echo "$ISO not found - run 'make' first" >&2
     exit 1
 fi
+
+USB_IMAGE="$USB_IMAGE" USB_SOURCE="$USB_SOURCE" tools/make_usb_image.sh
 
 # -vga std selects the Bochs-compatible adapter whose DISPI registers the
 # TinOS graphics driver programs.  -rtc base=localtime makes the taskbar
@@ -33,6 +37,9 @@ args=(
     -name "TinOS"
     -netdev user,id=tinosnet
     -device e1000,netdev=tinosnet
+    -drive "file=$USB_IMAGE,if=none,id=tinos-usb-disk,format=raw"
+    -device piix3-usb-uhci,id=tinos-usb
+    -device usb-storage,bus=tinos-usb.0,drive=tinos-usb-disk
 )
 
 display="default"

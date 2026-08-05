@@ -5,6 +5,7 @@
 #  make run        build and launch TinOS in QEMU (graphical window)
 #  make run-serial launch with the kernel log multiplexed onto stdout
 #  make runvnc     launch QEMU serving the display over VNC (127.0.0.1:0)
+#  make usb-image  create/reuse the FAT32 USB development image
 #  make test       build and run the host-side unit tests
 #  make check      host unit tests + automated QEMU boot/GUI test
 #  make clean      remove build products
@@ -56,7 +57,7 @@ HOST_SAN := $(shell echo 'int main(void){return 0;}' | \
 HOST_CFLAGS := -std=gnu11 -g -O1 -Wall -Wextra -Wno-unused-parameter \
                -DTINOS_HOST=1 -Ikernel/include -Itests/host $(HOST_SAN)
 
-.PHONY: all iso kernel run run-serial run-headless runvnc test check verify-reproducible clean distclean
+.PHONY: all iso kernel run run-serial run-headless runvnc usb-image test check verify-reproducible clean distclean
 
 all: $(ISO)
 
@@ -133,6 +134,9 @@ run-headless: $(ISO)
 # Serve the display over VNC instead of opening a local window (VNC := address)
 runvnc: $(ISO)
 	tools/run.sh --vnc
+
+usb-image:
+	tools/make_usb_image.sh
 
 # --- tests ------------------------------------------------------------
 $(HOST_BIN): $(HOST_SRCS) $(wildcard kernel/include/tinos/*.h) $(wildcard tests/host/*.h)
