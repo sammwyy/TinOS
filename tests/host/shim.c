@@ -9,6 +9,7 @@
 
 #include <tinos/fs.h>
 #include <tinos/heap.h>
+#include <tinos/net.h>
 #include <tinos/sh.h>
 
 /* --- heap ---------------------------------------------------------- */
@@ -100,4 +101,31 @@ void sys_info_get(sys_info_t *out)
     out->heap_used     = 1024 * 1024;
     out->screen_width  = 1024;
     out->screen_height = 768;
+}
+
+/* Networking is not part of the portable host test binary. */
+bool net_available(void) { return false; }
+const net_config_t *net_config(void)
+{
+    static net_config_t config;
+    return &config;
+}
+void net_poll(void) {}
+bool net_init(void) { return false; }
+void net_format_address(uint32_t address, char *out, size_t size)
+{
+    snprintf(out, size, "%u.%u.%u.%u", (address >> 24) & 255,
+             (address >> 16) & 255, (address >> 8) & 255, address & 255);
+}
+bool net_parse_address(const char *text, uint32_t *out)
+{
+    (void)text; (void)out; return false;
+}
+bool net_ping(uint32_t address, uint32_t timeout_ms, uint32_t *elapsed_ms)
+{
+    (void)address; (void)timeout_ms; (void)elapsed_ms; return false;
+}
+bool net_dns_lookup(const char *name, uint32_t *address, uint32_t timeout_ms)
+{
+    (void)name; (void)address; (void)timeout_ms; return false;
 }

@@ -18,6 +18,7 @@
 #include <tinos/input.h>
 #include <tinos/io.h>
 #include <tinos/kernel.h>
+#include <tinos/net.h>
 #include <tinos/printf.h>
 #include <tinos/sh.h>
 #include <tinos/string.h>
@@ -990,6 +991,7 @@ void desktop_run(void)
         async_run(8);
         thread_run(4);
         ktimer_poll(4);
+        net_poll();
 
         /* --- keyboard --- */
         key_event_t key;

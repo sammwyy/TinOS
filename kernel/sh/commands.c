@@ -9,6 +9,7 @@
 #include <tinos/heap.h>
 #include <tinos/path.h>
 #include <tinos/printf.h>
+#include <tinos/net.h>
 #include <tinos/regex.h>
 #include <tinos/sh.h>
 #include <tinos/string.h>
@@ -1123,6 +1124,45 @@ static int cmd_shutdown(shell_t *sh, int argc, char **argv, stream_t *in,
 /* Table                                                               */
 /* ------------------------------------------------------------------ */
 
+static int cmd_ping(shell_t *sh, int argc, char **argv, stream_t *in,
+                    stream_t *out, stream_t *err)
+{
+    if (argc != 2) { stream_puts(err, "usage: ping <address|hostname>\n"); return 2; }
+    if (!net_available() || !net_config()->configured) { stream_puts(err, "ping: network is not configured\n"); return 1; }
+    uint32_t address;
+    if (!net_parse_address(argv[1], &address) && !net_dns_lookup(argv[1], &address, 3000)) { stream_printf(err, "ping: cannot resolve %s\n", argv[1]); return 1; }
+    uint32_t elapsed;
+    if (!net_ping(address, 1000, &elapsed)) { stream_printf(err, "ping: timeout waiting for %s\n", argv[1]); return 1; }
+    char formatted[20]; net_format_address(address, formatted, sizeof(formatted));
+    stream_printf(out, "reply from %s (%s): time=%u ms\n", argv[1], formatted, elapsed);
+    return 0;
+}
+
+static int cmd_nslookup(shell_t *sh, int argc, char **argv, stream_t *in,
+                        stream_t *out, stream_t *err)
+{
+    if (argc != 2) { stream_puts(err, "usage: nslookup <hostname>\n"); return 2; }
+    if (!net_available() || !net_config()->configured) { stream_puts(err, "nslookup: network is not configured\n"); return 1; }
+    uint32_t address;
+    if (!net_dns_lookup(argv[1], &address, 3000)) { stream_printf(err, "nslookup: %s: no address found\n", argv[1]); return 1; }
+    char formatted[20]; net_format_address(address, formatted, sizeof(formatted));
+    stream_printf(out, "Name: %s\nAddress: %s\n", argv[1], formatted);
+    return 0;
+}
+
+static int cmd_ifconfig(shell_t *sh, int argc, char **argv, stream_t *in,
+                        stream_t *out, stream_t *err)
+{
+    if (argc != 1) { stream_puts(err, "usage: ifconfig\n"); return 2; }
+    if (!net_available()) { stream_puts(out, "network: unavailable\n"); return 1; }
+    const net_config_t *c = net_config();
+    char ip[20], mask[20], gateway[20], dns[20];
+    net_format_address(c->address, ip, sizeof(ip)); net_format_address(c->netmask, mask, sizeof(mask));
+    net_format_address(c->gateway, gateway, sizeof(gateway)); net_format_address(c->dns, dns, sizeof(dns));
+    stream_printf(out, "eth0: %s\n  ip %s\n  mask %s\n  gateway %s\n  dns %s\n", c->configured ? "up" : "down", ip, mask, gateway, dns);
+    return c->configured ? 0 : 1;
+}
+
 static const sh_command_def_t commands[] = {
     { "about",    "about",
       "show the About window",                       cmd_about },
@@ -1152,6 +1192,8 @@ static const sh_command_def_t commands[] = {
       "search for text in files or piped input",     cmd_grep },
     { "head",     "head [-n count] [file...]",
       "show the first lines of the input",           cmd_head },
+    { "ifconfig", "ifconfig",
+      "show network interface configuration",       cmd_ifconfig },
     { "help",     "help [command]",
       "list the built-in commands",                  cmd_help },
     { "history",  "history",
@@ -1162,6 +1204,10 @@ static const sh_command_def_t commands[] = {
       "create directories",                          cmd_mkdir },
     { "mv",       "mv source... destination",
       "move or rename files and directories",        cmd_mv },
+    { "nslookup", "nslookup <hostname>",
+      "resolve a DNS A record",                     cmd_nslookup },
+    { "ping",     "ping <address|hostname>",
+      "send an ICMP echo request",                   cmd_ping },
     { "pwd",      "pwd",
       "print the working directory",                 cmd_pwd },
     { "reboot",   "reboot",

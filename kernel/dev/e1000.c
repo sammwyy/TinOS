@@ -25,23 +25,24 @@
 #define REG_TIPG  0x0410
 #define REG_RAL   0x540
 #define REG_RAH   0x544
-#define REG_RDBAL 0x280
-#define REG_RDBAH 0x284
-#define REG_RDLEN 0x288
+#define REG_RDBAL 0x2800
+#define REG_RDBAH 0x2804
+#define REG_RDLEN 0x2808
 #define REG_RDH   0x2810
 #define REG_RDT   0x2818
-#define REG_TDBAL 0x380
-#define REG_TDBAH 0x384
-#define REG_TDLEN 0x388
+#define REG_TDBAL 0x3800
+#define REG_TDBAH 0x3804
+#define REG_TDLEN 0x3808
 #define REG_TDH   0x3810
 #define REG_TDT   0x3818
 
 #define CTRL_RST  0x04000000u
+#define CTRL_SLU  0x00000040u
 #define RCTL_EN   0x00000002u
 #define RCTL_SBP  0x00000004u
-#define RCTL_UPE  0x00000010u
-#define RCTL_MPE  0x00000020u
-#define RCTL_BAM  0x00000004u
+#define RCTL_UPE  0x00000008u
+#define RCTL_MPE  0x00000010u
+#define RCTL_BAM  0x00008000u
 #define RCTL_BSIZE_2048 0
 #define RCTL_SECRC 0x04000000u
 #define TCTL_EN   0x00000002u
@@ -143,6 +144,7 @@ static bool e1000_probe(kernel_device_t *device)
         if (!(reg_read(REG_CTRL) & CTRL_RST))
             break;
     reg_write(REG_IMC, 0xFFFFFFFFu);
+    reg_write(REG_CTRL, reg_read(REG_CTRL) | CTRL_SLU);
 
     uint32_t ral = reg_read(REG_RAL);
     uint32_t rah = reg_read(REG_RAH);
@@ -164,6 +166,14 @@ static bool e1000_probe(kernel_device_t *device)
             return false;
         }
     }
+
+    /* Reset clears the receive address table; restore the EEPROM MAC. */
+    reg_write(REG_RAL, (uint32_t)nic.mac[0] |
+                       ((uint32_t)nic.mac[1] << 8) |
+                       ((uint32_t)nic.mac[2] << 16) |
+                       ((uint32_t)nic.mac[3] << 24));
+    reg_write(REG_RAH, (uint32_t)nic.mac[4] |
+                       ((uint32_t)nic.mac[5] << 8) | 0x80000000u);
 
     if (!dma_alloc(&nic.rx_desc_dma, sizeof(e1000_rx_desc_t) * RX_COUNT) ||
         !dma_alloc(&nic.tx_desc_dma, sizeof(e1000_tx_desc_t) * TX_COUNT)) {
@@ -204,7 +214,8 @@ static bool e1000_probe(kernel_device_t *device)
     reg_write(REG_TDT, 0);
     reg_write(REG_RCTL, RCTL_EN | RCTL_BAM | RCTL_SECRC |
                          RCTL_BSIZE_2048);
-    reg_write(REG_TCTL, TCTL_EN | TCTL_PSP | (0x10u << 4) | (0x40u << 12));
+    reg_write(REG_TCTL, TCTL_EN | TCTL_PSP | (0x10u << 4) |
+                         (0x40u << 12) | 0x01000000u);
     reg_write(REG_TIPG, 10 | (8u << 10) | (6u << 20));
     nic.rx_next = 0;
     nic.tx_next = 0;
@@ -245,18 +256,15 @@ bool e1000_send(const void *data, size_t length)
         return false;
     uint16_t index = nic.tx_next;
     e1000_tx_desc_t *desc = &nic.tx_desc[index];
-    if (!(desc->status & TX_STATUS_DD))
-        return false;
     memcpy(nic.tx_buffers[index].virt, data, length);
     desc->length = (uint16_t)length;
     desc->command = TX_CMD_EOP | TX_CMD_IFCS | TX_CMD_RS;
     desc->status = 0;
     nic.tx_next = (uint16_t)((index + 1) % TX_COUNT);
     reg_write(REG_TDT, nic.tx_next);
-    for (volatile uint32_t i = 0; i < 10000; i++)
-        if (desc->status & TX_STATUS_DD)
-            return true;
-    return false;
+    /* Some QEMU e1000 revisions kick the queue on a TCTL write as well. */
+    reg_write(REG_TCTL, reg_read(REG_TCTL));
+    return true;
 }
 
 size_t e1000_receive(void *data, size_t capacity)
@@ -264,7 +272,8 @@ size_t e1000_receive(void *data, size_t capacity)
     if (!nic.ready || !data || capacity == 0)
         return 0;
     e1000_rx_desc_t *desc = &nic.rx_desc[nic.rx_next];
-    if (!(desc->status & 1))
+    uint8_t status = *(volatile uint8_t *)&desc->status;
+    if (!(status & 1))
         return 0;
     size_t length = MIN((size_t)desc->length, capacity);
     memcpy(data, nic.rx_buffers[nic.rx_next].virt, length);
