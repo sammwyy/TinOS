@@ -20,6 +20,7 @@ static size_t live_allocations;
 
 bool audio_available(void) { return false; }
 bool audio_play_doremi(void) { return false; }
+size_t audio_stream_capacity_frames(void) { return 0; }
 
 void speaker_beep(uint32_t frequency, uint32_t duration_ms)
 {

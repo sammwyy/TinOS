@@ -28,7 +28,7 @@
 
 #define AC97_RATE        22050u
 #define AC97_BUFFER_FRAMES 2048u
-#define AC97_BUFFER_COUNT 4u
+#define AC97_BUFFER_COUNT 8u
 
 typedef struct {
     uint32_t address;
@@ -213,6 +213,10 @@ void audio_stream_stop(void)
 }
 
 size_t audio_stream_queued_frames(void) { return queued_frames; }
+size_t audio_stream_capacity_frames(void)
+{
+    return AC97_BUFFER_FRAMES * AC97_BUFFER_COUNT;
+}
 uint64_t audio_stream_position(void) { return played_frames; }
 
 bool audio_play_doremi(void)

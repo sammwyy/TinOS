@@ -16,6 +16,7 @@ size_t audio_stream_write(const int16_t *samples, size_t frames);
 void audio_stream_pause(bool paused);
 void audio_stream_stop(void);
 size_t audio_stream_queued_frames(void);
+size_t audio_stream_capacity_frames(void);
 uint64_t audio_stream_position(void);
 void audio_poll(void);
 void audio_driver_register(void);

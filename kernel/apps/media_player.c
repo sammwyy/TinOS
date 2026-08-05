@@ -95,7 +95,8 @@ static void player_playback_worker(void *arg)
     media_player_t *p = arg;
     int16_t buffer[512 * 2];
     while (!thread_cancelled() && !p->closing && p->decoder) {
-        if (audio_stream_queued_frames() > 6144) {
+        size_t capacity = audio_stream_capacity_frames();
+        if (audio_stream_queued_frames() + 512 > capacity) {
             audio_poll();
             thread_yield();
             continue;
