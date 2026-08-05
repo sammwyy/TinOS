@@ -92,20 +92,14 @@ static audio_decoder_t *wav_open(const uint8_t *data, size_t size,
 }
 
 static audio_decoder_t *wav_open_file(const char *path, const fs_node_t *file,
+                                      const uint8_t *probe, size_t probe_size,
                                       audio_format_t *format,
                                       uint64_t *total_frames)
 {
     (void)path;
-    size_t size = file->size < 65536 ? file->size : 65536;
-    uint8_t *probe = kmalloc(size);
-    if (!probe || !fs_read_at(file, 0, probe, size)) {
-        kfree(probe);
-        return NULL;
-    }
     size_t data_offset = 0;
     wav_decoder_t *decoder = (wav_decoder_t *)wav_open_impl(
-        probe, size, format, total_frames, &data_offset, true);
-    kfree(probe);
+        probe, probe_size, format, total_frames, &data_offset, true);
     if (!decoder) return NULL;
     if (data_offset > file->size || decoder->bytes > file->size - data_offset) {
         kfree(decoder);
@@ -116,6 +110,12 @@ static audio_decoder_t *wav_open_file(const char *path, const fs_node_t *file,
     decoder->data_offset = data_offset;
     decoder->chunk = kmalloc(32768);
     if (!decoder->chunk) { kfree(decoder); return NULL; }
+    size_t available = probe_size - data_offset;
+    size_t seed = decoder->bytes < available ? decoder->bytes : available;
+    if (seed > 32768)
+        seed = 32768;
+    memcpy(decoder->chunk, probe + data_offset, seed);
+    decoder->chunk_size = seed;
     return (audio_decoder_t *)decoder;
 }
 

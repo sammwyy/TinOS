@@ -48,6 +48,8 @@ static audio_decoder_t *vorbis_open(const uint8_t *data, size_t size,
 
 static audio_decoder_t *vorbis_open_file(const char *path,
                                          const fs_node_t *file,
+                                         const uint8_t *probe,
+                                         size_t probe_size,
                                          audio_format_t *format,
                                          uint64_t *total_frames)
 {
@@ -59,7 +61,10 @@ static audio_decoder_t *vorbis_open_file(const char *path,
     if (!decoder->input) { kfree(decoder); return NULL; }
     size_t first = file->size < decoder->input_capacity ? file->size :
                    decoder->input_capacity;
-    if (!fs_read_at(file, 0, decoder->input, first)) {
+    size_t seed = first < probe_size ? first : probe_size;
+    memcpy(decoder->input, probe, seed);
+    if (seed < first && !fs_read_at(file, seed, decoder->input + seed,
+                                    first - seed)) {
         kfree(decoder->input); kfree(decoder); return NULL;
     }
     int consumed = 0, error = 0;
@@ -75,8 +80,9 @@ static audio_decoder_t *vorbis_open_file(const char *path,
         if (!grown) break;
         decoder->input = grown;
         decoder->input_capacity = next;
+        if (!fs_read_at(file, first, decoder->input + first, next - first))
+            break;
         first = next;
-        if (!fs_read_at(file, 0, decoder->input, first)) break;
         consumed = 0;
         error = 0;
     }

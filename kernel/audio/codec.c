@@ -68,7 +68,7 @@ audio_decoder_t *audio_decoder_open_file(const char *path,
         if (!codec->matches(path, probe, size))
             continue;
         audio_decoder_t *decoder = codec->open_file
-            ? codec->open_file(path, file, format, total_frames)
+            ? codec->open_file(path, file, probe, size, format, total_frames)
             : audio_decoder_open(path, fs_data(file), file->size,
                                  format, total_frames, codec_out);
         kfree(probe);

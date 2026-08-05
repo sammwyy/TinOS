@@ -12,6 +12,7 @@ typedef struct audio_codec {
     audio_decoder_t *(*open)(const uint8_t *data, size_t size,
                              audio_format_t *format, uint64_t *total_frames);
     audio_decoder_t *(*open_file)(const char *path, const fs_node_t *file,
+                                  const uint8_t *probe, size_t probe_size,
                                   audio_format_t *format,
                                   uint64_t *total_frames);
     size_t (*read)(audio_decoder_t *decoder, int16_t *stereo, size_t frames);

@@ -602,6 +602,18 @@ static void test_robustness(void)
     fs_shutdown();
 }
 
+static uint8_t streamed_wav[70044];
+static size_t streamed_wav_reads;
+
+static bool read_streamed_wav(const fs_node_t *node, size_t offset,
+                              void *buffer, size_t length)
+{
+    (void)node;
+    streamed_wav_reads++;
+    memcpy(buffer, streamed_wav + offset, length);
+    return true;
+}
+
 static void test_audio_codecs(void)
 {
     SUITE("audio codecs");
@@ -629,6 +641,37 @@ static void test_audio_codecs(void)
     audio_decoder_close(decoder);
     CHECK(audio_decoder_open("bad.wav", bad, sizeof(bad), &format, &frames,
                              &codec) == NULL);
+
+    memset(streamed_wav, 0, sizeof(streamed_wav));
+    memcpy(streamed_wav, "RIFF", 4);
+    uint32_t riff_size = sizeof(streamed_wav) - 8;
+    memcpy(streamed_wav + 4, &riff_size, sizeof(riff_size));
+    memcpy(streamed_wav + 8, "WAVEfmt ", 8);
+    streamed_wav[16] = 16;
+    streamed_wav[20] = 1;
+    streamed_wav[22] = 2;
+    streamed_wav[24] = 0x44; streamed_wav[25] = 0xac;
+    streamed_wav[28] = 0x10; streamed_wav[29] = 0xb1;
+    streamed_wav[30] = 2;
+    streamed_wav[32] = 4;
+    streamed_wav[34] = 16;
+    memcpy(streamed_wav + 36, "data", 4);
+    uint32_t pcm_size = sizeof(streamed_wav) - 44;
+    memcpy(streamed_wav + 40, &pcm_size, sizeof(pcm_size));
+    fs_node_t file = { .type = FS_FILE, .size = sizeof(streamed_wav),
+                       .read_at = read_streamed_wav };
+    streamed_wav_reads = 0;
+    decoder = audio_decoder_open_file("stream.wav", &file, &format, &frames,
+                                      &codec);
+    CHECK(decoder != NULL && streamed_wav_reads == 1);
+    int16_t *stream_samples = malloc(8193 * 2 * sizeof(*stream_samples));
+    CHECK(stream_samples != NULL);
+    CHECK(audio_decoder_read(decoder, stream_samples, 8192) == 8192);
+    CHECK(streamed_wav_reads == 1);
+    CHECK(audio_decoder_read(decoder, stream_samples, 1) == 1);
+    CHECK(streamed_wav_reads == 2);
+    free(stream_samples);
+    audio_decoder_close(decoder);
 }
 
 int main(void)
