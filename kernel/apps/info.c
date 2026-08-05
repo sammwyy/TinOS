@@ -280,6 +280,11 @@ static window_t *launch_network(const char *arg)
     return app_network_open(arg);
 }
 
+static window_t *launch_calculator(const char *arg)
+{
+    return app_calculator_open(arg);
+}
+
 static const app_entry_t registry[] = {
     { "File Explorer", "browse files", "Accessories", ICON_FOLDER,
       launch_explorer },
@@ -289,6 +294,8 @@ static const app_entry_t registry[] = {
       launch_image_viewer },
     { "Media Player", "play WAV and Ogg Vorbis audio", "Accessories", ICON_FILE,
       launch_media_player },
+    { "Calculator", "integer arithmetic", "Accessories", ICON_CHIP,
+      launch_calculator },
     { "Terminal", "command line", "System", ICON_TERMINAL,
       launch_terminal },
     { "System Information", "system details", "System", ICON_CHIP,

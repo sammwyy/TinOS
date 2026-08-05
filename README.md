@@ -160,6 +160,12 @@ resize them by dragging the grip in the bottom-right corner, press the
 minimise and close buttons in the title bar, and click taskbar buttons to
 raise or minimise a window.
 
+### Calculator
+
+The Calculator is available from Start > Accessories. It supports integer
+arithmetic with `+`, `-`, `*`, `/`, `%` and parentheses. Type expressions on
+the keyboard, press `Enter` or `=`, use `Backspace` to edit and `C` to clear.
+
 ### Terminal
 
 | Key | Action |

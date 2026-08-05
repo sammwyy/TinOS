@@ -192,6 +192,7 @@ window_t *app_explorer_open(const char *path);
 window_t *app_editor_open(const char *path);
 window_t *app_image_viewer_open(const char *path);
 window_t *app_media_player_open(const char *path);
+window_t *app_calculator_open(const char *arg);
 window_t *app_about_open(const char *arg);
 window_t *app_sysinfo_open(const char *arg);
 
