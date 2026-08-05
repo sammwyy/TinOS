@@ -9,6 +9,8 @@
 
 #include <tinos/arch.h>
 #include <tinos/async.h>
+#include <tinos/ata.h>
+#include <tinos/fat16.h>
 #include <tinos/console.h>
 #include <tinos/desktop.h>
 #include <tinos/driver.h>
@@ -198,9 +200,29 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
         boot_note("No PS/2 mouse detected - keyboard control only");
     pause_ms(BOOT_STEP_DELAY_MS);
 
+    /* --- storage -------------------------------------------------- */
+    size_t ata_disks = ata_pio_init();
+    boot_note("ATA PIO: %u disk(s) detected", (uint32_t)ata_disks);
+
     /* --- filesystem ----------------------------------------------- */
     fs_init();
     boot_step("In-memory filesystem mounted at /");
+    size_t mounted = 0;
+    for (size_t i = 0; i < ata_pio_count(); i++) {
+        block_device_t *device = ata_pio_device(i);
+        char mount_path[FS_PATH_MAX];
+        ksnprintf(mount_path, sizeof(mount_path), "/drive/disk%u",
+                  (uint32_t)mounted);
+        fs_node_t *mountpoint = NULL;
+        if (fs_mkdir(fs_root(), mount_path, &mountpoint) != FS_OK)
+            continue;
+        if (fat16_import(device, mountpoint)) {
+            klog("[fat ] mounted %s at %s\n", device->name, mount_path);
+            mounted++;
+        } else {
+            fs_remove(fs_root(), mount_path, true);
+        }
+    }
     boot_note("%u nodes in the initial tree", (uint32_t)fs_node_count());
     pause_ms(BOOT_STEP_DELAY_MS);
 

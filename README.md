@@ -239,9 +239,9 @@ TinOS uses one hierarchical namespace. The canonical top-level layout is:
 │   └── <app-name>/               # configuration owned by one app
 │       └── ...
 ├── dev/                          # device nodes exposed by drivers
-├── drive/                        # mounted storage devices
+├── drive/                        # mounted storage volumes
 │   └── <device-name>/            # for example, an attached disk or volume
-├── run/                          # volatile runtime state (future)
+├── run/                          # volatile runtime state
 │   └── ...
 ├── system/                       # immutable OS files
 │   ├── bin/                      # system utilities and core executables
@@ -342,16 +342,37 @@ allow `..` to escape the root. Applications should construct paths from the
 well-known directories above instead of hard-coding another private root.
 
 The current prototype creates the conventional directory tree in memory and
-initializes the default user as `sammy`. It still has no persistent storage,
-user database or permission enforcement; `/drive` and the protected mounts
-are reserved namespaces for future filesystem passes.
+initializes the default user as `sammy`. It still has no user database or
+permission enforcement. ATA disks with a supported filesystem are imported
+into `/drive`; unsupported or unformatted disks are ignored.
 
 Directories, regular files with real byte content, absolute and relative
 paths, `.` and `..`, creation, reading, writing, appending, copying (deep for
 directories), moving, renaming and deletion are supported. Files grow
-geometrically on the kernel heap. Nothing is written to disk yet: the tree
-lives for one boot session, so `/drive` is currently a reserved namespace
-rather than persistent storage.
+geometrically on the kernel heap. The base tree lives for one boot session;
+the current FAT16 importer is read-only from the VFS perspective.
+
+### Storage
+
+The first storage path is the legacy ATA/IDE PIO controller emulated by
+QEMU's `pc` machine. It uses polling and 28-bit LBA over 512-byte sectors, so
+it has no dependency on DMA, PCI or a particular filesystem. A raw FAT16 disk
+is imported at `/drive/disk0`, `/drive/disk1`, and so on.
+
+For example, a QEMU disk can be prepared and attached with:
+
+```sh
+qemu-img create -f raw build/disk.img 64M
+mkfs.fat -F 16 build/disk.img
+qemu-system-i386 -cdrom build/tinos.iso \
+                 -drive file=build/disk.img,format=raw,if=ide,index=1
+```
+
+The storage stack is layered: block devices provide sectors, partition
+readers describe ranges of sectors, filesystems interpret those ranges, and
+the VFS exposes mounted trees. MBR partition discovery and FAT32 are the next
+storage layer; USB mass storage and VirtIO block devices can then reuse the
+same filesystem code.
 
 Every application holds *paths*, not node pointers, and re-resolves them, so
 deleting a directory from one window cannot leave another window pointing at
