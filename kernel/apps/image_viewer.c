@@ -14,6 +14,8 @@ typedef struct {
     window_t *window;
 } image_viewer_t;
 
+#define VIEWER_FOOTER_H  28
+
 static void image_extension(const char *path, char *out, size_t size)
 {
     const char *name = strrchr(path, '/');
@@ -91,17 +93,20 @@ static void image_viewer_on_close(window_t *win)
 static void image_viewer_on_draw(window_t *win, rect_t client)
 {
     image_viewer_t *viewer = win->priv;
-    gfx_fill_rect(client.x, client.y, client.w, client.h, RGB(0x24, 0x28, 0x31));
+    gfx_fill_rect(client.x, client.y, client.w, client.h, RGB(0x20, 0x25, 0x30));
     if (!viewer || !viewer->loaded) {
-        if (viewer)
-            widget_text_centered(client, viewer->request ? "Loading..." :
+        if (viewer) {
+            rect_t empty = rect_make(client.x, client.y,
+                                     client.w, client.h - VIEWER_FOOTER_H);
+            widget_text_centered(empty, viewer->request ? "Loading..." :
                                 viewer->error, viewer->request ? COLOR_TEXT :
                                 COLOR_DANGER);
+        }
         return;
     }
 
-    int max_w = client.w - 20;
-    int max_h = client.h - 42;
+    int max_w = client.w - 32;
+    int max_h = client.h - VIEWER_FOOTER_H - 20;
     int draw_w = max_w;
     int draw_h = (int)((uint64_t)max_w * viewer->image.height /
                        viewer->image.width);
@@ -110,23 +115,31 @@ static void image_viewer_on_draw(window_t *win, rect_t client)
         draw_w = (int)((uint64_t)max_h * viewer->image.width /
                        viewer->image.height);
     }
-    rect_t image = rect_make(client.x + (client.w - draw_w) / 2,
-                             client.y + (max_h - draw_h) / 2,
+    rect_t image_area = rect_make(client.x + 16, client.y + 8,
+                                  max_w, max_h);
+    rect_t image = rect_make(image_area.x + (image_area.w - draw_w) / 2,
+                             image_area.y + (image_area.h - draw_h) / 2,
                              draw_w, draw_h);
+    gfx_fill_rect(image_area.x, image_area.y, image_area.w, image_area.h,
+                  RGB(0x20, 0x25, 0x30));
     for (int y = image.y; y < image.y + image.h; y += 16)
         for (int x = image.x; x < image.x + image.w; x += 16)
             gfx_fill_rect(x, y, MIN(16, image.x + image.w - x),
                           MIN(16, image.y + image.h - y),
                           ((x / 16 + y / 16) & 1) ? RGB(0x9a, 0x9a, 0xa2)
                                                   : RGB(0xe1, 0xe1, 0xe5));
+    gfx_rect(image.x - 1, image.y - 1, image.w + 2, image.h + 2,
+             RGB(0x4c, 0x5b, 0x72));
     gfx_blit_image(image, viewer->image.pixels, (int)viewer->image.width,
                    (int)viewer->image.height);
 
     char info[64];
     ksnprintf(info, sizeof(info), "%u x %u", viewer->image.width,
-              viewer->image.height);
-    gfx_text(client.x + 8, client.y + client.h - FONT_H - 6, info,
+               viewer->image.height);
+    gfx_text(client.x + 12, client.y + client.h - FONT_H - 7, info,
              RGB(0xe0, 0xe3, 0xeb));
+    gfx_text(client.x + client.w - 104, client.y + client.h - FONT_H - 7,
+             "Fit to window", COLOR_TEXT_DIM);
 }
 
 static bool image_viewer_on_key(window_t *win, const key_event_t *event)
@@ -148,5 +161,5 @@ static const app_class_t image_viewer_class = {
 
 window_t *app_image_viewer_open(const char *path)
 {
-    return wm_open(&image_viewer_class, 700, 500, "Image Viewer", path);
+    return wm_open(&image_viewer_class, 760, 540, "Image Viewer", path);
 }

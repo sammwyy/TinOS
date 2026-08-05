@@ -142,6 +142,9 @@ typedef enum {
     ICON_NEW,
     ICON_UNDO,
     ICON_REDO,
+    ICON_PLAY,
+    ICON_PAUSE,
+    ICON_VOLUME,
 } icon_t;
 
 void widget_icon(int x, int y, int size, icon_t icon);
@@ -149,6 +152,10 @@ void widget_icon(int x, int y, int size, icon_t icon);
  * Returns false when no such resource exists. */
 bool widget_icon_name(int x, int y, int size, const char *name);
 void widget_button(rect_t r, const char *label, bool hot, bool pressed);
+void widget_button_icon(rect_t r, icon_t icon, const char *label, bool hot,
+                        bool pressed);
+void widget_slider(rect_t r, int value, int maximum);
+int widget_slider_value(rect_t r, int x, int maximum);
 void widget_panel(rect_t r, color_t fill, color_t border);
 void widget_text_centered(rect_t r, const char *text, color_t color);
 void widget_input_frame(rect_t r);

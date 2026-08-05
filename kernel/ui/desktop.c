@@ -306,6 +306,11 @@ static icon_t window_icon(const window_t *win)
         return ICON_EDITOR;
     if (strcmp(win->cls->name, "sysinfo") == 0)
         return ICON_CHIP;
+    if (strcmp(win->cls->name, "mplayer") == 0 ||
+        strcmp(win->cls->name, "image-viewer") == 0)
+        return ICON_FILE;
+    if (strcmp(win->cls->name, "control-panel") == 0)
+        return ICON_CHIP;
     return ICON_INFO;
 }
 
@@ -954,6 +959,14 @@ static bool rects_overlap(rect_t a, rect_t b)
     return !rect_empty(rect_intersect(a, b));
 }
 
+static rect_t rect_union_local(rect_t a, rect_t b)
+{
+    int x0 = MIN(a.x, b.x), y0 = MIN(a.y, b.y);
+    int x1 = MAX(a.x + a.w, b.x + b.w);
+    int y1 = MAX(a.y + a.h, b.y + b.h);
+    return rect_make(x0, y0, x1 - x0, y1 - y0);
+}
+
 static void composite(bool full)
 {
     if (full) {
@@ -967,58 +980,40 @@ static void composite(bool full)
         return;
     }
 
-    /* Repair only the rectangles a moved/closed/minimised window uncovered,
-     * instead of repainting the whole desktop. */
+    /* Render invalidated windows independently, then compose every cached
+     * surface bottom-to-top.  A lower window can never paint over a higher
+     * one just because it happened to be invalidated later. */
     rect_t exposed[16];
     size_t nexposed = wm_take_exposed(exposed, ARRAY_SIZE(exposed));
+    rect_t repaint = rect_make(0, 0, 0, 0);
     for (size_t i = 0; i < nexposed; i++) {
-        gfx_clip_push(exposed[i]);
-        draw_wallpaper();
-        gfx_clip_pop();
+        repaint = rect_empty(repaint) ? exposed[i] : rect_union_local(repaint, exposed[i]);
         if (rects_overlap(taskbar_rect(), exposed[i]))
             taskbar_dirty = true;
         if (menu_open && rects_overlap(menu_frame_rect(), exposed[i]))
             menu_dirty = true;
     }
+    for (window_t *w = wm_bottom(); w; w = w->above)
+        if (!w->minimized && w->needs_redraw)
+            repaint = rect_empty(repaint) ? w->frame : rect_union_local(repaint, w->frame);
 
-    /* A window can overlap an exposed region without being the window that
-     * caused it (for example, when the top window is moved or closed).  Draw
-     * every intersecting window in z-order, otherwise the repaired wallpaper
-     * can remain visible on top of a window. */
-    for (window_t *w = wm_bottom(); w; w = w->above) {
-        if (w->minimized)
-            continue;
-
-        bool redraw = w->needs_redraw;
-        for (size_t i = 0; i < nexposed; i++)
-            if (rects_overlap(w->frame, exposed[i])) {
-                redraw = true;
-                break;
-            }
-        bool overlaps_exposed = false;
-        for (size_t i = 0; i < nexposed; i++)
-            if (rects_overlap(w->frame, exposed[i])) {
-                overlaps_exposed = true;
-                break;
-            }
-        if (!redraw && !overlaps_exposed)
-            continue;
-
-        if (redraw || !wm_window_cached(w)) {
-            wm_draw_window(w);
-        } else {
-            for (size_t i = 0; i < nexposed; i++) {
-                if (!rects_overlap(w->frame, exposed[i]))
-                    continue;
-                gfx_clip_push(exposed[i]);
-                wm_blit_window(w);
-                gfx_clip_pop();
-            }
+    if (!rect_empty(repaint)) {
+        gfx_clip_push(repaint);
+        draw_wallpaper();
+        gfx_clip_pop();
+        for (window_t *w = wm_bottom(); w; w = w->above) {
+            if (w->minimized || !rects_overlap(w->frame, repaint))
+                continue;
+            if (w->needs_redraw || !wm_window_cached(w))
+                wm_draw_window(w);
+            gfx_clip_push(repaint);
+            wm_blit_window(w);
+            gfx_clip_pop();
+            if (rects_overlap(taskbar_rect(), w->frame))
+                taskbar_dirty = true;
+            if (menu_open && rects_overlap(menu_frame_rect(), w->frame))
+                menu_dirty = true;
         }
-        if (rects_overlap(taskbar_rect(), w->frame))
-            taskbar_dirty = true;
-        if (menu_open && rects_overlap(menu_frame_rect(), w->frame))
-            menu_dirty = true;
     }
 
     if (taskbar_dirty)
@@ -1088,8 +1083,10 @@ void desktop_run(void)
 
         /* --- application ticks --- */
         for (window_t *w = wm_bottom(); w; w = w->above)
-            if (w->cls->on_tick && w->cls->on_tick(w))
+            if (w->cls->on_tick && w->cls->on_tick(w)) {
+                wm_invalidate(w);
                 dirty = true;
+            }
 
         /* --- clock --- */
         uint32_t second = (uint32_t)(timer_ticks() / 1000);

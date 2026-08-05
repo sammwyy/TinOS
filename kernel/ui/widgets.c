@@ -288,8 +288,34 @@ static const char *icon_resource_name(icon_t icon)
     return icon >= 0 && (size_t)icon < ARRAY_SIZE(names) ? names[icon] : NULL;
 }
 
+static bool draw_media_icon(int x, int y, int size, icon_t icon)
+{
+    if (icon != ICON_PLAY && icon != ICON_PAUSE && icon != ICON_VOLUME)
+        return false;
+    color_t color = COLOR_TEXT;
+    int s = MAX(12, size);
+    if (icon == ICON_PLAY) {
+        for (int row = 0; row < s; row++) {
+            int width = row < s / 2 ? row * 2 / 3 + 2 : (s - row) * 2 / 3 + 2;
+            gfx_fill_rect(x + 3, y + row, width, 1, color);
+        }
+    } else if (icon == ICON_PAUSE) {
+        gfx_fill_rect(x + 3, y + 2, 4, s - 4, color);
+        gfx_fill_rect(x + s - 7, y + 2, 4, s - 4, color);
+    } else {
+        gfx_fill_rect(x + 2, y + 6, 4, 5, color);
+        gfx_fill_rect(x + 6, y + 4, 3, 9, color);
+        gfx_hline(x + 10, y + 3, 2, color);
+        gfx_hline(x + 10, y + s - 5, 2, color);
+        gfx_vline(x + 12, y + 4, s - 8, color);
+    }
+    return true;
+}
+
 void widget_icon(int x, int y, int size, icon_t icon)
 {
+    if (draw_media_icon(x, y, size, icon))
+        return;
     const char *name = icon_resource_name(icon);
     if (name)
         (void)widget_icon_name(x, y, size, name);
@@ -322,6 +348,38 @@ void widget_button(rect_t r, const char *label, bool hot, bool pressed)
               pressed ? COLOR_PANEL_LIGHT : COLOR_BORDER);
     gfx_rect(r.x, r.y, r.w, r.h, hot ? COLOR_ACCENT : COLOR_BORDER);
     widget_text_centered(r, label, COLOR_TEXT);
+}
+
+void widget_button_icon(rect_t r, icon_t icon, const char *label, bool hot,
+                        bool pressed)
+{
+    widget_button(r, "", hot, pressed);
+    if (!label || !label[0]) {
+        widget_icon(r.x + (r.w - 16) / 2, r.y + (r.h - 16) / 2, 16, icon);
+        return;
+    }
+    widget_icon(r.x + 6, r.y + (r.h - 16) / 2, 16, icon);
+    widget_text_centered(rect_make(r.x + 26, r.y, r.w - 28, r.h), label,
+                         COLOR_TEXT);
+}
+
+void widget_slider(rect_t r, int value, int maximum)
+{
+    if (maximum < 1)
+        maximum = 1;
+    value = CLAMP(value, 0, maximum);
+    gfx_fill_rect(r.x, r.y + r.h / 2 - 3, r.w, 6, RGB(0x35, 0x3e, 0x4d));
+    gfx_rect(r.x, r.y + r.h / 2 - 3, r.w, 6, COLOR_BORDER);
+    int thumb_x = r.x + (int)((int64_t)(r.w - 12) * value / maximum);
+    gfx_fill_rect(thumb_x, r.y, 12, r.h, COLOR_ACCENT);
+    gfx_bevel(thumb_x, r.y, 12, r.h, COLOR_PANEL_LIGHT, COLOR_BORDER);
+}
+
+int widget_slider_value(rect_t r, int x, int maximum)
+{
+    if (maximum < 1)
+        maximum = 1;
+    return CLAMP((x - r.x) * maximum / MAX(1, r.w), 0, maximum);
 }
 
 void widget_text_centered(rect_t r, const char *text, color_t color)

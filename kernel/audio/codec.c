@@ -89,6 +89,12 @@ size_t audio_decoder_read(audio_decoder_t *decoder, int16_t *stereo,
     return decoder->codec->read(decoder, stereo, frames);
 }
 
+bool audio_decoder_seek(audio_decoder_t *decoder, uint64_t frame)
+{
+    return decoder && decoder->codec->seek &&
+           decoder->codec->seek(decoder, frame);
+}
+
 void audio_decoder_close(audio_decoder_t *decoder)
 {
     if (!decoder)

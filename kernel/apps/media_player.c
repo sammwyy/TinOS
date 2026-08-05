@@ -1,4 +1,5 @@
 #include <tinos/audio.h>
+#include <tinos/arch.h>
 #include <tinos/codec.h>
 #include <tinos/fs.h>
 #include <tinos/gfx.h>
@@ -50,6 +51,15 @@ typedef struct {
     volatile bool decode_done;
     bool eof;
     bool closing;
+    bool playlist_open;
+    bool seek_pending;
+    bool seek_drag;
+    bool volume_drag;
+    bool seek_resume;
+    uint64_t seek_frame;
+    uint16_t visualizer_left[16];
+    uint16_t visualizer_right[16];
+    uint64_t visualizer_at;
 } media_player_t;
 
 static bool supported(const char *name)
@@ -237,7 +247,10 @@ static void player_on_open(window_t *win, const char *arg)
 {
     media_player_t *p = kcalloc(1, sizeof(*p));
     if (!p) return;
-    p->hot = -1; p->state = PLAYER_STOPPED; win->priv = p;
+    p->hot = -1;
+    p->state = PLAYER_STOPPED;
+    p->playlist_open = true;
+    win->priv = p;
     if (!arg || !arg[0]) return;
     fs_node_t *node = NULL;
     if (fs_resolve(fs_root(), arg, &node) != FS_OK) {
@@ -292,47 +305,127 @@ static void format_time(uint64_t frames, uint32_t rate, char *out, size_t size)
     ksnprintf(out, size, "%u:%02u", seconds / 60, seconds % 60);
 }
 
+static void player_text_clip(rect_t clip, int x, int y, const char *text,
+                             color_t color)
+{
+    gfx_clip_push(clip);
+    gfx_text(x, y, text, color);
+    gfx_clip_pop();
+}
+
+static void player_visualizer(const media_player_t *p, rect_t area)
+{
+    gfx_fill_rect(area.x, area.y, area.w, area.h, RGB(0x0d, 0x12, 0x1c));
+    gfx_rect(area.x, area.y, area.w, area.h, RGB(0x3a, 0x4b, 0x68));
+    const int bars = 24;
+    int gap = 2;
+    int bar_w = MAX(4, (area.w - (bars - 1) * gap) / bars);
+    int block = MAX(4, MIN(9, bar_w));
+    int step = block + 1;
+    int max_blocks = MAX(1, (area.h - 8) / step);
+    for (int bar = 0; bar < bars; bar++) {
+        int x = area.x + bar * (bar_w + gap);
+        int left = p ? p->visualizer_left[bar * 16 / bars] : 0;
+        int right = p ? p->visualizer_right[bar * 16 / bars] : 0;
+        int peak = (left + right) / 2;
+        int blocks = peak * max_blocks / 32767;
+        int t = bar * 255 / (bars - 1);
+        color_t cold = RGB(0x35, 0xd0, 0xd0);
+        color_t hot = RGB(0xe0, 0x67, 0xd3);
+        int r = RGB_R(cold) + (RGB_R(hot) - RGB_R(cold)) * t / 255;
+        int g = RGB_G(cold) + (RGB_G(hot) - RGB_G(cold)) * t / 255;
+        int b = RGB_B(cold) + (RGB_B(hot) - RGB_B(cold)) * t / 255;
+        for (int row = 0; row < blocks; row++) {
+            int fade = 145 + (max_blocks - row) * 110 / max_blocks;
+            color_t color = RGB(r * fade / 255, g * fade / 255,
+                                b * fade / 255);
+            int y = area.y + area.h - 4 - (row + 1) * step;
+            gfx_fill_rect(x + (bar_w - block) / 2, y, block, block, color);
+        }
+    }
+}
+
 static void player_on_draw(window_t *win, rect_t client)
 {
     media_player_t *p = win->priv;
-    gfx_fill_rect(client.x, client.y, client.w, client.h, COLOR_WINDOW_BG);
-    gfx_fill_rect(client.x, client.y, client.w, 38, COLOR_ACCENT_DARK);
-    gfx_text(client.x + 16, client.y + 11, "Media Player", RGB(255,255,255));
-    widget_button(rect_make(client.x + client.w - 82, client.y + 6, 68, 26),
-                  "Open", false, false);
-    int list_x = client.x + 12, list_y = client.y + 50;
-    gfx_text(list_x, list_y, "Playlist", COLOR_TEXT_DIM);
-    for (size_t i = 0; p && i < p->count && i < 10; i++) {
-        int y = list_y + 22 + (int)i * 20;
-        if (i == p->current) gfx_fill_rect(list_x - 4, y - 2, client.w - 24, 19,
-                                           COLOR_SELECTION);
-        gfx_text(list_x, y, p->tracks[i].name,
-                 i == p->current ? RGB(255,255,255) : COLOR_TEXT);
+    gfx_fill_rect(client.x, client.y, client.w, client.h, RGB(0x1a, 0x20, 0x2b));
+    int progress_y = client.y + client.h - 106;
+    int bottom_y = client.y + client.h - 62;
+    int top_x = client.x + 12;
+    int top_w = client.w - 24;
+    if (p && p->playlist_open) {
+        int list_w = 184;
+        gfx_fill_rect(top_x, client.y + 12, list_w, progress_y - client.y - 48,
+                      RGB(0x24, 0x2b, 0x38));
+        gfx_rect(top_x, client.y + 12, list_w, progress_y - client.y - 48,
+                 RGB(0x4a, 0x59, 0x73));
+        gfx_text(top_x + 12, client.y + 24, "Playlist",
+                 RGB(0xb5, 0xc4, 0xd8));
+        for (size_t i = 0; i < p->count && i < 10; i++) {
+            int y = client.y + 48 + (int)i * 22;
+            if (i == p->current)
+                gfx_fill_rect(top_x + 4, y - 3, list_w - 8, 20,
+                              COLOR_SELECTION);
+            player_text_clip(rect_make(top_x + 12, y - 3, list_w - 24, 20),
+                             top_x + 12, y, p->tracks[i].name,
+                             i == p->current ? RGB(0xff, 0xff, 0xff) :
+                                               RGB(0xd1, 0xd7, 0xe2));
+        }
+        top_x += list_w + 12;
+        top_w -= list_w + 12;
     }
-    int controls = client.y + client.h - 72;
-    widget_button(rect_make(client.x + 12, controls, 60, 26), "Prev", false, false);
-    widget_button(rect_make(client.x + 78, controls, 70, 26),
-                  p && p->state == PLAYER_PLAYING ? "Pause" : "Play", false, false);
-    widget_button(rect_make(client.x + 154, controls, 60, 26), "Stop", false, false);
-    widget_button(rect_make(client.x + 220, controls, 60, 26), "Next", false, false);
+    player_visualizer(p, rect_make(top_x, client.y + 12, top_w,
+                                   progress_y - client.y - 48));
+
+    /* A conventional transport strip: timestamps belong to the progress
+     * bar, while transport, volume and track metadata stay below it. */
     if (p) {
-        char status[128];
         char elapsed[16], total[16];
-        const char *name = p->count ? p->tracks[p->current].name : "No track selected";
         format_time(p->decoded, p->format.sample_rate, elapsed, sizeof(elapsed));
         format_time(p->total, p->format.sample_rate, total, sizeof(total));
-        ksnprintf(status, sizeof(status), "%s  |  %s  |  %s", name,
-                  p->codec ? p->codec->name : "-", state_name(p->state));
-        gfx_text(client.x + 12, controls - 42, status, COLOR_TEXT);
-        gfx_rect(client.x + 12, controls - 18, client.w - 24, 8, COLOR_BORDER);
-        if (p->total) gfx_fill_rect(client.x + 12, controls - 18,
-                                   (client.w - 24) * p->decoded / p->total, 8,
-                                   COLOR_ACCENT);
-        char timing[40];
-        ksnprintf(timing, sizeof(timing), "%s / %s", elapsed, total);
-        gfx_text(client.x + client.w - 92, controls - 42, timing, COLOR_TEXT_DIM);
-        if (p->message[0]) gfx_text(client.x + 12, client.y + 28, p->message,
-                                    COLOR_DANGER);
+        const char *name = p->count ? p->tracks[p->current].name : "No track";
+        player_text_clip(rect_make(client.x + 64, progress_y - 27,
+                                   client.w - 128, 16), client.x + 64,
+                         progress_y - 27, name, RGB(0xe5, 0xeb, 0xf5));
+        gfx_text(client.x + 16, progress_y - 11, elapsed, COLOR_TEXT_DIM);
+        player_text_clip(rect_make(client.x + client.w - 56, progress_y - 11,
+                                   40, 16), client.x + client.w - 56,
+                         progress_y - 11, total, COLOR_TEXT_DIM);
+        widget_slider(rect_make(client.x + 16, progress_y, client.w - 32, 14),
+                      p->total ? (int)MIN(p->decoded, p->total) : 0,
+                      p->total ? (int)MIN(p->total, 0x7fffffff) : 1);
+        if (p->message[0])
+            player_text_clip(rect_make(client.x + 220, client.y + 6,
+                                       client.w - 232, 18), client.x + 220,
+                             client.y + 11, p->message, COLOR_DANGER);
+    }
+
+    widget_button_icon(rect_make(client.x + 16, bottom_y, 34, 34), ICON_FOLDER,
+                       "", false, false);
+
+    int transport_x = client.x + client.w / 2 - 70;
+    widget_button_icon(rect_make(transport_x, bottom_y, 34, 34), ICON_BACK,
+                       "", false, false);
+    widget_button_icon(rect_make(transport_x + 40, bottom_y, 42, 34),
+                       p && p->state == PLAYER_PLAYING ? ICON_PAUSE : ICON_PLAY,
+                       "", false, false);
+    widget_button_icon(rect_make(transport_x + 88, bottom_y, 34, 34), ICON_POWER,
+                       "", false, false);
+    widget_button_icon(rect_make(transport_x + 128, bottom_y, 34, 34),
+                       ICON_FORWARD, "", false, false);
+
+    widget_icon(client.x + client.w - 126, bottom_y + 9, 16, ICON_VOLUME);
+    widget_slider(rect_make(client.x + client.w - 104, bottom_y + 9, 88, 16),
+                  audio_get_volume(), 100);
+
+    if (p) {
+        char meta[96];
+        const char *name = p->count ? p->tracks[p->current].name : "No track";
+        ksnprintf(meta, sizeof(meta), "%s  ·  %s", name,
+                  state_name(p->state));
+        player_text_clip(rect_make(client.x + 430, bottom_y + 4, 82, 28),
+                         client.x + 430, bottom_y + 8, meta,
+                         RGB(0xd1, 0xd7, 0xe2));
     }
 }
 
@@ -348,19 +441,45 @@ static bool player_on_key(window_t *win, const key_event_t *ev)
 static bool player_on_mouse(window_t *win, const mouse_event_t *ev, int x, int y)
 {
     media_player_t *p = win->priv;
-    if (!p || !(ev->pressed & MOUSE_LEFT)) return false;
+    if (!p) return false;
     rect_t client = wm_client_rect(win);
-    if (y < 38 && x >= client.w - 88) {
-        app_explorer_open(TINOS_DEFAULT_HOME);
+    int bottom_y = client.h - 62;
+    int transport_x = client.w / 2 - 70;
+
+    if (p->volume_drag && (ev->buttons & MOUSE_LEFT || ev->released & MOUSE_LEFT)) {
+        audio_set_volume((uint8_t)widget_slider_value(
+            rect_make(client.w - 104, bottom_y + 9, 88, 16), x, 100));
+        if (ev->released & MOUSE_LEFT)
+            p->volume_drag = false;
+        wm_invalidate(win);
         return true;
     }
-    int controls = wm_client_rect(win).h - 72;
-    if (y >= controls && y < controls + 30) {
-        if (x < 72 && p->count) player_load(p, (p->current + p->count - 1) % p->count);
-        else if (x < 154) {
+    if (p->seek_drag && (ev->buttons & MOUSE_LEFT || ev->released & MOUSE_LEFT)) {
+        p->seek_frame = (uint64_t)widget_slider_value(
+            rect_make(16, client.h - 106, client.w - 32, 14), x, 1000000);
+        p->seek_frame = p->total ? p->seek_frame * p->total / 1000000 : 0;
+        if (ev->released & MOUSE_LEFT) {
+            p->seek_drag = false;
+            p->seek_pending = true;
+        }
+        wm_invalidate(win);
+        return true;
+    }
+    if (!(ev->pressed & MOUSE_LEFT))
+        return false;
+    if (y >= bottom_y && y < bottom_y + 38) {
+        if (x >= client.w - 104 && x < client.w - 16) {
+            p->volume_drag = true;
+            audio_set_volume((uint8_t)widget_slider_value(
+                rect_make(client.w - 104, bottom_y + 9, 88, 16), x, 100));
+        } else if (x >= 16 && x < 50) {
+            p->playlist_open = !p->playlist_open;
+        } else if (x >= transport_x && x < transport_x + 34 && p->count) {
+            player_load(p, (p->current + p->count - 1) % p->count);
+        } else if (x >= transport_x + 40 && x < transport_x + 82) {
             if (p->state == PLAYER_PLAYING) { audio_stream_pause(true); p->state = PLAYER_PAUSED; }
             else if (p->state == PLAYER_PAUSED) { audio_stream_pause(false); p->state = PLAYER_PLAYING; }
-        } else if (x < 220) {
+        } else if (x >= transport_x + 88 && x < transport_x + 122) {
             audio_stream_stop();
             p->state = PLAYER_STOPPED;
             if (p->decode_worker) thread_cancel(p->decode_worker);
@@ -368,11 +487,28 @@ static bool player_on_mouse(window_t *win, const mouse_event_t *ev, int x, int y
             if (!p->decode_worker && !p->playback)
                 player_stop_decoder(p);
         }
-        else if (p->count) player_next(p);
+        else if (x >= transport_x + 128 && x < transport_x + 162 && p->count)
+            player_next(p);
         wm_invalidate(win); return true;
     }
-    if (y >= 70 && y < 270 && p->count) {
-        size_t index = (size_t)((y - 72) / 20);
+    int progress_y = client.h - 106;
+    if (y >= progress_y - 4 && y < progress_y + 18 && p->total && p->decoder &&
+        p->codec && p->codec->seek) {
+        p->seek_drag = true;
+        p->seek_frame = (uint64_t)widget_slider_value(
+            rect_make(16, progress_y, client.w - 32, 14), x, 1000000);
+        p->seek_frame = p->seek_frame * p->total / 1000000;
+        p->seek_resume = p->state == PLAYER_PLAYING;
+        p->seek_pending = false;
+        audio_stream_stop();
+        if (p->decode_worker) thread_cancel(p->decode_worker);
+        if (p->playback) thread_cancel(p->playback);
+        p->state = PLAYER_PAUSED;
+        wm_invalidate(win);
+        return true;
+    }
+    if (p->playlist_open && x >= 12 && x < 196 && y >= 48 && y < 268 && p->count) {
+        size_t index = (size_t)((y - 48) / 22);
         if (index < p->count) player_load(p, index);
         wm_invalidate(win); return true;
     }
@@ -382,6 +518,44 @@ static bool player_on_mouse(window_t *win, const mouse_event_t *ev, int x, int y
 static bool player_on_tick(window_t *win)
 {
     media_player_t *p = win->priv;
+    uint64_t now = timer_ticks();
+    bool redraw = false;
+    if (p && now >= p->visualizer_at) {
+        p->visualizer_at = now + 80;
+        redraw = true;
+        uint32_t queued = p->pcm_queued;
+        for (int bar = 0; bar < 16; bar++) {
+            uint32_t begin = queued * (uint32_t)bar / 16;
+            uint32_t end = queued * (uint32_t)(bar + 1) / 16;
+            int peak_left = 0, peak_right = 0;
+            if (p->pcm && end > begin) {
+                for (uint32_t i = begin; i < end; i += 64) {
+                    int left = p->pcm[((p->pcm_read + i) % PLAYER_PCM_FRAMES) * 2];
+                    int right = p->pcm[((p->pcm_read + i) % PLAYER_PCM_FRAMES) * 2 + 1];
+                    peak_left = MAX(peak_left, left < 0 ? -left : left);
+                    peak_right = MAX(peak_right, right < 0 ? -right : right);
+                }
+            }
+            uint16_t targets[2] = {
+                (uint16_t)MIN(32767, peak_left),
+                (uint16_t)MIN(32767, peak_right),
+            };
+            uint16_t *levels[2] = {
+                &p->visualizer_left[bar], &p->visualizer_right[bar],
+            };
+            for (int channel = 0; channel < 2; channel++) {
+                uint16_t target = targets[channel];
+                uint16_t current = *levels[channel];
+                if (target > current)
+                    current = (uint16_t)MIN(target,
+                        current + (target - current) / 3 + 1);
+                else if (current > target)
+                    current = (uint16_t)(current - MIN(current - target,
+                        (current - target) / 5 + 1));
+                *levels[channel] = current;
+            }
+        }
+    }
     if (p && p->decode_worker &&
         thread_state(p->decode_worker) == THREAD_DEAD) {
         thread_join(p->decode_worker);
@@ -392,7 +566,41 @@ static bool player_on_tick(window_t *win)
         p->playback = NULL;
     }
     if (p && !p->decode_worker && !p->playback && p->decoder) {
-        if (p->eof && p->state == PLAYER_PLAYING) {
+        if (p->seek_pending && !p->seek_drag) {
+            p->seek_pending = false;
+            if (!audio_decoder_seek(p->decoder, p->seek_frame)) {
+                strlcpy(p->message, "This audio format cannot seek",
+                        sizeof(p->message));
+                p->state = PLAYER_ERROR;
+            } else {
+                p->decoded = p->seek_frame;
+                p->eof = false;
+                p->decode_done = false;
+                p->pcm_read = p->pcm_write = p->pcm_queued = 0;
+                if (!audio_stream_start(&p->format)) {
+                    strlcpy(p->message, "Audio output is unavailable",
+                            sizeof(p->message));
+                    p->state = PLAYER_ERROR;
+                } else {
+                    p->decode_worker = thread_spawn("audio-decode",
+                                                    player_decode_worker, p);
+                    p->playback = p->decode_worker
+                        ? thread_spawn("audio-play", player_playback_worker, p)
+                        : NULL;
+                    if (!p->decode_worker || !p->playback) {
+                        if (p->decode_worker) thread_cancel(p->decode_worker);
+                        if (p->playback) thread_cancel(p->playback);
+                        audio_stream_stop();
+                        p->state = PLAYER_ERROR;
+                    } else {
+                        p->workers += 2;
+                        p->state = p->seek_resume ? PLAYER_PLAYING : PLAYER_PAUSED;
+                        if (!p->seek_resume)
+                            audio_stream_pause(true);
+                    }
+                }
+            }
+        } else if (p->eof && p->state == PLAYER_PLAYING) {
             player_stop_decoder(p);
             player_next(p);
         } else if (p->state == PLAYER_STOPPED) {
@@ -472,7 +680,7 @@ static bool player_on_tick(window_t *win)
         return true;
     }
     if (!p || p->state != PLAYER_PLAYING || !p->decoder) return false;
-    return true;
+    return redraw;
 }
 
 static const app_class_t media_player_class = {
@@ -482,4 +690,4 @@ static const app_class_t media_player_class = {
 };
 
 window_t *app_media_player_open(const char *path)
-{ return wm_open(&media_player_class, 560, 390, "Media Player", path); }
+{ return wm_open(&media_player_class, 640, 430, "Media Player", path); }

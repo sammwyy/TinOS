@@ -13,6 +13,7 @@ typedef struct {
     size_t input_size;
     size_t input_at;
     size_t file_at;
+    uint8_t *owned_data;
     int16_t pending[4096 * 2];
     size_t pending_frames;
     size_t pending_at;
@@ -54,55 +55,27 @@ static audio_decoder_t *vorbis_open_file(const char *path,
                                          uint64_t *total_frames)
 {
     (void)path;
-    vorbis_decoder_t *decoder = kcalloc(1, sizeof(*decoder));
-    if (!decoder) return NULL;
-    decoder->input_capacity = 131072;
-    decoder->input = kmalloc(decoder->input_capacity);
-    if (!decoder->input) { kfree(decoder); return NULL; }
-    size_t first = file->size < decoder->input_capacity ? file->size :
-                   decoder->input_capacity;
-    size_t seed = first < probe_size ? first : probe_size;
-    memcpy(decoder->input, probe, seed);
-    if (seed < first && !fs_read_at(file, seed, decoder->input + seed,
-                                    first - seed)) {
-        kfree(decoder->input); kfree(decoder); return NULL;
+    if (!file->size || file->size > 32u * 1024u * 1024u)
+        return NULL;
+    const uint8_t *data = fs_data(file);
+    uint8_t *owned = NULL;
+    if (!data) {
+        owned = kmalloc(file->size);
+        if (!owned || !fs_read_at(file, 0, owned, file->size)) {
+            kfree(owned);
+            return NULL;
+        }
+        data = owned;
     }
-    int consumed = 0, error = 0;
-    for (;;) {
-        decoder->vorbis = stb_vorbis_open_pushdata(
-            decoder->input, (int)first, &consumed, &error, NULL);
-        if (decoder->vorbis || error != 1 || first >= file->size ||
-            decoder->input_capacity >= 1024 * 1024)
-            break;
-        size_t next = decoder->input_capacity * 2;
-        if (next > file->size) next = file->size;
-        uint8_t *grown = krealloc(decoder->input, next);
-        if (!grown) break;
-        decoder->input = grown;
-        decoder->input_capacity = next;
-        if (!fs_read_at(file, first, decoder->input + first, next - first))
-            break;
-        first = next;
-        consumed = 0;
-        error = 0;
+    audio_decoder_t *base = vorbis_open(data, file->size, format, total_frames);
+    if (!base) {
+        kfree(owned);
+        return NULL;
     }
-    if (!decoder->vorbis) {
-        kfree(decoder->input); kfree(decoder); return NULL;
-    }
-    decoder->file = file;
-    decoder->input_size = first;
-    decoder->input_at = (size_t)consumed;
-    decoder->file_at = first;
-    stb_vorbis_info info = stb_vorbis_get_info(decoder->vorbis);
-    if (!info.sample_rate || info.channels < 1 || info.channels > 2) {
-        stb_vorbis_close(decoder->vorbis);
-        kfree(decoder->input); kfree(decoder); return NULL;
-    }
-    format->sample_rate = info.sample_rate;
-    format->channels = 2;
-    format->bits_per_sample = 16;
-    *total_frames = 0;
-    return (audio_decoder_t *)decoder;
+    ((vorbis_decoder_t *)base)->owned_data = owned;
+    (void)probe;
+    (void)probe_size;
+    return base;
 }
 
 static bool vorbis_more(vorbis_decoder_t *decoder)
@@ -168,18 +141,29 @@ static size_t vorbis_read(audio_decoder_t *decoder, int16_t *out, size_t frames)
     return (size_t)stb_vorbis_get_samples_short_interleaved(v->vorbis, 2,
                                                             out, (int)frames * 2);
 }
+
+static bool vorbis_seek(audio_decoder_t *base, uint64_t frame)
+{
+    vorbis_decoder_t *decoder = (vorbis_decoder_t *)base;
+    if (decoder->file || frame > 0xffffffffu)
+        return false;
+    decoder->pending_frames = decoder->pending_at = 0;
+    return stb_vorbis_seek(decoder->vorbis, (unsigned int)frame) != 0;
+}
+
 static void vorbis_close(audio_decoder_t *decoder)
 {
     vorbis_decoder_t *v = (vorbis_decoder_t *)decoder;
     stb_vorbis_close(v->vorbis);
     kfree(v->input);
+    kfree(v->owned_data);
     kfree(v);
 }
 
 static audio_codec_t vorbis_codec = {
     .name = "vorbis", .matches = vorbis_matches, .open = vorbis_open,
     .open_file = vorbis_open_file,
-    .read = vorbis_read, .close = vorbis_close,
+    .read = vorbis_read, .seek = vorbis_seek, .close = vorbis_close,
 };
 
 void vorbis_codec_register(void) { audio_codec_register(&vorbis_codec); }

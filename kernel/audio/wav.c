@@ -182,6 +182,18 @@ static size_t wav_read(audio_decoder_t *base, int16_t *out, size_t frames)
     return frames;
 }
 
+static bool wav_seek(audio_decoder_t *base, uint64_t frame)
+{
+    wav_decoder_t *decoder = (wav_decoder_t *)base;
+    uint64_t cursor = frame * decoder->block_align;
+    if (cursor > decoder->bytes)
+        cursor = decoder->bytes;
+    decoder->cursor = (size_t)cursor;
+    decoder->chunk_at = 0;
+    decoder->chunk_size = 0;
+    return true;
+}
+
 static void wav_close(audio_decoder_t *decoder)
 {
     wav_decoder_t *wav = (wav_decoder_t *)decoder;
@@ -192,7 +204,7 @@ static void wav_close(audio_decoder_t *decoder)
 static audio_codec_t wav_codec = {
     .name = "wav", .matches = wav_matches, .open = wav_open,
     .open_file = wav_open_file,
-    .read = wav_read, .close = wav_close,
+    .read = wav_read, .seek = wav_seek, .close = wav_close,
 };
 
 void wav_codec_register(void) {
