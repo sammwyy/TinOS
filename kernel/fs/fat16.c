@@ -10,11 +10,20 @@
 #include <tinos/heap.h>
 #include <tinos/kernel.h>
 #include <tinos/string.h>
+#ifndef TINOS_HOST
+#include <tinos/thread.h>
+#endif
 
 #define FAT16_MAX_DEPTH 16
 #define FAT16_EOC        0xFFF8u
 #define FAT16_BAD        0xFFF7u
 #define FAT_READ_BATCH   64u
+
+#ifdef TINOS_HOST
+#define FAT_READ_CANCELLED() false
+#else
+#define FAT_READ_CANCELLED() thread_cancelled()
+#endif
 
 typedef struct {
     uint16_t bytes_per_sector;
@@ -138,7 +147,8 @@ static bool fat16_file_read(const fs_node_t *node, size_t offset,
     uint32_t guard = 0;
 
     while (cluster_index--) {
-        if (cluster < 2 || cluster >= file->cluster_count + 2 ||
+        if (FAT_READ_CANCELLED() ||
+            cluster < 2 || cluster >= file->cluster_count + 2 ||
             guard++ > file->cluster_count)
             return false;
         if (!fat16_file_next(file, cluster, fat_cache, &fat_cache_lba,
@@ -146,7 +156,8 @@ static bool fat16_file_read(const fs_node_t *node, size_t offset,
             return false;
     }
     while (done < length) {
-        if (cluster < 2 || cluster >= file->cluster_count + 2)
+        if (FAT_READ_CANCELLED() || cluster < 2 ||
+            cluster >= file->cluster_count + 2)
             return false;
         size_t sector_index = in_cluster / BLOCK_SECTOR_SIZE;
         size_t in_sector = in_cluster % BLOCK_SECTOR_SIZE;
