@@ -52,7 +52,9 @@ FORCE:
 
 # --- host unit tests --------------------------------------------------
 HOST_SRCS   := $(sort $(wildcard kernel/fs/*.c) $(wildcard kernel/sh/*.c) \
-                      kernel/lib/printf.c $(wildcard tests/host/*.c))
+                      kernel/audio/codec.c kernel/audio/wav.c \
+                      kernel/audio/vorbis.c kernel/lib/printf.c \
+                      $(wildcard tests/host/*.c))
 HOST_BIN    := $(BUILD)/tests/tinos-tests
 # AddressSanitizer catches filesystem/parser memory bugs on the host, but the
 # runtime is not installed everywhere, so probe for it.
@@ -90,6 +92,11 @@ $(OBJS): $(ICON_GEN_H)
 $(BUILD)/%.c.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+# stb_vorbis uses the x87 FPU for its portable transform math. It runs only
+# in the desktop loop, outside interrupt handlers, so this one translation
+# unit does not use the general-register-only interrupt-path restriction.
+$(BUILD)/kernel/audio/vorbis.c.o: CFLAGS := $(filter-out -mgeneral-regs-only,$(CFLAGS))
 
 $(BUILD)/%.S.o: %.S
 	@mkdir -p $(dir $@)
