@@ -169,7 +169,7 @@ line. The required set behaves as expected:
 
 | Command | Notes |
 |---------|-------|
-| `cd [dir\|-]` | no argument goes to `/home`, `-` returns to the previous directory |
+| `cd [dir\|-]` | no argument goes to the current user's home, `-` returns to the previous directory |
 | `ls [-l] [-a] [-1] [path...]` | columns by default, `-l` adds size and modification time |
 | `mkdir [-p] dir...` | |
 | `touch file...` | creates or updates the timestamp |
@@ -202,7 +202,8 @@ screen - see *Error handling*).
 | `a \|\| b` | run b only if a failed |
 
 Words honour `'single'` and `"double"` quotes and `\` escapes, and a leading
-`~` expands to `/home`. Error messages go to the terminal even inside a
+`~` expands to the current user's directory (currently `/home` in the
+prototype; the target layout is `/users/<username>`). Error messages go to the terminal even inside a
 pipeline, so a mistake in the middle of a pipe is still visible.
 
 The example session from the project brief works verbatim:
@@ -224,24 +225,134 @@ rm archive.txt
 
 ## Filesystem
 
-A single tree of nodes in RAM, created at boot:
+TinOS uses one hierarchical namespace. The canonical top-level layout is:
 
 ```
 /
-├── home/
-│   └── documents/notes.txt
-├── system/
-│   ├── help.txt
-│   └── motd.txt
-├── tmp/
+├── apps/                         # installed applications
+│   └── <app-name>/
+│       ├── <app-name>.elf        # main executable
+│       ├── assets/               # icons, fonts and other app data
+│       └── ...
+├── config/                       # system-wide configuration
+│   ├── <file>                    # configuration used by the system
+│   └── <app-name>/               # configuration owned by one app
+│       └── ...
+├── dev/                          # device nodes exposed by drivers
+├── drive/                        # mounted storage devices
+│   └── <device-name>/            # for example, an attached disk or volume
+├── run/                          # volatile runtime state (future)
+│   └── ...
+├── system/                       # immutable OS files
+│   ├── bin/                      # system utilities and core executables
+│   ├── lib/                      # trusted system libraries
+│   ├── drivers/                  # driver modules and metadata (future)
+│   └── ...
+├── tmp/                          # temporary, disposable files
+├── var/                          # mutable system-managed state
+│   ├── cache/                    # regenerable global cache
+│   ├── lib/                      # persistent app/service state
+│   └── log/                      # system and application logs
+├── users/                        # user homes and user-owned data
+│   └── <username>/
+│       ├── .apps/                # per-user app overrides and packages
+│       ├── .data/                # per-user mutable app state
+│       │   └── <app-name>/
+│       │       ├── config/
+│       │       ├── cache/
+│       │       ├── logs/
+│       │       ├── tmp/
+│       │       └── data/
+│       ├── documents/
+│       └── downloads/
+├── shared/                       # explicitly shared user data
 └── README.txt
 ```
 
+### Path conventions
+
+* `/apps/<app-name>/` is the installed application package. The executable
+  that launches an app is conventionally
+  `/apps/<app-name>/<app-name>.elf`; assets and private libraries stay beside
+  it in directories such as `assets/` and `lib/`. This keeps installation,
+  discovery and removal simple and avoids a separate global `/bin`.
+* `/users/<username>/` is the home directory of that user. User documents,
+  downloads and mutable personal data belong there. A shell's `~` should
+  resolve to the logged-in user's directory, not to a global shared home.
+* `/config/` contains system-wide configuration that must survive
+  independently of an application executable. Application defaults live
+  below `/config/<app-name>/`; user-specific overrides live below
+  `~/.data/<app-name>/config/`.
+* `/system/` contains files supplied by the operating system. It is a
+  reserved, immutable tree at runtime: applications may read it but should
+  not modify or remove it. `/system/bin` and `/system/drivers` are reserved
+  for system utilities and future driver support.
+* `/dev/` is the device namespace. Entries represent devices or kernel
+  interfaces, while `/drive/` contains mounted filesystems backed by storage
+  devices. A device name under `/drive` is not required to match its `/dev`
+  node.
+* `/tmp/` is volatile scratch space. Programs must tolerate its contents
+  being removed between boots, and future cleanup may remove old entries
+  while the system is running.
+* `/run/` is reserved for live runtime state such as service metadata,
+  sockets and lock files. It is volatile and must not be used for documents
+  or configuration.
+* `/var/lib/` stores persistent mutable state that an application or service
+  needs to operate, but that is not itself user documents or configuration.
+  Examples include indexes, databases, queues and generated metadata.
+* `/var/cache/` stores regenerable global data. Deleting it must not make the
+  system or an application unusable.
+* `/var/log/` stores system-wide and application logs. Logs do not belong in
+  `/apps/<app-name>/`, because an app installation should remain replaceable
+  and easy to remove.
+* `/shared/` stores data deliberately exposed to multiple users. It is not a
+  general-purpose second home directory.
+
+User-specific application state is grouped below the user's home instead of
+adding a separate global root for every kind of data:
+
+* `~/.apps/<app-name>/` contains user-installed packages, overrides, plugins
+  and optional user resources. It must not silently replace system
+  executables or trusted libraries.
+* `~/.data/<app-name>/config/` contains per-user configuration and overrides.
+* `~/.data/<app-name>/cache/` contains per-user regenerable cache.
+* `~/.data/<app-name>/logs/` contains logs visible only to that user.
+* `~/.data/<app-name>/tmp/` contains user-scoped temporary files.
+* `~/.data/<app-name>/data/` contains persistent user-owned application data.
+
+There is deliberately no `/libraries` or `~/.libraries`. System libraries
+belong in `/system/lib/`, while private libraries and assets belong inside
+`/apps/<app-name>/` (for example `lib/` and `assets/`). User overrides may
+provide resources through `~/.apps/<app-name>/`, but executable and library
+search paths must be explicit rather than implicitly searching every user
+directory.
+
+The intended precedence is user overrides from `~/.apps/<app-name>/` and
+`~/.data/<app-name>/config/`, then installed app files from
+`/apps/<app-name>/`, then system defaults from `/config/<app-name>/` and
+`/system/`. Application data, configuration, cache, logs and temporary files
+remain separate concerns inside one per-app data root. If a future feature
+needs a new top-level directory, it should be reserved here first instead of
+inventing another application-specific root.
+
+Names are lowercase, use ASCII letters, digits, `-` and `_`, and application
+names are stable identifiers rather than display titles. Paths always use `/`,
+are case-sensitive, collapse repeated separators and `.`/`..`, and never
+allow `..` to escape the root. Applications should construct paths from the
+well-known directories above instead of hard-coding another private root.
+
+The current prototype still creates an in-memory tree under `/home` and uses
+`/home` as the default shell directory; `/users/<username>` and the protected
+mounts above are the target namespace for the next filesystem pass. This
+README describes the intended contract so new code can be written against it
+without introducing another layout.
+
 Directories, regular files with real byte content, absolute and relative
 paths, `.` and `..`, creation, reading, writing, appending, copying (deep for
-directories), moving, renaming and deletion. Files grow geometrically on the
-kernel heap. Nothing is written to disk - the tree lives for one boot
-session, which is what the brief asks for.
+directories), moving, renaming and deletion are supported. Files grow
+geometrically on the kernel heap. Nothing is written to disk yet: the tree
+lives for one boot session, so `/drive` is currently a reserved namespace
+rather than persistent storage.
 
 Every application holds *paths*, not node pointers, and re-resolves them, so
 deleting a directory from one window cannot leave another window pointing at
