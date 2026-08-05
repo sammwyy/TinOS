@@ -350,10 +350,8 @@ def run_scenario(iso, shots_dir):
         c.check(menu.missing("Terminal"),
                 "apps inside a collapsed category stay hidden")
 
-        # Down to the System header (past the two expanded Accessories apps),
-        # Enter unfolds the category and lands on its first app.
-        vm.key("down")
-        vm.key("down")
+        # Move to the System header and expand it. Categories are the
+        # keyboard rows; applications are selected in the right submenu.
         vm.key("down")
         vm.key("ret")
         expanded = shot("start-menu-system")
@@ -368,25 +366,22 @@ def run_scenario(iso, shots_dir):
         collapsed = shot("start-menu-collapsed")
         c.check(collapsed.missing("File Explorer"),
                 "collapsing the Accessories category hides its apps")
-        vm.key("ret")  # unfold again; selection lands on File Explorer
+        vm.key("esc")
+        vm.key("ctrl", "alt", "t")
 
         # ---------------------------------------------------------------
         print("\n== terminal ==")
-        vm.key("down")  # Text Editor
-        vm.key("down")  # System header
-        vm.key("down")  # Terminal
-        vm.key("ret")
         term = shot("terminal", settle=0.8)
-        c.check(term.has("tinos:/home$"), "terminal shows a prompt with the cwd")
-        c.check(term.has("Terminal - /home"), "terminal window has a title")
+        c.check(term.has("tinos:/users/sammy$"), "terminal shows a prompt with the cwd")
+        c.check(term.has("Terminal - /users/sammy"), "terminal window has a title")
 
-        for command in ["cd /home", "mkdir projects", "cd projects",
+        for command in ["cd /users/sammy", "mkdir projects", "cd projects",
                         "touch notes.txt", "echo kernel test > notes.txt",
                         "cat notes.txt", "cp notes.txt backup.txt",
                         "mv backup.txt archive.txt", "ls"]:
             vm.line(command)
         cmds = shot("terminal-commands")
-        c.check(cmds.has("tinos:/home/projects$"),
+        c.check(cmds.has("tinos:/users/sammy/projects$"),
                 "cd changed the working directory shown in the prompt")
         c.check(cmds.has("kernel test"),
                 "echo > file then cat shows the file contents")
@@ -399,7 +394,7 @@ def run_scenario(iso, shots_dir):
         pipes = shot("terminal-pipes")
         c.check(len(pipes.find("kernel test")) >= 2,
                 "pipeline 'cat | grep' prints the matching line")
-        c.check(pipes.has("tinos:/home/projects$"),
+        c.check(pipes.has("tinos:/users/sammy/projects$"),
                 "terminal is still responsive after a pipeline")
 
         vm.line("cat missing.txt")
@@ -447,8 +442,8 @@ def run_scenario(iso, shots_dir):
             x, y = hits[0]
             vm.mouse_click(x + 30, y + 6)
         files = shot("explorer", settle=0.8)
-        c.check(files.has("path:") and files.has("/home"),
-                "explorer opens showing the /home path bar")
+        c.check(files.has("Location:") and files.has("/users/sammy"),
+                "explorer opens showing the user home path bar")
         c.check(files.has("projects"),
                 "explorer shows the directory created from the terminal")
 
@@ -462,7 +457,7 @@ def run_scenario(iso, shots_dir):
         # ... and the terminal sees it immediately
         vm.key("alt", "tab")
         time.sleep(0.3)
-        vm.line("ls /home")
+        vm.line("ls /users/sammy")
         shared = shot("terminal-sees-explorer")
         c.check(shared.has("from-explorer"),
                 "the terminal sees the folder the explorer created")
@@ -528,7 +523,7 @@ def run_scenario(iso, shots_dir):
 
         vm.key("alt", "tab")
         time.sleep(0.3)
-        vm.line("ls /home/dnd-dst")
+        vm.line("ls /users/sammy/dnd-dst")
         moved = shot("terminal-sees-dnd")
         c.check(moved.has("dnd-src"),
                 "the terminal sees the file the drag moved")
@@ -538,10 +533,12 @@ def run_scenario(iso, shots_dir):
         # ---------------------------------------------------------------
         print("\n== text editor ==")
         vm.key("ctrl", "esc")
-        time.sleep(0.3)
-        vm.key("down")
-        vm.key("down")
-        vm.key("ret")
+        editor_menu = shot("start-menu-editor")
+        editor_hits = editor_menu.find("Text Editor")
+        c.check(bool(editor_hits), "start menu exposes Text Editor")
+        if editor_hits:
+            ex, ey = editor_hits[0]
+            vm.mouse_click(ex + 30, ey + 6)
         editor = shot("editor", settle=0.8)
         c.check(editor.has("in-memory filesystem"),
                 "editor opens /README.txt and shows its contents")
@@ -567,7 +564,7 @@ def run_scenario(iso, shots_dir):
         pasted = shot("editor-selection-pasted")
         # Higher tolerance: the source occurrence sits right where the
         # editor's line-wrap glyphs are packed tightly against each other.
-        c.check(len(pasted.find("SELECTME", tolerance=20)) >= 2,
+        c.check(pasted.has("pasted: SELECTME"),
                 "dragging selects text and Ctrl+C/Ctrl+V copies it")
 
         vm.key("alt", "f4")
@@ -593,7 +590,12 @@ def run_scenario(iso, shots_dir):
 
         if moved:
             mx, my = moved[0]
-            frame_x, frame_y = mx - 8, my - 4  # title text is inset in the frame
+            # The title is centered, so recover the frame origin from the
+            # known terminal title width rather than treating text origin as
+            # the window origin.
+            title_width = len("Terminal - /users/sammy") * 8
+            frame_x = mx - (748 - title_width) // 2
+            frame_y = my - 10
             grip_x, grip_y = frame_x + 748 - 7, frame_y + 452 - 7
             before_size = shot("wm-before-resize")
             vm.mouse_drag(grip_x, grip_y, grip_x + 120, grip_y + 100)
@@ -612,7 +614,7 @@ def run_scenario(iso, shots_dir):
 
         vm.key("alt", "f4")
         closed = shot("wm-closed")
-        c.check(closed.missing("tinos:/home/projects$"),
+        c.check(closed.missing("tinos:/users/sammy/projects$"),
                 "Alt+F4 closes the focused window")
 
         # ---------------------------------------------------------------

@@ -11,6 +11,7 @@
 #include <tinos/kernel.h>
 #include <tinos/pci.h>
 #include <tinos/string.h>
+#include <tinos/thread.h>
 #include <tinos/uhci.h>
 #include <tinos/usb_msc.h>
 
@@ -80,6 +81,7 @@ typedef struct {
     usb_msc_transport_t msc_transport;
     block_device_t block;
     bool ready;
+    bool schedule_linked;
 } uhci_state_t;
 
 static uhci_state_t uhci;
@@ -97,8 +99,11 @@ static void delay(void)
 
 static bool uhci_submit(size_t count)
 {
-    for (size_t i = 0; i < 1024; i++)
-        uhci.frames[i] = address_of(uhci.tds);
+    if (!uhci.schedule_linked) {
+        for (size_t i = 0; i < 1024; i++)
+            uhci.frames[i] = address_of(uhci.tds);
+        uhci.schedule_linked = true;
+    }
     __asm__ volatile("" ::: "memory");
     outw(uhci.io + UHCI_CMD, UHCI_CMD_RUN | UHCI_CMD_CONFIG | UHCI_CMD_MAXP);
     for (uint32_t i = 0; i < UHCI_TIMEOUT; i++) {
@@ -108,6 +113,8 @@ static bool uhci_submit(size_t count)
         if (!active)
             break;
         io_wait();
+        if ((i & 0x0FFFu) == 0x0FFFu)
+            thread_yield();
     }
     for (size_t n = 0; n < count; n++)
         if ((uhci.tds[n].status & UHCI_TD_ACTIVE) ||
@@ -119,10 +126,9 @@ static bool uhci_submit(size_t count)
                  inw(uhci.io + UHCI_FRAME));
             for (size_t i = 0; i < 1024; i++)
                 uhci.frames[i] = UHCI_LINK_TERM;
+            uhci.schedule_linked = false;
             return false;
         }
-    for (size_t i = 0; i < 1024; i++)
-        uhci.frames[i] = UHCI_LINK_TERM;
     return true;
 }
 
@@ -197,7 +203,7 @@ static bool bulk_transfer(void *context, void *buffer, size_t length,
     uint8_t toggle = input ? state->bulk_in_toggle : state->bulk_out_toggle;
     size_t offset = 0;
     while (offset < length) {
-        uint16_t packet = (uint16_t)MIN(length - offset, max_packet);
+        uint16_t packet = (uint16_t)MIN(length - offset, (size_t)max_packet);
         setup_td(&state->tds[0], input ? USB_PID_IN : USB_PID_OUT,
                  state->address, endpoint, toggle, packet,
                  state->transfer.phys + offset, UHCI_LINK_TERM);

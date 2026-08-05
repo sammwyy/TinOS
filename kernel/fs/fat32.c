@@ -7,6 +7,7 @@
 #define FAT32_MAX_DEPTH 16
 #define FAT32_EOC        0x0FFFFFF8u
 #define FAT32_BAD        0x0FFFFFF7u
+#define FAT_READ_BATCH   8u
 
 typedef struct {
     uint8_t  sectors_per_cluster;
@@ -18,6 +19,9 @@ typedef struct {
     uint32_t data_lba;
     uint32_t root_cluster;
     uint32_t cluster_count;
+    uint32_t fat_cache_lba;
+    bool     fat_cache_valid;
+    uint8_t  fat_cache[BLOCK_SECTOR_SIZE];
 } fat32_volume_t;
 
 static uint16_t le16(const uint8_t *p)
@@ -35,15 +39,17 @@ static bool sector_read(block_device_t *device, uint32_t lba, uint8_t *buffer)
     return block_read(device, lba, buffer, 1);
 }
 
-static bool next_cluster(block_device_t *device, const fat32_volume_t *volume,
+static bool next_cluster(block_device_t *device, fat32_volume_t *volume,
                          uint32_t cluster, uint32_t *next)
 {
     uint32_t offset = cluster * 4;
-    uint8_t sector[BLOCK_SECTOR_SIZE];
-    if (!sector_read(device, volume->fat_lba + offset / BLOCK_SECTOR_SIZE,
-                     sector))
-        return false;
-    *next = le32(sector + offset % BLOCK_SECTOR_SIZE) & 0x0FFFFFFF;
+    uint32_t lba = volume->fat_lba + offset / BLOCK_SECTOR_SIZE;
+    if (!volume->fat_cache_valid || volume->fat_cache_lba != lba) {
+        if (!sector_read(device, lba, volume->fat_cache)) return false;
+        volume->fat_cache_lba = lba;
+        volume->fat_cache_valid = true;
+    }
+    *next = le32(volume->fat_cache + offset % BLOCK_SECTOR_SIZE) & 0x0FFFFFFF;
     return true;
 }
 
@@ -73,10 +79,10 @@ static void short_name(const uint8_t *entry, char *name, size_t capacity)
     name[used] = '\0';
 }
 
-static bool import_directory(block_device_t *, const fat32_volume_t *,
+static bool import_directory(block_device_t *, fat32_volume_t *,
                              fs_node_t *, uint32_t, unsigned);
 
-static bool import_file(block_device_t *device, const fat32_volume_t *volume,
+static bool import_file(block_device_t *device, fat32_volume_t *volume,
                         fs_node_t *parent, const uint8_t *entry,
                         const char *name)
 {
@@ -85,20 +91,27 @@ static bool import_file(block_device_t *device, const fat32_volume_t *volume,
         return false;
     uint32_t remaining = le32(entry + 28);
     uint32_t cluster = ((uint32_t)le16(entry + 20) << 16) | le16(entry + 26);
-    uint8_t sector[BLOCK_SECTOR_SIZE];
+    uint8_t sectors[BLOCK_SECTOR_SIZE * FAT_READ_BATCH];
     uint32_t guard = 0;
     while (remaining) {
         if (!cluster_valid(volume, cluster) || cluster == FAT32_BAD ||
             guard++ > volume->cluster_count)
             return false;
         uint32_t lba = cluster_lba(volume, cluster);
-        for (uint32_t s = 0; s < volume->sectors_per_cluster && remaining; s++) {
-            if (!sector_read(device, lba + s, sector))
+        for (uint32_t s = 0; s < volume->sectors_per_cluster && remaining;) {
+            uint32_t batch = MIN((uint32_t)FAT_READ_BATCH,
+                                 volume->sectors_per_cluster - s);
+            batch = MIN(batch, (remaining + BLOCK_SECTOR_SIZE - 1) /
+                                BLOCK_SECTOR_SIZE);
+            if (!block_read(device, lba + s, sectors, batch))
                 return false;
-            uint32_t count = MIN(remaining, BLOCK_SECTOR_SIZE);
-            if (fs_append(file, sector, count) != FS_OK)
-                return false;
-            remaining -= count;
+            for (uint32_t b = 0; b < batch && remaining; b++) {
+                uint32_t count = MIN(remaining, BLOCK_SECTOR_SIZE);
+                if (fs_append(file, sectors + b * BLOCK_SECTOR_SIZE, count) != FS_OK)
+                    return false;
+                remaining -= count;
+            }
+            s += batch;
         }
         if (!remaining)
             return true;
@@ -109,7 +122,7 @@ static bool import_file(block_device_t *device, const fat32_volume_t *volume,
     return true;
 }
 
-static bool import_entry(block_device_t *device, const fat32_volume_t *volume,
+static bool import_entry(block_device_t *device, fat32_volume_t *volume,
                          fs_node_t *parent, const uint8_t *entry,
                          unsigned depth)
 {
@@ -133,7 +146,7 @@ static bool import_entry(block_device_t *device, const fat32_volume_t *volume,
 }
 
 static bool import_directory(block_device_t *device,
-                             const fat32_volume_t *volume, fs_node_t *parent,
+                             fat32_volume_t *volume, fs_node_t *parent,
                              uint32_t first_cluster, unsigned depth)
 {
     uint32_t cluster = first_cluster;
@@ -193,5 +206,10 @@ bool fat32_import(block_device_t *device, fs_node_t *mountpoint)
                            volume.sectors_per_cluster;
     if (volume.cluster_count < 65525)
         return false;
-    return import_directory(device, &volume, mountpoint, volume.root_cluster, 0);
+    bool imported = import_directory(device, &volume, mountpoint,
+                                     volume.root_cluster, 0);
+    if (!imported)
+        klog("[fat32] directory import failed root=%u data=%u clusters=%u\n",
+             volume.root_cluster, volume.data_lba, volume.cluster_count);
+    return imported;
 }

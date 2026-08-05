@@ -14,6 +14,7 @@
 #define FAT16_MAX_DEPTH 16
 #define FAT16_EOC        0xFFF8u
 #define FAT16_BAD        0xFFF7u
+#define FAT_READ_BATCH   8u
 
 typedef struct {
     uint16_t bytes_per_sector;
@@ -28,6 +29,9 @@ typedef struct {
     uint32_t root_sectors;
     uint32_t data_lba;
     uint32_t cluster_count;
+    uint32_t fat_cache_lba;
+    bool     fat_cache_valid;
+    uint8_t  fat_cache[BLOCK_SECTOR_SIZE];
 } fat16_volume_t;
 
 static uint16_t le16(const uint8_t *p)
@@ -45,15 +49,17 @@ static bool fat16_sector(block_device_t *device, uint32_t lba, uint8_t *buffer)
     return block_read(device, lba, buffer, 1);
 }
 
-static bool fat16_next(block_device_t *device, const fat16_volume_t *volume,
+static bool fat16_next(block_device_t *device, fat16_volume_t *volume,
                        uint16_t cluster, uint16_t *next)
 {
     uint32_t byte_offset = (uint32_t)cluster * 2;
-    uint8_t sector[BLOCK_SECTOR_SIZE];
-    if (!fat16_sector(device, volume->fat_lba + byte_offset / BLOCK_SECTOR_SIZE,
-                      sector))
-        return false;
-    *next = le16(sector + byte_offset % BLOCK_SECTOR_SIZE);
+    uint32_t lba = volume->fat_lba + byte_offset / BLOCK_SECTOR_SIZE;
+    if (!volume->fat_cache_valid || volume->fat_cache_lba != lba) {
+        if (!fat16_sector(device, lba, volume->fat_cache)) return false;
+        volume->fat_cache_lba = lba;
+        volume->fat_cache_valid = true;
+    }
+    *next = le16(volume->fat_cache + byte_offset % BLOCK_SECTOR_SIZE);
     return true;
 }
 
@@ -87,7 +93,7 @@ static void fat16_name(const uint8_t *entry, char *name, size_t capacity)
 }
 
 static bool fat16_import_file(block_device_t *device,
-                              const fat16_volume_t *volume,
+                              fat16_volume_t *volume,
                               fs_node_t *parent, const uint8_t *entry,
                               const char *name)
 {
@@ -97,20 +103,27 @@ static bool fat16_import_file(block_device_t *device,
 
     uint32_t remaining = le32(entry + 28);
     uint16_t cluster = le16(entry + 26);
-    uint8_t sector[BLOCK_SECTOR_SIZE];
+    uint8_t sectors[BLOCK_SECTOR_SIZE * FAT_READ_BATCH];
     uint32_t guard = 0;
     while (remaining) {
         if (!fat16_cluster_valid(volume, cluster) ||
             cluster == FAT16_BAD || guard++ > volume->cluster_count)
             return false;
         uint32_t lba = fat16_cluster_lba(volume, cluster);
-        for (uint32_t s = 0; s < volume->sectors_per_cluster && remaining; s++) {
-            if (!fat16_sector(device, lba + s, sector))
+        for (uint32_t s = 0; s < volume->sectors_per_cluster && remaining;) {
+            uint32_t batch = MIN((uint32_t)FAT_READ_BATCH,
+                                 volume->sectors_per_cluster - s);
+            batch = MIN(batch, (remaining + BLOCK_SECTOR_SIZE - 1) /
+                                BLOCK_SECTOR_SIZE);
+            if (!block_read(device, lba + s, sectors, batch))
                 return false;
-            uint32_t count = MIN(remaining, BLOCK_SECTOR_SIZE);
-            if (fs_append(file, sector, count) != FS_OK)
-                return false;
-            remaining -= count;
+            for (uint32_t b = 0; b < batch && remaining; b++) {
+                uint32_t count = MIN(remaining, BLOCK_SECTOR_SIZE);
+                if (fs_append(file, sectors + b * BLOCK_SECTOR_SIZE, count) != FS_OK)
+                    return false;
+                remaining -= count;
+            }
+            s += batch;
         }
         if (!remaining)
             break;
@@ -123,12 +136,12 @@ static bool fat16_import_file(block_device_t *device,
 }
 
 static bool fat16_import_directory(block_device_t *device,
-                                   const fat16_volume_t *volume,
+                                   fat16_volume_t *volume,
                                    fs_node_t *parent, uint16_t first_cluster,
                                    bool root, unsigned depth);
 
 static bool fat16_import_entry(block_device_t *device,
-                               const fat16_volume_t *volume, fs_node_t *parent,
+                               fat16_volume_t *volume, fs_node_t *parent,
                                const uint8_t *entry, unsigned depth)
 {
     if (entry[0] == 0x00 || entry[0] == 0xE5 || entry[11] == 0x0F ||
@@ -154,7 +167,7 @@ static bool fat16_import_entry(block_device_t *device,
 }
 
 static bool fat16_import_directory(block_device_t *device,
-                                   const fat16_volume_t *volume,
+                                   fat16_volume_t *volume,
                                    fs_node_t *parent, uint16_t first_cluster,
                                    bool root, unsigned depth)
 {

@@ -6,8 +6,8 @@
  * tests work without any special cases.
  */
 
-#include <tinos/heap.h>
 #include <tinos/audio.h>
+#include <tinos/heap.h>
 #include <tinos/speaker.h>
 #include <tinos/path.h>
 #include <tinos/printf.h>
@@ -511,25 +511,6 @@ static int cmd_echo(shell_t *sh, int argc, char **argv, stream_t *in,
     return 0;
 }
 
-static int cmd_doremi(shell_t *sh, int argc, char **argv, stream_t *in,
-                      stream_t *out, stream_t *err)
-{
-    if (argc != 1) {
-        usage_error(err, "doremi");
-        return 2;
-    }
-    if (!audio_available()) {
-        stream_puts(err, "doremi: AC'97 audio device is unavailable\n");
-        return 1;
-    }
-    if (!audio_play_doremi()) {
-        stream_puts(err, "doremi: playback failed\n");
-        return 1;
-    }
-    stream_puts(out, "doremi: played the test melody\n");
-    return 0;
-}
-
 static int cmd_beep(shell_t *sh, int argc, char **argv, stream_t *in,
                     stream_t *out, stream_t *err)
 {
@@ -546,6 +527,18 @@ static int cmd_beep(shell_t *sh, int argc, char **argv, stream_t *in,
     }
     speaker_beep(frequency, duration);
     stream_printf(out, "beep: %u Hz for %u ms\n", frequency, duration);
+    return 0;
+}
+
+static int cmd_doremi(shell_t *sh, int argc, char **argv, stream_t *in,
+                      stream_t *out, stream_t *err)
+{
+    if (argc != 1) { usage_error(err, "doremi"); return 2; }
+    if (!audio_available() || !audio_play_doremi()) {
+        stream_puts(err, "doremi: AC'97 audio test unavailable\n");
+        return 1;
+    }
+    stream_puts(out, "doremi: AC'97 audio test passed\n");
     return 0;
 }
 
@@ -1235,7 +1228,7 @@ static const sh_command_def_t commands[] = {
     { "date",     "date",
       "show the current date and time",              cmd_date },
     { "doremi",   "doremi",
-      "play the AC'97 audio test melody",            cmd_doremi },
+      "run the AC'97 audio hardware test",           cmd_doremi },
     { "echo",     "echo [-n] text...",
       "write text to the output",                    cmd_echo },
     { "edit",     "edit <file>",

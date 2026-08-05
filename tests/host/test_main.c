@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include <tinos/fs.h>
+#include <tinos/codec.h>
 #include <tinos/path.h>
 #include <tinos/sh.h>
 
@@ -365,7 +366,7 @@ static void test_commands(void)
     check_output(sh, "pwd", TINOS_DEFAULT_HOME "\n");
     check_output(sh, "echo hello", "hello\n");
     check_output(sh, "beep 440 1", "beep: 440 Hz for 1 ms\n");
-    check_output(sh, "doremi", "doremi: AC'97 audio device is unavailable\n");
+    check_output(sh, "doremi", "doremi: AC'97 audio test unavailable\n");
     check_output(sh, "echo -n hello", "hello");
     check_output(sh, "echo   spaced   out", "spaced out\n");
 
@@ -598,6 +599,35 @@ static void test_robustness(void)
     fs_shutdown();
 }
 
+static void test_audio_codecs(void)
+{
+    SUITE("audio codecs");
+    static const uint8_t wav[] = {
+        'R','I','F','F', 36,0,0,0, 'W','A','V','E',
+        'f','m','t',' ', 16,0,0,0, 1,0, 1,0, 0x44,0xac,0,0,
+        0x88,0x58,1,0, 2,0, 16,0,
+        'd','a','t','a', 2,0,0,0, 0,0,
+    };
+    static const uint8_t bad[] = { 'R','I','F','F', 0,0,0,0, 'W','A','V','E' };
+    audio_codecs_init();
+    CHECK(audio_codec_for("tone.wav", wav, sizeof(wav)) != NULL);
+    CHECK(audio_codec_for("tone.wav", bad, sizeof(bad)) != NULL);
+    audio_format_t format;
+    uint64_t frames;
+    const audio_codec_t *codec = NULL;
+    audio_decoder_t *decoder = audio_decoder_open("tone.wav", wav, sizeof(wav),
+                                                   &format, &frames, &codec);
+    CHECK(decoder != NULL);
+    CHECK(codec != NULL && strcmp(codec->name, "wav") == 0);
+    CHECK(format.sample_rate == 44100 && format.channels == 2 && frames == 1);
+    int16_t samples[2] = { 1, 1 };
+    CHECK(audio_decoder_read(decoder, samples, 1) == 1);
+    CHECK(samples[0] == 0 && samples[1] == 0);
+    audio_decoder_close(decoder);
+    CHECK(audio_decoder_open("bad.wav", bad, sizeof(bad), &format, &frames,
+                             &codec) == NULL);
+}
+
 int main(void)
 {
     printf("TinOS host unit tests\n\n");
@@ -609,6 +639,7 @@ int main(void)
     test_commands();
     test_shared_state();
     test_robustness();
+    test_audio_codecs();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

@@ -122,9 +122,11 @@ registers of the standard VGA adapter. `-m 256` is a comfortable default;
 TinOS runs in far less.
 
 The default QEMU run uses an AC'97 device with the PipeWire audio backend, so
-`doremi` and `beep` are audible through the host sound server. Set `AUDIODEV`,
+Media Player audio and `beep` are audible through the host sound server. Set `AUDIODEV`,
 for example to `driver=pa,id=tinos-audio` or `driver=none,id=tinos-audio`, when
 another backend is required. Automated headless tests select `none` explicitly.
+The `doremi` shell command remains a blocking AC'97 hardware test; music
+playback and controls are provided by Media Player.
 
 The GRUB menu has two entries:
 
@@ -209,7 +211,6 @@ a file created in the terminal appears in the file explorer, and vice versa.
 
 ```
 about     beep      cat       cd        clear     cp        crash     date
-doremi    echo
 edit      exit      explorer  free      grep      head      help      history
 ls        mkdir     mv        pwd       reboot    rm        shutdown  sort
 stat      sysinfo   tail      touch     tree      uname     uptime    wc
@@ -234,7 +235,7 @@ line. The required set behaves as expected:
 | `clear` | |
 | `help [command]` | |
 | `beep [frequency] [milliseconds]` | test the PC speaker (defaults to 880 Hz for 120 ms) |
-| `doremi` | play the hardcoded AC'97 PCM test melody |
+| `doremi` | test AC'97 PCM output with a short melody |
 
 Extras: `tree`, `wc`, `head`, `tail`, `sort`, `stat`, `free`, `date`,
 `uptime`, `uname -a`, `sysinfo`, `history`, `edit <file>` and

@@ -39,7 +39,7 @@
 #define TASKBAR_HEIGHT 28
 #define TITLEBAR_HEIGHT 20
 #define WINDOW_BORDER 2
-#define RESIZE_GRIP 12
+#define RESIZE_GRIP 20
 #define WINDOW_MIN_W 180
 #define WINDOW_MIN_H 120
 

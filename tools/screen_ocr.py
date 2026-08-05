@@ -95,6 +95,31 @@ def find_text(image, text, threshold=150, tolerance=6, region=None):
         block = ink[y:y + h, x:x + w]
         if np.count_nonzero(block != mask) <= tolerance * len(text):
             hits.append((int(x) + x0, int(y) + y0))
+    if hits:
+        return hits
+
+    # Menu labels use dark text on a light panel, while the desktop and
+    # terminal use light text on dark backgrounds. Try the inverse polarity
+    # only when the normal fixed-font match found nothing.
+    rgb = np.asarray(image.convert("RGB"), dtype=np.int32)
+    lum = (rgb[:, :, 0] * 299 + rgb[:, :, 1] * 587 + rgb[:, :, 2] * 114) // 1000
+    ink = lum < (255 - threshold)
+    if region:
+        x0, y0, x1, y1 = region
+        ink = ink[y0:y1, x0:x1]
+    else:
+        x0, y0 = 0, 0
+    score = np.zeros((H - h + 1, W - w + 1), dtype=np.int16)
+    for dy in range(16):
+        for dx in range(8):
+            window = ink[dy:dy + H - h + 1, dx:dx + W - w + 1]
+            score += (window == first[dy, dx])
+    candidates = np.argwhere(score >= 128 - tolerance)
+    hits = []
+    for y, x in candidates:
+        block = ink[y:y + h, x:x + w]
+        if np.count_nonzero(block != mask) <= tolerance * len(text):
+            hits.append((int(x) + x0, int(y) + y0))
     return hits
 
 

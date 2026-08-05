@@ -262,7 +262,7 @@ static window_t *launch_explorer(const char *arg)
 
 static window_t *launch_editor(const char *arg)
 {
-    return app_editor_open(arg);
+    return app_editor_open(arg ? arg : "/README.txt");
 }
 
 static window_t *launch_image_viewer(const char *arg)

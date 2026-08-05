@@ -44,6 +44,18 @@
 
 static const char *boot_cmdline = "";
 
+typedef struct {
+    block_device_t *device;
+    size_t mount_index;
+} storage_mount_job_t;
+
+static void storage_mount_worker(void *arg)
+{
+    storage_mount_job_t *job = arg;
+    storage_mount_device(job->device, &job->mount_index);
+    thread_exit();
+}
+
 static void boot_banner(void)
 {
     vga_text_set_color(VGA_LCYAN, VGA_BLACK);
@@ -237,8 +249,17 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     for (size_t i = 0; i < virtio_blk_count(); i++)
         storage_mount_device(virtio_blk_device(i), &mounted);
     size_t usb_disks = uhci_usb_init();
-    for (size_t i = 0; i < usb_disks; i++)
-        storage_mount_device(uhci_usb_device(i), &mounted);
+    static storage_mount_job_t usb_mount;
+    if (usb_disks) {
+        usb_mount.device = uhci_usb_device(0);
+        usb_mount.mount_index = mounted;
+        kernel_thread_t *worker = thread_spawn("usb-mount", storage_mount_worker,
+                                               &usb_mount);
+        if (worker)
+            thread_detach(worker);
+        else
+            storage_mount_device(usb_mount.device, &usb_mount.mount_index);
+    }
     bool network = net_init();
     if (network)
         net_async_init();
