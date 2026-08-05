@@ -24,6 +24,7 @@
 #include <tinos/selftest.h>
 #include <tinos/string.h>
 #include <tinos/thread.h>
+#include <tinos/timer.h>
 
 #define SCREEN_WIDTH  1024
 #define SCREEN_HEIGHT 768
@@ -172,6 +173,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     heap_init();
     async_init();
     thread_init();
+    ktimer_init();
     boot_step("Memory manager online");
     boot_note("Asynchronous worker runtime online (cooperative mode)");
     boot_note("Kernel thread scheduler online (private stacks, cooperative)");

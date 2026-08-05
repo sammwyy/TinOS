@@ -16,9 +16,11 @@
 #include <tinos/kernel.h>
 #include <tinos/mm.h>
 #include <tinos/path.h>
+#include <tinos/queue.h>
 #include <tinos/selftest.h>
 #include <tinos/sh.h>
 #include <tinos/string.h>
+#include <tinos/sync.h>
 #include <tinos/thread.h>
 
 static int checks;
@@ -129,7 +131,9 @@ static void thread_probe_entry(void *arg)
 static void test_threads(void)
 {
     thread_probe = 0;
-    check(thread_spawn("selftest", thread_probe_entry, NULL) != NULL,
+    kernel_thread_t *thread = thread_spawn("selftest", thread_probe_entry,
+                                           NULL);
+    check(thread != NULL,
           "thread_spawn creates a kernel thread");
     check(thread_run(1) == 1 && thread_probe == 1,
           "thread starts on its private stack");
@@ -137,6 +141,36 @@ static void test_threads(void)
           "thread_yield returns to the scheduler");
     check(thread_run(1) == 1 && thread_probe == 3 && thread_active() == 0,
           "thread exits and releases its stack");
+    check(thread && thread_join(thread) == 0,
+          "thread_join reaps a completed thread");
+}
+
+static void test_sync_and_queue(void)
+{
+    void *storage[3];
+    kqueue_t queue;
+    ksemaphore_t semaphore;
+    int a = 1, b = 2, c = 3;
+    void *item = NULL;
+
+    kqueue_init(&queue, storage, ARRAY_SIZE(storage));
+    check(kqueue_try_push(&queue, &a), "queue accepts first item");
+    check(kqueue_try_push(&queue, &b), "queue accepts second item");
+    check(kqueue_count(&queue) == 2, "queue reports item count");
+    check(kqueue_try_pop(&queue, &item) && item == &a,
+          "queue preserves FIFO order");
+    check(kqueue_try_push(&queue, &c), "queue wraps its ring indexes");
+    check(kqueue_try_pop(&queue, &item) && item == &b,
+          "queue returns the second item");
+    check(kqueue_try_pop(&queue, &item) && item == &c,
+          "queue returns the wrapped item");
+    check(!kqueue_try_pop(&queue, &item), "empty queue does not underflow");
+
+    ksemaphore_init(&semaphore, 1, 2);
+    check(ksemaphore_try_wait(&semaphore), "semaphore consumes a token");
+    check(!ksemaphore_try_wait(&semaphore), "semaphore reports no token");
+    ksemaphore_post(&semaphore);
+    check(ksemaphore_try_wait(&semaphore), "semaphore wakes token capacity");
 }
 
 static void test_paths(void)
@@ -263,6 +297,7 @@ int selftest_run(void)
 
     test_heap();
     test_threads();
+    test_sync_and_queue();
     test_paths();
     test_filesystem();
     test_font();

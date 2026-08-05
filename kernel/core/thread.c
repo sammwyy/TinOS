@@ -18,17 +18,16 @@ struct kernel_thread {
     void *arg;
     uint64_t wake_at;
     uint32_t id;
-    uint8_t state;
+    thread_state_t state;
     bool used;
+    bool detached;
+    bool cancel_requested;
+    int exit_status;
+    kernel_thread_t *joiner;
+    thread_wait_queue_t joiners;
+    kernel_thread_t *wait_next;
+    thread_wait_queue_t *waiting_on;
     char name[24];
-};
-
-enum {
-    THREAD_READY = 0,
-    THREAD_RUNNING,
-    THREAD_SLEEPING,
-    THREAD_BLOCKED,
-    THREAD_DEAD,
 };
 
 extern void arch_context_switch(thread_context_t *from,
@@ -38,6 +37,13 @@ static kernel_thread_t threads[THREAD_MAX];
 static thread_context_t scheduler_context;
 static kernel_thread_t *current;
 static uint32_t next_id;
+
+static void context_return(void)
+{
+    kernel_thread_t *thread = current;
+    thread->entry(thread->arg);
+    thread_exit();
+}
 
 static void copy_name(char *dst, const char *src)
 {
@@ -57,11 +63,43 @@ void thread_init(void)
     next_id = 1;
 }
 
-static void thread_bootstrap(void)
+static void thread_bootstrap(void) { context_return(); }
+
+void thread_wait_queue_init(thread_wait_queue_t *queue)
+{
+    queue->head = NULL;
+    queue->tail = NULL;
+}
+
+static void wait_remove(kernel_thread_t *thread)
+{
+    thread_wait_queue_t *queue = thread->waiting_on;
+    if (!queue)
+        return;
+    kernel_thread_t *prev = NULL;
+    for (kernel_thread_t *it = queue->head; it; it = it->wait_next) {
+        if (it != thread) {
+            prev = it;
+            continue;
+        }
+        if (prev)
+            prev->wait_next = it->wait_next;
+        else
+            queue->head = it->wait_next;
+        if (queue->tail == it)
+            queue->tail = prev;
+        it->wait_next = NULL;
+        it->waiting_on = NULL;
+        return;
+    }
+    thread->waiting_on = NULL;
+    thread->wait_next = NULL;
+}
+
+static void switch_to_scheduler(void)
 {
     kernel_thread_t *thread = current;
-    thread->entry(thread->arg);
-    thread_exit();
+    arch_context_switch(&thread->context, &scheduler_context);
 }
 
 kernel_thread_t *thread_spawn(const char *name, thread_entry_fn entry,
@@ -90,6 +128,8 @@ kernel_thread_t *thread_spawn(const char *name, thread_entry_fn entry,
             next_id = 1;
         thread->state = THREAD_READY;
         thread->used = true;
+        thread->detached = false;
+        thread_wait_queue_init(&thread->joiners);
         copy_name(thread->name, name);
 
         uintptr_t top = (uintptr_t)stack + THREAD_STACK_SIZE;
@@ -108,8 +148,7 @@ void thread_yield(void)
     if (!current)
         return;
     current->state = THREAD_READY;
-    kernel_thread_t *thread = current;
-    arch_context_switch(&thread->context, &scheduler_context);
+    switch_to_scheduler();
 }
 
 void thread_sleep(uint32_t milliseconds)
@@ -118,8 +157,7 @@ void thread_sleep(uint32_t milliseconds)
         return;
     current->wake_at = timer_ticks() + milliseconds;
     current->state = THREAD_SLEEPING;
-    kernel_thread_t *thread = current;
-    arch_context_switch(&thread->context, &scheduler_context);
+    switch_to_scheduler();
 }
 
 void thread_block(void)
@@ -127,13 +165,52 @@ void thread_block(void)
     if (!current)
         return;
     current->state = THREAD_BLOCKED;
-    kernel_thread_t *thread = current;
-    arch_context_switch(&thread->context, &scheduler_context);
+    switch_to_scheduler();
+}
+
+void thread_block_on(thread_wait_queue_t *queue)
+{
+    if (!current) {
+        return;
+    }
+    current->wait_next = NULL;
+    current->waiting_on = queue;
+    if (queue->tail)
+        queue->tail->wait_next = current;
+    else
+        queue->head = current;
+    queue->tail = current;
+    current->state = THREAD_BLOCKED;
+    switch_to_scheduler();
+}
+
+void thread_wake_one(thread_wait_queue_t *queue)
+{
+    kernel_thread_t *thread = queue->head;
+    if (!thread)
+        return;
+    queue->head = thread->wait_next;
+    if (queue->tail == thread)
+        queue->tail = NULL;
+    thread->wait_next = NULL;
+    thread->waiting_on = NULL;
+    if (thread->used && thread->state == THREAD_BLOCKED)
+        thread->state = THREAD_READY;
+}
+
+void thread_wake_all(thread_wait_queue_t *queue)
+{
+    while (queue->head)
+        thread_wake_one(queue);
 }
 
 void thread_wake(kernel_thread_t *thread)
 {
-    if (thread && thread->used && thread->state == THREAD_BLOCKED)
+    if (!thread || !thread->used)
+        return;
+    if (thread->waiting_on)
+        wait_remove(thread);
+    if (thread->state == THREAD_BLOCKED || thread->state == THREAD_SLEEPING)
         thread->state = THREAD_READY;
 }
 
@@ -144,11 +221,64 @@ kernel_thread_t *thread_current(void)
 
 void thread_exit(void)
 {
+    thread_exit_code(0);
+}
+
+void thread_exit_code(int status)
+{
     KASSERT(current != NULL);
     kernel_thread_t *thread = current;
+    thread->exit_status = status;
     thread->state = THREAD_DEAD;
-    arch_context_switch(&thread->context, &scheduler_context);
+    thread_wake_all(&thread->joiners);
+    switch_to_scheduler();
     panic("thread %u resumed after exit", thread->id);
+}
+
+int thread_join(kernel_thread_t *thread)
+{
+    KASSERT(thread != NULL && thread != current && thread->used);
+    KASSERT(!thread->detached && thread->joiner == NULL);
+    if (thread->state != THREAD_DEAD) {
+        KASSERT(current != NULL);
+        thread->joiner = current;
+        while (thread->state != THREAD_DEAD)
+            thread_block_on(&thread->joiners);
+    }
+    int status = thread->exit_status;
+    thread->joiner = NULL;
+    kfree(thread->stack);
+    memset(thread, 0, sizeof(*thread));
+    return status;
+}
+
+void thread_detach(kernel_thread_t *thread)
+{
+    if (!thread || !thread->used)
+        return;
+    thread->detached = true;
+    if (thread->state == THREAD_DEAD) {
+        kfree(thread->stack);
+        memset(thread, 0, sizeof(*thread));
+    }
+}
+
+void thread_cancel(kernel_thread_t *thread)
+{
+    if (!thread || !thread->used)
+        return;
+    thread->cancel_requested = true;
+    thread_wake(thread);
+}
+
+bool thread_cancelled(void)
+{
+    return current && current->cancel_requested;
+}
+
+thread_state_t thread_state(const kernel_thread_t *thread)
+{
+    return thread ? thread->state : THREAD_DEAD;
 }
 
 size_t thread_run(size_t budget)
@@ -176,7 +306,7 @@ size_t thread_run(size_t budget)
         current = NULL;
         ran++;
 
-        if (thread->state == THREAD_DEAD) {
+        if (thread->state == THREAD_DEAD && thread->detached) {
             kfree(thread->stack);
             memset(thread, 0, sizeof(*thread));
         }

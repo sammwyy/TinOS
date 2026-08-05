@@ -11,7 +11,7 @@
 void kmutex_init(kmutex_t *mutex)
 {
     mutex->owner = NULL;
-    mutex->waiter = NULL;
+    thread_wait_queue_init(&mutex->waiters);
 }
 
 bool kmutex_try_lock(kmutex_t *mutex)
@@ -30,10 +30,8 @@ void kmutex_lock(kmutex_t *mutex)
     KASSERT(mutex->owner != self); /* recursive locking is a bug for now */
 
     while (mutex->owner) {
-        mutex->waiter = self;
-        thread_block();
+        thread_block_on(&mutex->waiters);
     }
-    mutex->waiter = NULL;
     mutex->owner = self;
 }
 
@@ -42,16 +40,44 @@ void kmutex_unlock(kmutex_t *mutex)
     kernel_thread_t *self = thread_current();
     KASSERT(self != NULL && mutex->owner == self);
     mutex->owner = NULL;
-    if (mutex->waiter) {
-        thread_wake(mutex->waiter);
-        mutex->waiter = NULL;
-    }
+    thread_wake_one(&mutex->waiters);
+}
+
+void ksemaphore_init(ksemaphore_t *semaphore, uint32_t initial,
+                     uint32_t maximum)
+{
+    KASSERT(maximum > 0 && initial <= maximum);
+    semaphore->count = initial;
+    semaphore->maximum = maximum;
+    thread_wait_queue_init(&semaphore->waiters);
+}
+
+bool ksemaphore_try_wait(ksemaphore_t *semaphore)
+{
+    if (!semaphore->count)
+        return false;
+    semaphore->count--;
+    return true;
+}
+
+void ksemaphore_wait(ksemaphore_t *semaphore)
+{
+    KASSERT(thread_current() != NULL);
+    while (!ksemaphore_try_wait(semaphore))
+        thread_block_on(&semaphore->waiters);
+}
+
+void ksemaphore_post(ksemaphore_t *semaphore)
+{
+    if (semaphore->count < semaphore->maximum)
+        semaphore->count++;
+    thread_wake_one(&semaphore->waiters);
 }
 
 void kevent_init(kevent_t *event, bool signaled)
 {
     event->signaled = signaled;
-    event->waiter = NULL;
+    thread_wait_queue_init(&event->waiters);
 }
 
 void kevent_wait(kevent_t *event)
@@ -59,18 +85,15 @@ void kevent_wait(kevent_t *event)
     kernel_thread_t *self = thread_current();
     KASSERT(self != NULL);
     while (!event->signaled) {
-        event->waiter = self;
-        thread_block();
+        thread_block_on(&event->waiters);
     }
     event->signaled = false; /* auto-reset event */
-    event->waiter = NULL;
 }
 
 void kevent_signal(kevent_t *event)
 {
     event->signaled = true;
-    if (event->waiter)
-        thread_wake(event->waiter);
+    thread_wake_one(&event->waiters);
 }
 
 void kevent_reset(kevent_t *event)

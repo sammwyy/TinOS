@@ -15,15 +15,39 @@
 #define THREAD_STACK_SIZE (16u * 1024u)
 
 typedef struct kernel_thread kernel_thread_t;
+typedef struct thread_wait_queue thread_wait_queue_t;
 typedef void (*thread_entry_fn)(void *arg);
+
+typedef enum {
+    THREAD_READY = 0,
+    THREAD_RUNNING,
+    THREAD_SLEEPING,
+    THREAD_BLOCKED,
+    THREAD_DEAD,
+} thread_state_t;
+
+struct thread_wait_queue {
+    kernel_thread_t *head;
+    kernel_thread_t *tail;
+};
 
 void thread_init(void);
 kernel_thread_t *thread_spawn(const char *name, thread_entry_fn entry,
                               void *arg);
+int thread_join(kernel_thread_t *thread);
+void thread_detach(kernel_thread_t *thread);
+void thread_cancel(kernel_thread_t *thread);
+bool thread_cancelled(void);
+thread_state_t thread_state(const kernel_thread_t *thread);
 void thread_yield(void);
 void thread_sleep(uint32_t milliseconds);
 void thread_block(void);
+void thread_wait_queue_init(thread_wait_queue_t *queue);
+void thread_block_on(thread_wait_queue_t *queue);
+void thread_wake_one(thread_wait_queue_t *queue);
+void thread_wake_all(thread_wait_queue_t *queue);
 void thread_wake(kernel_thread_t *thread);
+void thread_exit_code(int status) NORETURN;
 void thread_exit(void) NORETURN;
 kernel_thread_t *thread_current(void);
 

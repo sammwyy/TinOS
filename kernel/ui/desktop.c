@@ -23,6 +23,7 @@
 #include <tinos/string.h>
 #include <tinos/ui.h>
 #include <tinos/thread.h>
+#include <tinos/timer.h>
 
 #define MENU_WIDTH      176
 #define MENU_SUBMENU_W  252
@@ -979,6 +980,7 @@ void desktop_run(void)
          * The budget prevents one busy subsystem from starving the GUI. */
         async_run(8);
         thread_run(4);
+        ktimer_poll(4);
 
         /* --- keyboard --- */
         key_event_t key;
