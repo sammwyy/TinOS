@@ -8,6 +8,7 @@
  */
 
 #include <tinos/arch.h>
+#include <tinos/async.h>
 #include <tinos/console.h>
 #include <tinos/desktop.h>
 #include <tinos/fs.h>
@@ -22,6 +23,7 @@
 #include <tinos/printf.h>
 #include <tinos/selftest.h>
 #include <tinos/string.h>
+#include <tinos/thread.h>
 
 #define SCREEN_WIDTH  1024
 #define SCREEN_HEIGHT 768
@@ -168,7 +170,11 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     /* --- memory --------------------------------------------------- */
     pmm_init(mbi);
     heap_init();
+    async_init();
+    thread_init();
     boot_step("Memory manager online");
+    boot_note("Asynchronous worker runtime online (cooperative mode)");
+    boot_note("Kernel thread scheduler online (private stacks, cooperative)");
     boot_note("%u MiB usable in %u regions, %u MiB free",
               (uint32_t)(pmm_total_bytes() / (1024 * 1024)),
               (uint32_t)pmm_region_count(),

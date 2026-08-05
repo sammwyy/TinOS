@@ -305,10 +305,25 @@ worth being explicit that a genuinely misbehaving callback (an infinite
 loop, a slow computation) would stall the whole desktop, since one C
 function call is the entire scheduling unit.
 
-A real fix is a preemptive scheduler, not a patch: per-task stacks, a timer
-interrupt that saves/restores context instead of just marking events
-pending, a run queue, and a decision about what "task" even means here
-(each window? each app tick?). That touches the PIT ISR
+**Asynchronous workers and kernel threads.** `kernel/core/async.c` provides a
+stackless state-machine API for short operations, while `kernel/core/thread.c`
+and `kernel/arch/x86/context.S` provide real kernel threads with private
+stacks. Async tasks and threads are both run outside interrupt handlers, and
+the desktop gives each subsystem a bounded scheduling budget. Threads can
+call `thread_yield()`, `thread_sleep()` and `thread_exit()`; networking can
+therefore use a blocking-looking worker API without blocking the GUI. The
+current scheduler is cooperative, so a thread must yield voluntarily.
+
+`kernel/core/sync.c` supplies cooperative mutexes and auto-reset events.
+`kmutex_lock()` and `kevent_wait()` put the current worker in a blocked state
+instead of spinning; an unlock or signal wakes it. Interrupt handlers should
+only publish data and wake a worker, never acquire a mutex or execute a
+blocking operation.
+
+Preemption is deliberately still a separate step: the PIT must save and
+restore a thread context instead of only marking events pending, and the
+kernel needs a run queue, locks and a decision about what "task" even means
+here (each window? each app tick?). That touches the PIT ISR
 (`kernel/arch/x86/pit.c`), the GDT/TSS setup, and the desktop event loop
 all at once, and every one of the 32 shell built-ins and 5 applications
 would need to be re-audited for what they assume about not being

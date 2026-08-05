@@ -10,6 +10,7 @@
  */
 
 #include <tinos/arch.h>
+#include <tinos/async.h>
 #include <tinos/desktop.h>
 #include <tinos/fs.h>
 #include <tinos/gfx.h>
@@ -21,6 +22,7 @@
 #include <tinos/sh.h>
 #include <tinos/string.h>
 #include <tinos/ui.h>
+#include <tinos/thread.h>
 
 #define MENU_WIDTH      176
 #define MENU_SUBMENU_W  252
@@ -972,6 +974,11 @@ void desktop_run(void)
 
     for (;;) {
         bool dirty = false;
+
+        /* Future network/storage workers execute outside interrupt context.
+         * The budget prevents one busy subsystem from starving the GUI. */
+        async_run(8);
+        thread_run(4);
 
         /* --- keyboard --- */
         key_event_t key;

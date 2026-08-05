@@ -19,9 +19,11 @@
 #include <tinos/selftest.h>
 #include <tinos/sh.h>
 #include <tinos/string.h>
+#include <tinos/thread.h>
 
 static int checks;
 static int failures;
+static volatile uint32_t thread_probe;
 
 static void check(bool condition, const char *what)
 {
@@ -112,6 +114,29 @@ static void test_heap(void)
     s = krealloc(s, 4096);
     check(s && strcmp(s, "preserved") == 0, "krealloc keeps the contents");
     kfree(s);
+}
+
+static void thread_probe_entry(void *arg)
+{
+    UNUSED(arg);
+    thread_probe = 1;
+    thread_yield();
+    thread_probe = 2;
+    thread_yield();
+    thread_probe = 3;
+}
+
+static void test_threads(void)
+{
+    thread_probe = 0;
+    check(thread_spawn("selftest", thread_probe_entry, NULL) != NULL,
+          "thread_spawn creates a kernel thread");
+    check(thread_run(1) == 1 && thread_probe == 1,
+          "thread starts on its private stack");
+    check(thread_run(1) == 1 && thread_probe == 2,
+          "thread_yield returns to the scheduler");
+    check(thread_run(1) == 1 && thread_probe == 3 && thread_active() == 0,
+          "thread exits and releases its stack");
 }
 
 static void test_paths(void)
@@ -237,6 +262,7 @@ int selftest_run(void)
     uint64_t start = timer_ticks();
 
     test_heap();
+    test_threads();
     test_paths();
     test_filesystem();
     test_font();
