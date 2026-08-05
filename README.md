@@ -70,6 +70,14 @@ shell atlas.  The legacy `icon_t` values remain as compatibility handles, but
 `widget_icon()` resolves them exclusively to those named bitmap resources;
 custom code can use `widget_icon_name(x, y, size, "name")` directly.
 
+Image files with `.jpg`, `.jpeg`, `.png`, or `.webp` extensions open in the
+Image Viewer from the File Explorer.  The viewer uses the file contents to
+select a registered decoder, renders RGBA pixels with transparency, and fits
+the image proportionally to its window.  PNG and JPEG decoding is provided by
+the vendored `stb_image` library; WebP decoding is provided by the vendored
+`simplewebp` library.  Both libraries use the TinOS heap and do not depend on
+host filesystem or libc services.
+
 For temporary artwork, create a numbered placeholder with:
 
 ```sh

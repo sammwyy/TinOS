@@ -74,7 +74,8 @@ static image_result_t webp_decode(const uint8_t *data, size_t size,
 
     simplewebp_get_dimensions(decoded, &width, &height);
     if (!width || !height || width > SIZE_MAX / height ||
-        width * height > SIZE_MAX / 4)
+        width * height > SIZE_MAX / 4 ||
+        width * height > SIZE_MAX / sizeof(uint32_t))
         goto done;
 
     size_t count = width * height;

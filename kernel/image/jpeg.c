@@ -26,12 +26,17 @@ static image_result_t jpeg_decode(const uint8_t *data, size_t size,
                                                  &height, &channels, 4);
     if (!rgba)
         return IMAGE_ERR_INVALID;
-    if (width <= 0 || height <= 0 || (size_t)width > SIZE_MAX / (size_t)height) {
+    if (width <= 0 || height <= 0 ||
+        (size_t)width > SIZE_MAX / (size_t)height) {
         stbi_image_free(rgba);
         return IMAGE_ERR_INVALID;
     }
 
     size_t count = (size_t)width * (size_t)height;
+    if (count > SIZE_MAX / sizeof(uint32_t)) {
+        stbi_image_free(rgba);
+        return IMAGE_ERR_NOMEM;
+    }
     out->pixels = kmalloc(count * sizeof(uint32_t));
     if (!out->pixels) {
         stbi_image_free(rgba);
