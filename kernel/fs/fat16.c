@@ -14,7 +14,7 @@
 #define FAT16_MAX_DEPTH 16
 #define FAT16_EOC        0xFFF8u
 #define FAT16_BAD        0xFFF7u
-#define FAT_READ_BATCH   16u
+#define FAT_READ_BATCH   64u
 
 typedef struct {
     uint16_t bytes_per_sector;
@@ -104,7 +104,7 @@ static bool fat16_file_read(const fs_node_t *node, size_t offset,
                             void *buffer, size_t length)
 {
     fat16_file_backend_t *file = node->backend;
-    uint8_t sectors[BLOCK_SECTOR_SIZE * FAT_READ_BATCH];
+    uint8_t sector[BLOCK_SECTOR_SIZE];
     uint8_t fat_cache[BLOCK_SECTOR_SIZE];
     uint32_t fat_cache_lba = 0;
     bool fat_cache_valid = false;
@@ -132,21 +132,25 @@ static bool fat16_file_read(const fs_node_t *node, size_t offset,
         uint32_t lba = file->data_lba +
                        (uint32_t)(cluster - 2) * file->sectors_per_cluster +
                        (uint32_t)sector_index;
-        uint32_t batch = MIN((uint32_t)FAT_READ_BATCH,
-                             file->sectors_per_cluster -
-                             (uint32_t)sector_index);
-        batch = MIN(batch, (uint32_t)((length - done + in_sector +
-                                       BLOCK_SECTOR_SIZE - 1) /
-                                      BLOCK_SECTOR_SIZE));
-        if (!block_read(file->device, lba, sectors, batch))
-            return false;
-        for (uint32_t b = 0; b < batch && done < length; b++) {
-            size_t skip = b == 0 ? in_sector : 0;
-            size_t count = MIN(length - done, BLOCK_SECTOR_SIZE - skip);
-            memcpy((uint8_t *)buffer + done,
-                   sectors + b * BLOCK_SECTOR_SIZE + skip, count);
+        size_t remaining = length - done;
+        if (in_sector || remaining < BLOCK_SECTOR_SIZE) {
+            if (!block_read(file->device, lba, sector, 1))
+                return false;
+            size_t count = MIN(remaining, BLOCK_SECTOR_SIZE - in_sector);
+            memcpy((uint8_t *)buffer + done, sector + in_sector, count);
             done += count;
             in_cluster += count;
+        } else {
+            uint32_t batch = MIN((uint32_t)FAT_READ_BATCH,
+                                 file->sectors_per_cluster -
+                                 (uint32_t)sector_index);
+            batch = MIN(batch, (uint32_t)(remaining / BLOCK_SECTOR_SIZE));
+            if (!block_read(file->device, lba, (uint8_t *)buffer + done,
+                            batch))
+                return false;
+            size_t bytes = (size_t)batch * BLOCK_SECTOR_SIZE;
+            done += bytes;
+            in_cluster += bytes;
         }
         if (in_cluster == cluster_bytes && done < length) {
             if (guard++ > file->cluster_count)
