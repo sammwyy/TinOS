@@ -145,6 +145,9 @@ typedef enum {
 } icon_t;
 
 void widget_icon(int x, int y, int size, icon_t icon);
+/* Draw a build-time resource icon by its BMP filename stem (e.g. "test").
+ * Returns false when no such resource exists. */
+bool widget_icon_name(int x, int y, int size, const char *name);
 void widget_button(rect_t r, const char *label, bool hot, bool pressed);
 void widget_panel(rect_t r, color_t fill, color_t border);
 void widget_text_centered(rect_t r, const char *text, color_t color);

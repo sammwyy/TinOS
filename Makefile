@@ -32,7 +32,7 @@ CFLAGS := -m32 -std=gnu11 -O2 -g \
           -fno-pic -fno-pie -fno-asynchronous-unwind-tables \
           -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -mgeneral-regs-only \
           -Wall -Wextra -Wno-unused-parameter -Wno-address-of-packed-member \
-          -Ikernel/include
+          -Ikernel/include -I$(BUILD)/generated
 ASFLAGS := -m32 -g -Ikernel/include
 LDFLAGS := -m elf_i386 -T boot/linker.ld -nostdlib -z noexecstack \
            --build-id=none -Map=$(MAP)
@@ -44,6 +44,11 @@ SRCS_S := $(sort $(shell find kernel boot -name '*.S'))
 OBJS   := $(patsubst %.c,$(BUILD)/%.c.o,$(SRCS_C)) \
           $(patsubst %.S,$(BUILD)/%.S.o,$(SRCS_S))
 DEPS   := $(OBJS:.o=.d)
+ICON_GEN_C := $(BUILD)/generated/icons_generated.c
+ICON_GEN_H := $(BUILD)/generated/icons_generated.h
+ICON_GEN_OBJ := $(BUILD)/generated/icons_generated.c.o
+ICON_GEN_STAMP := $(BUILD)/generated/.icons.stamp
+FORCE:
 
 # --- host unit tests --------------------------------------------------
 HOST_SRCS   := $(sort $(wildcard kernel/fs/*.c) $(wildcard kernel/sh/*.c) \
@@ -57,9 +62,29 @@ HOST_SAN := $(shell echo 'int main(void){return 0;}' | \
 HOST_CFLAGS := -std=gnu11 -g -O1 -Wall -Wextra -Wno-unused-parameter \
                -DTINOS_HOST=1 -Ikernel/include -Itests/host $(HOST_SAN)
 
-.PHONY: all iso kernel run run-serial run-headless runvnc usb-image test check verify-reproducible clean distclean
+.PHONY: all iso kernel resources run run-serial run-headless runvnc usb-image test check verify-reproducible clean distclean
 
 all: $(ISO)
+
+$(ICON_GEN_STAMP): tools/gen_icons.py $(wildcard resources/icons/*.bmp)
+	@mkdir -p $(dir $@)
+	python3 tools/gen_icons.py resources/icons $(ICON_GEN_C)
+	@touch $@
+
+# The generator writes both outputs in one pass; the stamp gives make one
+# concrete dependency and avoids races between the header and source outputs.
+$(ICON_GEN_C) $(ICON_GEN_H): $(ICON_GEN_STAMP)
+	@test -f $@
+
+resources: $(ICON_GEN_STAMP)
+
+$(ICON_GEN_OBJ): $(ICON_GEN_C) $(ICON_GEN_H)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+# Every kernel translation unit may include the generated public UI header;
+# make this ordering explicit for parallel clean builds.
+$(OBJS): $(ICON_GEN_H)
 
 # --- kernel -----------------------------------------------------------
 $(BUILD)/%.c.o: %.c
@@ -70,9 +95,9 @@ $(BUILD)/%.S.o: %.S
 	@mkdir -p $(dir $@)
 	$(CC) $(ASFLAGS) -MMD -MP -c $< -o $@
 
-$(KERNEL): $(OBJS) boot/linker.ld
+$(KERNEL): $(OBJS) $(ICON_GEN_OBJ) $(ICON_GEN_STAMP) boot/linker.ld
 	@mkdir -p $(dir $@)
-	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(LIBGCC)
+	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(ICON_GEN_OBJ) $(LIBGCC)
 	@echo "  kernel: $$(stat -c%s $@) bytes"
 
 kernel: $(KERNEL)

@@ -63,6 +63,22 @@ possibly `libgcc.i686` and `grub2-tools-extra`.
 | `make runvnc` | launch QEMU with the display served over VNC |
 | `make usb-image` | create or reuse a sparse 4 GiB FAT32 USB development image |
 | `make test` | build and run the host-side unit tests |
+| `make resources` | compile `resources/icons/*.bmp` into the generated icon atlas |
+
+The desktop icons live in `resources/icons/` and are always compiled into the
+shell atlas.  The legacy `icon_t` values remain as compatibility handles, but
+`widget_icon()` resolves them exclusively to those named bitmap resources;
+custom code can use `widget_icon_name(x, y, size, "name")` directly.
+
+For temporary artwork, create a numbered placeholder with:
+
+```sh
+python3 tools/make_icon_placeholder.py my-icon 21
+python3 tools/make_icon_placeholder.py next-icon
+```
+
+Without a number, the script assigns the next number after counting the BMPs
+already present in `resources/icons/`.
 | `make check` | host tests **and** the scripted QEMU boot/GUI test |
 | `make verify-reproducible` | build twice from clean and compare the kernel and ISO |
 | `make clean` | delete `build/` |

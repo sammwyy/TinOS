@@ -5,38 +5,17 @@
 #include <tinos/gfx.h>
 #include <tinos/string.h>
 #include <tinos/ui.h>
+#include "icons_generated.h"
 
 /* ------------------------------------------------------------------ */
 /* Shapes                                                              */
 /* ------------------------------------------------------------------ */
 
-static void fill_circle(int cx, int cy, int radius, color_t color)
-{
-    for (int dy = -radius; dy <= radius; dy++) {
-        int span = 0;
-        while (span * span + dy * dy <= radius * radius)
-            span++;
-        span--;
-        gfx_hline(cx - span, cy + dy, span * 2 + 1, color);
-    }
-}
-
-static void ring(int cx, int cy, int radius, int thickness, color_t color)
-{
-    for (int dy = -radius; dy <= radius; dy++) {
-        for (int dx = -radius; dx <= radius; dx++) {
-            int d2 = dx * dx + dy * dy;
-            if (d2 <= radius * radius &&
-                d2 >= (radius - thickness) * (radius - thickness))
-                gfx_pixel(cx + dx, cy + dy, color);
-        }
-    }
-}
-
 /* ------------------------------------------------------------------ */
 /* Icons                                                               */
 /* ------------------------------------------------------------------ */
 
+#if 0 /* Legacy hardcoded icon table; resources/icons is authoritative. */
 typedef struct {
     icon_t   icon;
     uint16_t mask[16];
@@ -99,7 +78,37 @@ static bool draw_builtin_icon(int x, int y, int size, icon_t icon)
     }
     return true;
 }
+#endif
 
+bool widget_icon_name(int x, int y, int size, const char *name)
+{
+    if (!name || size <= 0)
+        return false;
+    const custom_icon_t *icon = NULL;
+    for (size_t i = 0; i < custom_icon_count; i++) {
+        if (strcmp(custom_icons[i].name, name) == 0) {
+            icon = &custom_icons[i];
+            break;
+        }
+    }
+    if (!icon)
+        return false;
+
+    for (int py = 0; py < size; py++) {
+        int sy = py * icon->height / size;
+        for (int px = 0; px < size; px++) {
+            int sx = px * icon->width / size;
+            uint32_t pixel = custom_icon_atlas[(size_t)(icon->y + sy) *
+                                               custom_icon_atlas_width +
+                                               icon->x + sx];
+            if ((pixel >> 24) != 0)
+                gfx_pixel(x + px, y + py, pixel & 0x00ffffffu);
+        }
+    }
+    return true;
+}
+
+#if 0
 void widget_icon(int x, int y, int size, icon_t icon)
 {
     int s = size;
@@ -250,6 +259,40 @@ void widget_icon(int x, int y, int size, icon_t icon)
         break;
     }
     }
+}
+#endif
+
+static const char *icon_resource_name(icon_t icon)
+{
+    static const char *const names[] = {
+        [ICON_TERMINAL] = "terminal",
+        [ICON_FOLDER] = "folder",
+        [ICON_FILE] = "file",
+        [ICON_INFO] = "info",
+        [ICON_CHIP] = "chip",
+        [ICON_POWER] = "power",
+        [ICON_RESTART] = "restart",
+        [ICON_EDITOR] = "editor",
+        [ICON_TINOS] = "tinos",
+        [ICON_BACK] = "back",
+        [ICON_FORWARD] = "forward",
+        [ICON_UP] = "up",
+        [ICON_HOME] = "home",
+        [ICON_DRIVE] = "drive",
+        [ICON_REFRESH] = "refresh",
+        [ICON_SAVE] = "save",
+        [ICON_NEW] = "new",
+        [ICON_UNDO] = "undo",
+        [ICON_REDO] = "redo",
+    };
+    return icon >= 0 && (size_t)icon < ARRAY_SIZE(names) ? names[icon] : NULL;
+}
+
+void widget_icon(int x, int y, int size, icon_t icon)
+{
+    const char *name = icon_resource_name(icon);
+    if (name)
+        (void)widget_icon_name(x, y, size, name);
 }
 
 /* ------------------------------------------------------------------ */
