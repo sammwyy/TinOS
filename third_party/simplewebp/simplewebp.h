@@ -14,9 +14,17 @@ extern "C" {
 #endif
 
 #include <stddef.h>
+#ifdef SIMPLEWEBP_TINOS
+#include <tinos/types.h>
+#include <tinos/string.h>
+#include <tinos/heap.h>
+#else
 #include <stdlib.h>
+#endif
 #if defined(__cplusplus) || (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901)
+#ifndef SIMPLEWEBP_TINOS
 #include <stdint.h>
+#endif
 
 typedef uint8_t simplewebp_u8;
 typedef int8_t simplewebp_i8;
@@ -292,8 +300,13 @@ simplewebp_error simplewebp_load_from_filename(const char *filename, const simpl
 extern "C" {
 #endif
 
+#ifdef SIMPLEWEBP_TINOS
+#include <tinos/string.h>
+#define abs(value) ((value) < 0 ? -(value) : (value))
+#else
 #include <assert.h>
 #include <string.h>
+#endif
 
 struct swebp__picture_header
 {
@@ -478,13 +491,21 @@ struct simplewebp_memoryinput_data
 static void *swebp__malloc(void *_unused, size_t size)
 {
 	(void)_unused;
+#ifdef SIMPLEWEBP_TINOS
+	return kmalloc(size);
+#else
 	return malloc(size);
+#endif
 }
 
 static void swebp__free(void *_unused, void *mem)
 {
 	(void)_unused;
+#ifdef SIMPLEWEBP_TINOS
+	kfree(mem);
+#else
 	free(mem);
+#endif
 }
 
 static void *swebp__alloc(simplewebp *simplewebp, size_t size)
