@@ -67,6 +67,8 @@ static fs_node_t *node_alloc(const char *name, fs_type_t type)
 
 static void node_free(fs_node_t *node)
 {
+    if (node->backend_release && node->backend)
+        node->backend_release(node->backend);
     if (node->data) {
         total_bytes -= node->capacity;
         kfree(node->data);
@@ -647,7 +649,8 @@ fs_result_t fs_copy_node(fs_node_t *src, fs_node_t *dst_dir,
     node_link(dst_dir, copy);
 
     if (src->type == FS_FILE) {
-        r = fs_write(copy, src->data, src->size);
+        const uint8_t *contents = fs_data(src);
+        r = contents ? fs_write(copy, contents, src->size) : FS_ERR_NOMEM;
         if (r != FS_OK) {
             fs_remove_node(copy, false);
             return r;
@@ -723,6 +726,8 @@ fs_result_t fs_write(fs_node_t *file, const void *data, size_t len)
         return FS_ERR_NOENT;
     if (file->type != FS_FILE)
         return FS_ERR_ISDIR;
+    if (file->backend)
+        return FS_ERR_INVAL;
 
     if (len == 0) {
         file->size     = 0;
@@ -746,6 +751,8 @@ fs_result_t fs_append(fs_node_t *file, const void *data, size_t len)
         return FS_ERR_NOENT;
     if (file->type != FS_FILE)
         return FS_ERR_ISDIR;
+    if (file->backend)
+        return FS_ERR_INVAL;
     if (len == 0)
         return FS_OK;
 
@@ -780,7 +787,36 @@ fs_result_t fs_write_path(fs_node_t *cwd, const char *path, const void *data,
 
 const uint8_t *fs_data(const fs_node_t *file)
 {
-    return file ? file->data : NULL;
+    if (!file || file->type != FS_FILE)
+        return NULL;
+    if (!file->data && file->backend && file->size) {
+        fs_node_t *mutable_file = (fs_node_t *)file;
+        uint8_t *loaded = kmalloc(file->size);
+        if (!loaded || !file->read_at(file, 0, loaded, file->size)) {
+            if (loaded)
+                kfree(loaded);
+            return NULL;
+        }
+        mutable_file->data = loaded;
+        mutable_file->capacity = file->size;
+        total_bytes += file->size;
+    }
+    return file->data;
+}
+
+bool fs_read_at(const fs_node_t *file, size_t offset, void *buffer,
+                size_t length)
+{
+    if (!file || file->type != FS_FILE || (!buffer && length) ||
+        offset > file->size || length > file->size - offset)
+        return false;
+    if (!length)
+        return true;
+    if (file->data) {
+        memcpy(buffer, file->data + offset, length);
+        return true;
+    }
+    return file->read_at && file->read_at(file, offset, buffer, length);
 }
 
 size_t fs_size(const fs_node_t *file)

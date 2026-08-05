@@ -999,7 +999,11 @@ void desktop_run(void)
         /* Future network/storage workers execute outside interrupt context.
          * The budget prevents one busy subsystem from starving the GUI. */
         async_run(8);
-        thread_run(4);
+        /* Storage workers are deliberately limited to one cooperative slice
+         * per frame.  A USB/FAT operation may be slow, so several resumptions
+         * here would make the desktop appear frozen even though interrupts
+         * remain enabled. */
+        thread_run(1);
         ktimer_poll(4);
 
         /* --- keyboard --- */

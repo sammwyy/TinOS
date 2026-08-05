@@ -196,6 +196,9 @@ static void test_fs_mutation(void)
     CHECK(fs_write(node, "hello", 5) == FS_OK);
     CHECK(fs_size(node) == 5);
     CHECK(memcmp(fs_data(node), "hello", 5) == 0);
+    char slice[4] = { 0 };
+    CHECK(fs_read_at(node, 1, slice, 3));
+    CHECK(memcmp(slice, "ell", 3) == 0);
     CHECK(fs_append(node, " world", 6) == FS_OK);
     CHECK(fs_size(node) == 11);
     CHECK(memcmp(fs_data(node), "hello world", 11) == 0);

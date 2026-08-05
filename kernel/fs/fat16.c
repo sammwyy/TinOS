@@ -1,9 +1,9 @@
 /*
  * Small, read-only FAT16 volume importer.
  *
- * FAT is intentionally kept above the block layer. This first filesystem
- * implementation imports a volume into TinOS's RAM tree; write-through VFS
- * mounts can be added later without changing ATA, USB, or VirtIO drivers.
+ * FAT is kept above the block layer. Mounting imports directory metadata into
+ * the VFS tree; regular-file contents remain on the block device and are read
+ * through the node backend only when an application asks for them.
  */
 
 #include <tinos/fat16.h>
@@ -33,6 +33,15 @@ typedef struct {
     bool     fat_cache_valid;
     uint8_t  fat_cache[BLOCK_SECTOR_SIZE];
 } fat16_volume_t;
+
+typedef struct {
+    block_device_t *device;
+    uint32_t fat_lba;
+    uint32_t data_lba;
+    uint8_t sectors_per_cluster;
+    uint32_t cluster_count;
+    uint16_t first_cluster;
+} fat16_file_backend_t;
 
 static uint16_t le16(const uint8_t *p)
 {
@@ -75,6 +84,77 @@ static uint32_t fat16_cluster_lba(const fat16_volume_t *volume,
                                   volume->sectors_per_cluster;
 }
 
+static bool fat16_file_next(fat16_file_backend_t *file, uint16_t cluster,
+                            uint8_t *cache, uint32_t *cache_lba,
+                            bool *cache_valid, uint16_t *next)
+{
+    uint32_t offset = (uint32_t)cluster * 2;
+    uint32_t lba = file->fat_lba + offset / BLOCK_SECTOR_SIZE;
+    if (!*cache_valid || *cache_lba != lba) {
+        if (!block_read(file->device, lba, cache, 1))
+            return false;
+        *cache_lba = lba;
+        *cache_valid = true;
+    }
+    *next = le16(cache + offset % BLOCK_SECTOR_SIZE);
+    return true;
+}
+
+static bool fat16_file_read(const fs_node_t *node, size_t offset,
+                            void *buffer, size_t length)
+{
+    fat16_file_backend_t *file = node->backend;
+    uint8_t sector[BLOCK_SECTOR_SIZE];
+    uint8_t fat_cache[BLOCK_SECTOR_SIZE];
+    uint32_t fat_cache_lba = 0;
+    bool fat_cache_valid = false;
+    size_t done = 0;
+    uint32_t cluster_bytes = (uint32_t)file->sectors_per_cluster *
+                             BLOCK_SECTOR_SIZE;
+    uint32_t cluster_index = (uint32_t)(offset / cluster_bytes);
+    size_t in_cluster = offset % cluster_bytes;
+    uint16_t cluster = file->first_cluster;
+    uint32_t guard = 0;
+
+    while (cluster_index--) {
+        if (cluster < 2 || cluster >= file->cluster_count + 2 ||
+            guard++ > file->cluster_count)
+            return false;
+        if (!fat16_file_next(file, cluster, fat_cache, &fat_cache_lba,
+                             &fat_cache_valid, &cluster))
+            return false;
+    }
+    while (done < length) {
+        if (cluster < 2 || cluster >= file->cluster_count + 2)
+            return false;
+        size_t sector_index = in_cluster / BLOCK_SECTOR_SIZE;
+        size_t in_sector = in_cluster % BLOCK_SECTOR_SIZE;
+        uint32_t lba = file->data_lba +
+                       (uint32_t)(cluster - 2) * file->sectors_per_cluster +
+                       (uint32_t)sector_index;
+        if (!block_read(file->device, lba, sector, 1))
+            return false;
+        size_t count = MIN(length - done, BLOCK_SECTOR_SIZE - in_sector);
+        memcpy((uint8_t *)buffer + done, sector + in_sector, count);
+        done += count;
+        in_cluster += count;
+        if (in_cluster == cluster_bytes && done < length) {
+            if (guard++ > file->cluster_count)
+                return false;
+            if (!fat16_file_next(file, cluster, fat_cache, &fat_cache_lba,
+                                 &fat_cache_valid, &cluster))
+                return false;
+            in_cluster = 0;
+        }
+    }
+    return true;
+}
+
+static void fat16_file_release(void *backend)
+{
+    kfree(backend);
+}
+
 static void fat16_name(const uint8_t *entry, char *name, size_t capacity)
 {
     size_t used = 0;
@@ -101,37 +181,28 @@ static bool fat16_import_file(block_device_t *device,
     if (fs_create(parent, name, &file) != FS_OK)
         return false;
 
-    uint32_t remaining = le32(entry + 28);
-    uint16_t cluster = le16(entry + 26);
-    uint8_t sectors[BLOCK_SECTOR_SIZE * FAT_READ_BATCH];
-    uint32_t guard = 0;
-    while (remaining) {
-        if (!fat16_cluster_valid(volume, cluster) ||
-            cluster == FAT16_BAD || guard++ > volume->cluster_count)
-            return false;
-        uint32_t lba = fat16_cluster_lba(volume, cluster);
-        for (uint32_t s = 0; s < volume->sectors_per_cluster && remaining;) {
-            uint32_t batch = MIN((uint32_t)FAT_READ_BATCH,
-                                 volume->sectors_per_cluster - s);
-            batch = MIN(batch, (remaining + BLOCK_SECTOR_SIZE - 1) /
-                                BLOCK_SECTOR_SIZE);
-            if (!block_read(device, lba + s, sectors, batch))
-                return false;
-            for (uint32_t b = 0; b < batch && remaining; b++) {
-                uint32_t count = MIN(remaining, BLOCK_SECTOR_SIZE);
-                if (fs_append(file, sectors + b * BLOCK_SECTOR_SIZE, count) != FS_OK)
-                    return false;
-                remaining -= count;
-            }
-            s += batch;
-        }
-        if (!remaining)
-            break;
-        if (!fat16_next(device, volume, cluster, &cluster))
-            return false;
-        if (cluster >= FAT16_EOC)
-            return false;
+    fat16_file_backend_t *backend = kcalloc(1, sizeof(*backend));
+    if (!backend)
+        return false;
+    uint32_t file_size = le32(entry + 28);
+    uint16_t first_cluster = le16(entry + 26);
+    uint64_t max_bytes = (uint64_t)volume->cluster_count *
+                         volume->sectors_per_cluster * BLOCK_SECTOR_SIZE;
+    if (file_size > max_bytes || (file_size &&
+                                  !fat16_cluster_valid(volume, first_cluster))) {
+        kfree(backend);
+        return false;
     }
+    backend->device = device;
+    backend->fat_lba = volume->fat_lba;
+    backend->data_lba = volume->data_lba;
+    backend->sectors_per_cluster = volume->sectors_per_cluster;
+    backend->cluster_count = volume->cluster_count;
+    backend->first_cluster = first_cluster;
+    file->size = file_size;
+    file->backend = backend;
+    file->read_at = fat16_file_read;
+    file->backend_release = fat16_file_release;
     return true;
 }
 

@@ -1,8 +1,9 @@
-/* In-memory hierarchical filesystem.
+/* Hierarchical VFS tree with in-memory and block-backed files.
  *
  * A single tree of nodes lives for the duration of the boot session and is
- * shared by every application: what the terminal changes, the file explorer
- * sees immediately, because both operate on these nodes directly.
+ * shared by every application. Mounted filesystems attach lightweight
+ * backends to nodes, so metadata is available immediately while file content
+ * can be fetched with fs_read_at() on demand.
  */
 #ifndef TINOS_FS_H
 #define TINOS_FS_H
@@ -33,7 +34,12 @@ typedef enum {
     FS_ERR_ROOT,
 } fs_result_t;
 
-typedef struct fs_node {
+typedef struct fs_node fs_node_t;
+typedef bool (*fs_read_at_fn)(const fs_node_t *node, size_t offset,
+                              void *buffer, size_t length);
+typedef void (*fs_backend_release_fn)(void *backend);
+
+struct fs_node {
     char            name[FS_NAME_MAX];
     fs_type_t       type;
     struct fs_node *parent;
@@ -44,7 +50,10 @@ typedef struct fs_node {
     size_t   size;
     size_t   capacity;
     uint32_t modified; /* fs_clock_ms() at the last modification       */
-} fs_node_t;
+    void    *backend;
+    fs_read_at_fn read_at;
+    fs_backend_release_fn backend_release;
+};
 
 /* Millisecond clock used for modification times; supplied by the kernel
  * (arch timer) and by the host test harness. */
@@ -93,6 +102,8 @@ fs_result_t fs_append(fs_node_t *file, const void *data, size_t len);
 fs_result_t fs_write_path(fs_node_t *cwd, const char *path, const void *data,
                           size_t len, bool append);
 const uint8_t *fs_data(const fs_node_t *file);
+bool fs_read_at(const fs_node_t *file, size_t offset, void *buffer,
+                size_t length);
 size_t         fs_size(const fs_node_t *file);
 
 /* Recursive size of a directory (or the file size for a file). */
