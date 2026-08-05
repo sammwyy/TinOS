@@ -36,6 +36,7 @@ typedef struct {
     audio_format_t loaded_format;
     uint64_t loaded_total;
     bool load_ok;
+    bool closing;
 } media_player_t;
 
 static bool supported(const char *name)
@@ -78,6 +79,11 @@ static void player_load_worker(void *arg)
             p->tracks[p->current].path, fs_data(node), fs_size(node),
             &p->loaded_format, &p->loaded_total, &p->loaded_codec);
         p->load_ok = p->loaded_decoder != NULL;
+    }
+    if (p->closing) {
+        if (p->loaded_decoder)
+            audio_decoder_close(p->loaded_decoder);
+        kfree(p);
     }
     thread_exit();
 }
@@ -134,11 +140,23 @@ static void player_on_close(window_t *win)
     media_player_t *p = win->priv;
     if (p) {
         if (p->loader) {
-            thread_cancel(p->loader);
-            while (thread_state(p->loader) != THREAD_DEAD)
-                thread_run(1);
-            thread_join(p->loader);
-            p->loader = NULL;
+            if (thread_state(p->loader) == THREAD_DEAD) {
+                thread_join(p->loader);
+                p->loader = NULL;
+                if (p->loaded_decoder)
+                    audio_decoder_close(p->loaded_decoder);
+                player_stop_decoder(p);
+                kfree(p);
+                win->priv = NULL;
+                return;
+            } else {
+                p->closing = true;
+                thread_cancel(p->loader);
+                thread_detach(p->loader);
+                audio_stream_stop();
+                win->priv = NULL;
+                return;
+            }
         }
         if (p->loaded_decoder)
             audio_decoder_close(p->loaded_decoder);

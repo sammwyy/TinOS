@@ -15,6 +15,8 @@ struct fs_io_request {
     bool ok;
     bool completed;
     bool notified;
+    bool cancelled;
+    bool released;
     struct fs_io_request *next;
     fs_io_complete_fn complete;
     void *arg;
@@ -29,9 +31,14 @@ static fs_io_request_t *requests;
 static void io_worker(void *arg)
 {
     fs_io_request_t *request = arg;
-    request->ok = fs_read_at(request->file, 0, request->data,
-                             request->size);
+    if (!thread_cancelled() && !request->cancelled)
+        request->ok = fs_read_at(request->file, 0, request->data,
+                                 request->size);
     request->completed = true;
+    if (request->cancelled && request->released) {
+        kfree(request->data);
+        kfree(request);
+    }
     thread_exit();
 }
 #endif
@@ -90,11 +97,9 @@ void fs_io_cancel(fs_io_request_t *request)
         return;
 #ifndef TINOS_HOST
     if (request->worker) {
+        request->cancelled = true;
         thread_cancel(request->worker);
-        while (thread_state(request->worker) != THREAD_DEAD)
-            thread_run(1);
-        thread_join(request->worker);
-        request->worker = NULL;
+        thread_detach(request->worker);
     }
 #endif
     request->completed = true;
@@ -119,16 +124,18 @@ void fs_io_release(fs_io_request_t *request)
 {
     if (!request)
         return;
-#ifndef TINOS_HOST
-    if (request->worker)
-        return;
-#endif
     for (fs_io_request_t **link = &requests; *link; link = &(*link)->next) {
         if (*link == request) {
             *link = request->next;
             break;
         }
     }
+#ifndef TINOS_HOST
+    if (request->worker && thread_state(request->worker) != THREAD_DEAD) {
+        request->released = true;
+        return;
+    }
+#endif
     kfree(request->data);
     kfree(request);
 }
