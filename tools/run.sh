@@ -17,6 +17,7 @@ MEM=${MEM:-256}
 QEMU=${QEMU:-qemu-system-i386}
 USB_IMAGE=${USB_IMAGE:-build/tinos-usb.img}
 USB_SOURCE=${USB_SOURCE:-build/usb-root}
+AUDIODEV=${AUDIODEV:-driver=none,id=tinos-audio}
 
 if [[ ! -f $ISO ]]; then
     echo "$ISO not found - run 'make' first" >&2
@@ -36,6 +37,8 @@ args=(
     -machine pc
     -rtc base=localtime
     -name "TinOS"
+    -audiodev "$AUDIODEV"
+    -device AC97,audiodev=tinos-audio
     -netdev user,id=tinosnet
     -device e1000,netdev=tinosnet
     -drive "file=$USB_IMAGE,if=none,id=tinos-usb-disk,format=raw"

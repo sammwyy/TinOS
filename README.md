@@ -95,6 +95,8 @@ The exact QEMU invocation (also in `tools/run.sh`):
 
 ```sh
 qemu-system-i386 -cdrom build/tinos.iso -m 256 -vga std -machine pc \
+                 -audiodev driver=none,id=tinos-audio \
+                 -device AC97,audiodev=tinos-audio \
                  -boot order=d -rtc base=localtime \
                  -drive file=build/tinos-usb.img,if=none,id=tinos-usb-disk,format=raw \
                  -device piix3-usb-uhci,id=tinos-usb \
@@ -117,6 +119,11 @@ Override the image and source directory with `USB_IMAGE` and `USB_SOURCE`.
 `-vga std` matters: the graphics driver programs the Bochs/QEMU **DISPI**
 registers of the standard VGA adapter. `-m 256` is a comfortable default;
 TinOS runs in far less.
+
+The default QEMU run uses an AC'97 device with the `none` audio backend so
+headless tests do not require a host sound server. Set `AUDIODEV`, for example
+to `driver=pipewire,id=tinos-audio` or `driver=pa,id=tinos-audio`, to hear
+`doremi` through a host audio backend.
 
 The GRUB menu has two entries:
 

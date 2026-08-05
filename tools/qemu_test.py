@@ -74,6 +74,8 @@ class Tinos:
             "-m", str(self.mem),
             "-vga", "std",
             "-machine", "pc",
+            "-audiodev", "driver=none,id=tinos-audio",
+            "-device", "AC97,audiodev=tinos-audio",
             "-display", "none",
             "-serial", "file:" + self.serial_path,
             "-qmp", "tcp:127.0.0.1:%d,server,nowait" % self.qmp_port,
