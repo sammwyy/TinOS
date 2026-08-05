@@ -2,7 +2,7 @@
  * QEMU-compatible UHCI host controller path for USB mass storage.
  *
  * This is intentionally a single-device, polling implementation: one frame
- * list, one queue head, and synchronous control/bulk transfers. It provides
+ * list, direct TD chains, and synchronous control/bulk transfers. It provides
  * the smallest useful USB transport while keeping BOT/SCSI in usb_msc.c.
  */
 
@@ -55,11 +55,6 @@ typedef struct PACKED {
 } uhci_td_t;
 
 typedef struct PACKED {
-    uint32_t head;
-    uint32_t element;
-} uhci_qh_t;
-
-typedef struct PACKED {
     uint8_t  request_type;
     uint8_t  request;
     uint16_t value;
@@ -80,7 +75,6 @@ typedef struct {
     bool     low_speed;
     dma_buffer_t schedule;
     dma_buffer_t transfer;
-    uhci_qh_t *qh;
     uhci_td_t *tds;
     uint32_t *frames;
     usb_msc_transport_t msc_transport;
@@ -103,7 +97,8 @@ static void delay(void)
 
 static bool uhci_submit(size_t count)
 {
-    uhci.qh->element = address_of(uhci.tds) | 0;
+    for (size_t i = 0; i < 1024; i++)
+        uhci.frames[i] = address_of(uhci.tds);
     __asm__ volatile("" ::: "memory");
     outw(uhci.io + UHCI_CMD, UHCI_CMD_RUN | UHCI_CMD_CONFIG | UHCI_CMD_MAXP);
     for (uint32_t i = 0; i < UHCI_TIMEOUT; i++) {
@@ -112,16 +107,22 @@ static bool uhci_submit(size_t count)
             active |= (uhci.tds[n].status & UHCI_TD_ACTIVE) != 0;
         if (!active)
             break;
+        io_wait();
     }
     for (size_t n = 0; n < count; n++)
         if ((uhci.tds[n].status & UHCI_TD_ACTIVE) ||
             (uhci.tds[n].status & UHCI_TD_ERROR)) {
             klog("[uhci] TD %u status 0x%08x token 0x%08x\n", (uint32_t)n,
                  uhci.tds[n].status, uhci.tds[n].token);
-            uhci.qh->element = UHCI_LINK_TERM;
+            klog("[uhci] submit cmd=0x%04x status=0x%04x frame=0x%04x\n",
+                 inw(uhci.io + UHCI_CMD), inw(uhci.io + UHCI_STATUS),
+                 inw(uhci.io + UHCI_FRAME));
+            for (size_t i = 0; i < 1024; i++)
+                uhci.frames[i] = UHCI_LINK_TERM;
             return false;
         }
-    uhci.qh->element = UHCI_LINK_TERM;
+    for (size_t i = 0; i < 1024; i++)
+        uhci.frames[i] = UHCI_LINK_TERM;
     return true;
 }
 
@@ -138,7 +139,8 @@ static void setup_td(uhci_td_t *td, uint8_t pid, uint8_t address,
                      uint32_t buffer, uint32_t next)
 {
     td->link = next;
-    td->status = UHCI_TD_ACTIVE | (3u << 27);
+    td->status = UHCI_TD_ACTIVE | (3u << 27) |
+                 (uhci.low_speed ? (1u << 26) : 0);
     td->token = token(pid, address, endpoint, toggle, length);
     td->buffer = buffer;
 }
@@ -193,18 +195,24 @@ static bool bulk_transfer(void *context, void *buffer, size_t length,
         memcpy((uint8_t *)state->transfer.virt, buffer, length);
 
     uint8_t toggle = input ? state->bulk_in_toggle : state->bulk_out_toggle;
-    size_t count = 0;
     size_t offset = 0;
     while (offset < length) {
         uint16_t packet = (uint16_t)MIN(length - offset, max_packet);
-        setup_td(&state->tds[count++], input ? USB_PID_IN : USB_PID_OUT,
+        setup_td(&state->tds[0], input ? USB_PID_IN : USB_PID_OUT,
                  state->address, endpoint, toggle, packet,
                  state->transfer.phys + offset, UHCI_LINK_TERM);
+        /* Keep an inactive tail in the schedule. QEMU's UHCI model, like
+         * PIIX hardware, needs a following TD before it retires an async
+         * bulk packet from a direct TD schedule. */
+        state->tds[1].link = UHCI_LINK_TERM;
+        state->tds[1].status = 0;
+        state->tds[1].token = 0;
+        state->tds[1].buffer = 0;
+        if (!uhci_submit(2))
+            return false;
         offset += packet;
         toggle ^= 1;
     }
-    if (!uhci_submit(count))
-        return false;
     if (input)
         memcpy(bytes, (uint8_t *)state->transfer.virt, length);
     if (input)
@@ -353,7 +361,8 @@ size_t uhci_usb_init(void)
     memset(&uhci, 0, sizeof(uhci));
     pci_device_t pci;
     if (!pci_find_class(UHCI_CLASS, UHCI_SUBCLASS, 0, &pci) ||
-        pci.prog_if != UHCI_PROG_IF || !pci_enable_io(&pci))
+        pci.prog_if != UHCI_PROG_IF || !pci_enable_io(&pci) ||
+        !pci_enable_bus_master(&pci))
         return 0;
     uint32_t bar = pci_bar(&pci, 4);
     if (!bar)
@@ -371,20 +380,20 @@ size_t uhci_usb_init(void)
     dma_zero(&uhci.schedule);
     dma_zero(&uhci.transfer);
     uhci.frames = uhci.schedule.virt;
-    uhci.qh = (void *)((uintptr_t)uhci.schedule.virt + 4096);
     uhci.tds = (void *)((uintptr_t)uhci.schedule.virt + 8192 -
                         UHCI_TD_COUNT * sizeof(uhci_td_t));
-    uint32_t qh_phys = address_of(uhci.qh);
     for (size_t i = 0; i < 1024; i++)
-        uhci.frames[i] = qh_phys | UHCI_LINK_QH;
-    /* A self-linked terminating QH is the PIIX/UHCI-safe schedule tail. */
-    uhci.qh->head = qh_phys | UHCI_LINK_QH;
-    uhci.qh->element = UHCI_LINK_TERM;
+        uhci.frames[i] = UHCI_LINK_TERM;
     outl(uhci.io + UHCI_FRAME_BASE, uhci.schedule.phys);
     outw(uhci.io + UHCI_FRAME, 0);
     outb(uhci.io + UHCI_SOF, 64);
     outw(uhci.io + UHCI_CMD, UHCI_CMD_RUN | UHCI_CMD_CONFIG | UHCI_CMD_MAXP);
     delay();
+    klog("[uhci] schedule phys=0x%08x framebase=0x%08x cmd=0x%04x status=0x%04x\n",
+         (uint32_t)uhci.schedule.phys, inl(uhci.io + UHCI_FRAME_BASE),
+         inw(uhci.io + UHCI_CMD), inw(uhci.io + UHCI_STATUS));
+    klog("[uhci] td=0x%08x frame0=0x%08x\n",
+         address_of(uhci.tds), uhci.frames[0]);
     for (size_t port = 0; port < UHCI_PORT_COUNT; port++)
         if (enumerate_port((uint16_t)(uhci.io + UHCI_PORTSC + port * 2)))
             return 1;

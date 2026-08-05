@@ -60,6 +60,8 @@ possibly `libgcc.i686` and `grub2-tools-extra`.
 | `make run` | build and launch QEMU in a window (serial log to `build/tinos-serial.log`) |
 | `make run-serial` | launch with the kernel log on your terminal |
 | `make run-headless` | launch with no display (for the test driver) |
+| `make runvnc` | launch QEMU with the display served over VNC |
+| `make usb-image` | create or reuse a sparse 4 GiB FAT32 USB development image |
 | `make test` | build and run the host-side unit tests |
 | `make check` | host tests **and** the scripted QEMU boot/GUI test |
 | `make verify-reproducible` | build twice from clean and compare the kernel and ISO |
@@ -71,6 +73,18 @@ The exact QEMU invocation (also in `tools/run.sh`):
 qemu-system-i386 -cdrom build/tinos.iso -m 256 -vga std -machine pc \
                  -rtc base=localtime -serial file:build/tinos-serial.log
 ```
+
+The run targets also attach `build/tinos-usb.img` through the emulated UHCI
+controller. The image is sparse, formatted as FAT32 on first use, and reused
+afterwards. Files placed in `build/usb-root/` are copied to its root:
+
+```sh
+mkdir -p build/usb-root
+cp test-data.bin build/usb-root/
+make run-serial
+```
+
+Override the image and source directory with `USB_IMAGE` and `USB_SOURCE`.
 
 `-vga std` matters: the graphics driver programs the Bochs/QEMU **DISPI**
 registers of the standard VGA adapter. `-m 256` is a comfortable default;
@@ -373,8 +387,8 @@ readers describe ranges of sectors, filesystems interpret those ranges, and
 the VFS exposes mounted trees. MBR partition discovery and FAT32 are
 supported, and a transitional VirtIO block device can be attached explicitly
 with QEMU's `-device virtio-blk-pci`; both transports reuse the same
-filesystem code. USB mass storage remains a separate host-controller
-milestone.
+filesystem code. USB Mass Storage BOT and the QEMU UHCI host-controller path
+are implemented as the next transport layer.
 
 Every application holds *paths*, not node pointers, and re-resolves them, so
 deleting a directory from one window cannot leave another window pointing at
