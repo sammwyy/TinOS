@@ -5,6 +5,7 @@
  */
 
 #include <tinos/io.h>
+#include <tinos/driver.h>
 #include <tinos/kernel.h>
 #include <tinos/pci.h>
 
@@ -32,11 +33,27 @@ uint16_t pci_config_read16(uint8_t bus, uint8_t slot, uint8_t func,
     return (uint16_t)((dword >> ((offset & 2) * 8)) & 0xFFFF);
 }
 
+uint8_t pci_config_read8(uint8_t bus, uint8_t slot, uint8_t func,
+                         uint8_t offset)
+{
+    uint32_t dword = pci_config_read32(bus, slot, func, offset);
+    return (uint8_t)(dword >> ((offset & 3) * 8));
+}
+
 void pci_config_write32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset,
                         uint32_t value)
 {
     outl(PCI_CONFIG_ADDRESS, config_address(bus, slot, func, offset));
     outl(PCI_CONFIG_DATA, value);
+}
+
+void pci_config_write16(uint8_t bus, uint8_t slot, uint8_t func,
+                        uint8_t offset, uint16_t value)
+{
+    uint32_t old = pci_config_read32(bus, slot, func, offset);
+    uint32_t shift = (uint32_t)(offset & 2) * 8;
+    old = (old & ~(0xFFFFu << shift)) | ((uint32_t)value << shift);
+    pci_config_write32(bus, slot, func, offset, old);
 }
 
 static bool read_device(uint8_t bus, uint8_t slot, uint8_t func,
@@ -57,6 +74,11 @@ static bool read_device(uint8_t bus, uint8_t slot, uint8_t func,
     out->prog_if    = (uint8_t)((classes >> 8) & 0xFF);
     out->subclass   = (uint8_t)((classes >> 16) & 0xFF);
     out->class_code = (uint8_t)((classes >> 24) & 0xFF);
+    out->command = pci_config_read16(bus, slot, func, 0x04);
+    out->status = pci_config_read16(bus, slot, func, 0x06);
+    out->header_type = pci_config_read8(bus, slot, func, 0x0E);
+    out->irq_line = pci_config_read8(bus, slot, func, 0x3C);
+    out->irq_pin = pci_config_read8(bus, slot, func, 0x3D);
     return true;
 }
 
@@ -71,6 +93,18 @@ uint32_t pci_bar(const pci_device_t *dev, int bar)
         return value & ~0x3u; /* I/O space */
     return value & ~0xFu;     /* memory space */
 }
+
+static bool pci_update_command(const pci_device_t *dev, uint16_t bits)
+{
+    uint16_t command = pci_config_read16(dev->bus, dev->slot, dev->func, 0x04);
+    command |= bits;
+    pci_config_write16(dev->bus, dev->slot, dev->func, 0x04, command);
+    return (pci_config_read16(dev->bus, dev->slot, dev->func, 0x04) & bits) == bits;
+}
+
+bool pci_enable_io(const pci_device_t *dev) { return dev && pci_update_command(dev, 1); }
+bool pci_enable_memory(const pci_device_t *dev) { return dev && pci_update_command(dev, 2); }
+bool pci_enable_bus_master(const pci_device_t *dev) { return dev && pci_update_command(dev, 4); }
 
 bool pci_find_class(uint8_t class_code, uint8_t subclass, int index,
                     pci_device_t *out)
@@ -113,6 +147,7 @@ size_t pci_scan(void)
                                  &dev))
                     continue;
                 count++;
+                driver_model_add_pci(&dev);
                 klog("[pci ] %02x:%02x.%u %04x:%04x class %02x.%02x\n", bus,
                      slot, func, dev.vendor_id, dev.device_id, dev.class_code,
                      dev.subclass);

@@ -320,6 +320,12 @@ instead of spinning; an unlock or signal wakes it. Interrupt handlers should
 only publish data and wake a worker, never acquire a mutex or execute a
 blocking operation.
 
+**Devices and drivers.** PCI enumeration publishes immutable bus records into
+the small driver model (`kernel/core/driver.c`). Drivers register a match and
+probe callback, and the model binds each device to at most one matching
+driver. PCI helpers expose command/status, IRQ routing, BARs and bus-master
+enablement; no network driver is included yet.
+
 Preemption is deliberately still a separate step: the PIT must save and
 restore a thread context instead of only marking events pending, and the
 kernel needs a run queue, locks and a decision about what "task" even means

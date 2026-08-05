@@ -11,6 +11,7 @@
 #include <tinos/async.h>
 #include <tinos/console.h>
 #include <tinos/desktop.h>
+#include <tinos/driver.h>
 #include <tinos/fs.h>
 #include <tinos/gfx.h>
 #include <tinos/heap.h>
@@ -174,6 +175,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     async_init();
     thread_init();
     ktimer_init();
+    driver_model_init();
     boot_step("Memory manager online");
     boot_note("Asynchronous worker runtime online (cooperative mode)");
     boot_note("Kernel thread scheduler online (private stacks, cooperative)");
@@ -212,7 +214,10 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
 
     /* --- graphics ------------------------------------------------- */
     size_t devices = pci_scan();
+    size_t bound = driver_bind_all();
     boot_step("PCI bus scanned, %u devices", (uint32_t)devices);
+    boot_note("Driver model online: %u devices, %u drivers bound",
+              (uint32_t)device_count(), (uint32_t)bound);
 
     vga_text_set_color(VGA_YELLOW, VGA_BLACK);
     vga_text_printf("\n  Starting the graphical desktop at %dx%d ...\n",
