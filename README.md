@@ -94,7 +94,8 @@ already present in `resources/icons/`.
 The exact QEMU invocation (also in `tools/run.sh`):
 
 ```sh
-qemu-system-i386 -cdrom build/tinos.iso -m 256 -vga std -machine pc \
+qemu-system-i386 -cdrom build/tinos.iso -m 256 -vga std \
+                 -machine pc,pcspk-audiodev=tinos-audio \
                  -audiodev driver=none,id=tinos-audio \
                  -device AC97,audiodev=tinos-audio \
                  -boot order=d -rtc base=localtime \

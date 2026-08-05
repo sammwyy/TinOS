@@ -34,7 +34,7 @@ args=(
     -boot order=d
     -m "$MEM"
     -vga std
-    -machine pc
+    -machine "pc,pcspk-audiodev=tinos-audio"
     -rtc base=localtime
     -name "TinOS"
     -audiodev "$AUDIODEV"

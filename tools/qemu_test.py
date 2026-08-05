@@ -73,7 +73,7 @@ class Tinos:
             "-cdrom", self.iso,
             "-m", str(self.mem),
             "-vga", "std",
-            "-machine", "pc",
+            "-machine", "pc,pcspk-audiodev=tinos-audio",
             "-audiodev", "driver=none,id=tinos-audio",
             "-device", "AC97,audiodev=tinos-audio",
             "-display", "none",
