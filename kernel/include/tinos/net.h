@@ -20,5 +20,7 @@ void net_format_address(uint32_t address, char *out, size_t size);
 bool net_parse_address(const char *text, uint32_t *out);
 bool net_ping(uint32_t address, uint32_t timeout_ms, uint32_t *elapsed_ms);
 bool net_dns_lookup(const char *name, uint32_t *address, uint32_t timeout_ms);
+bool net_http_get(const char *host, const char *path, char *response,
+                  size_t capacity, uint32_t timeout_ms);
 
 #endif /* TINOS_NET_H */

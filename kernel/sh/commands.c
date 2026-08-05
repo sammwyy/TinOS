@@ -1163,6 +1163,29 @@ static int cmd_ifconfig(shell_t *sh, int argc, char **argv, stream_t *in,
     return c->configured ? 0 : 1;
 }
 
+static int cmd_httpget(shell_t *sh, int argc, char **argv, stream_t *in,
+                       stream_t *out, stream_t *err)
+{
+    if (argc < 2 || argc > 3) {
+        stream_puts(err, "usage: httpget <host> [path]\n");
+        return 2;
+    }
+    if (!net_available() || !net_config()->configured) {
+        stream_puts(err, "httpget: network is not configured\n");
+        return 1;
+    }
+    char response[2048];
+    if (!net_http_get(argv[1], argc == 3 ? argv[2] : "/", response,
+                      sizeof(response), 5000)) {
+        stream_puts(err, "httpget: request failed or timed out\n");
+        return 1;
+    }
+    stream_puts(out, response);
+    if (response[0] && response[strlen(response) - 1] != '\n')
+        stream_putc(out, '\n');
+    return 0;
+}
+
 static const sh_command_def_t commands[] = {
     { "about",    "about",
       "show the About window",                       cmd_about },
@@ -1192,6 +1215,8 @@ static const sh_command_def_t commands[] = {
       "search for text in files or piped input",     cmd_grep },
     { "head",     "head [-n count] [file...]",
       "show the first lines of the input",           cmd_head },
+    { "httpget",  "httpget <host> [path]",
+      "fetch a simple HTTP response",                cmd_httpget },
     { "ifconfig", "ifconfig",
       "show network interface configuration",       cmd_ifconfig },
     { "help",     "help [command]",

@@ -129,3 +129,9 @@ bool net_dns_lookup(const char *name, uint32_t *address, uint32_t timeout_ms)
 {
     (void)name; (void)address; (void)timeout_ms; return false;
 }
+bool net_http_get(const char *host, const char *path, char *response,
+                  size_t capacity, uint32_t timeout_ms)
+{
+    (void)host; (void)path; (void)response; (void)capacity;
+    (void)timeout_ms; return false;
+}
