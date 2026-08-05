@@ -71,7 +71,11 @@ The exact QEMU invocation (also in `tools/run.sh`):
 
 ```sh
 qemu-system-i386 -cdrom build/tinos.iso -m 256 -vga std -machine pc \
-                 -rtc base=localtime -serial file:build/tinos-serial.log
+                 -boot order=d -rtc base=localtime \
+                 -drive file=build/tinos-usb.img,if=none,id=tinos-usb-disk,format=raw \
+                 -device piix3-usb-uhci,id=tinos-usb \
+                 -device usb-storage,bus=tinos-usb.0,drive=tinos-usb-disk \
+                 -serial file:build/tinos-serial.log
 ```
 
 The run targets also attach `build/tinos-usb.img` through the emulated UHCI
@@ -93,7 +97,7 @@ TinOS runs in far less.
 The GRUB menu has two entries:
 
 * **TinOS** - the normal desktop.
-* **TinOS (kernel self-test on serial)** - runs 176 in-kernel assertions over
+* **TinOS (kernel self-test on serial)** - runs the in-kernel assertions over
   the heap, path handling, filesystem and shell before starting the desktop
   and prints the results to the serial port.
 
@@ -364,14 +368,16 @@ Directories, regular files with real byte content, absolute and relative
 paths, `.` and `..`, creation, reading, writing, appending, copying (deep for
 directories), moving, renaming and deletion are supported. Files grow
 geometrically on the kernel heap. The base tree lives for one boot session;
-the current FAT16 importer is read-only from the VFS perspective.
+the current imported FAT16/FAT32 volumes are read-only from the VFS
+perspective; the in-memory filesystem remains writable for the session.
 
 ### Storage
 
-The first storage path is the legacy ATA/IDE PIO controller emulated by
-QEMU's `pc` machine. It uses polling and 28-bit LBA over 512-byte sectors, so
-it has no dependency on DMA, PCI or a particular filesystem. A raw FAT16 disk
-is imported at `/drive/disk0`, `/drive/disk1`, and so on.
+TinOS currently supports several block transports. ATA PIO is the simplest
+legacy path and uses polling with 28-bit LBA over 512-byte sectors. VirtIO-blk
+is available for virtual machines, and USB Mass Storage uses a polling UHCI
+host controller plus BOT/SCSI. All of them feed the same partition and
+filesystem layers and mount supported volumes below `/drive/`.
 
 For example, a QEMU disk can be prepared and attached with:
 
@@ -384,11 +390,9 @@ qemu-system-i386 -cdrom build/tinos.iso \
 
 The storage stack is layered: block devices provide sectors, partition
 readers describe ranges of sectors, filesystems interpret those ranges, and
-the VFS exposes mounted trees. MBR partition discovery and FAT32 are
-supported, and a transitional VirtIO block device can be attached explicitly
-with QEMU's `-device virtio-blk-pci`; both transports reuse the same
-filesystem code. USB Mass Storage BOT and the QEMU UHCI host-controller path
-are implemented as the next transport layer.
+the VFS exposes mounted trees. MBR partition discovery, FAT16 and FAT32 are
+supported. NTFS, USB host controllers other than UHCI, and filesystem writes
+are future work.
 
 Every application holds *paths*, not node pointers, and re-resolves them, so
 deleting a directory from one window cannot leave another window pointing at
@@ -408,6 +412,7 @@ to the nearest surviving ancestor.
 | Shell | `kernel/sh/` | byte streams, tokeniser/parser, execution engine, 32 built-ins |
 | UI | `kernel/ui/` | window manager, widgets and icons, desktop/taskbar/start menu/event loop |
 | Applications | `kernel/apps/` | terminal, file explorer, text editor, system information, about |
+| Networking | `kernel/net/` | Ethernet, ARP, IPv4, ICMP, UDP, DHCP, DNS, TCP/HTTP and async jobs |
 
 ### Decisions worth knowing
 
@@ -475,8 +480,9 @@ the small driver model (`kernel/core/driver.c`). Drivers register a match and
 probe callback, and the model binds each device to at most one matching
 driver. PCI helpers expose command/status, IRQ routing, BARs and bus-master
 enablement. `kernel/mm/dma.c` exposes physically contiguous DMA buffers behind
-an API that can later absorb virtual-to-physical mappings. No network driver
-is included yet.
+an API that can later absorb virtual-to-physical mappings. The e1000 driver
+backs the current Ethernet stack; networking is intentionally a small
+polling-oriented kernel service rather than a userspace socket subsystem.
 
 Preemption is deliberately still a separate step: the PIT must save and
 restore a thread context instead of only marking events pending, and the
@@ -516,8 +522,8 @@ exit status.
 Three layers, all runnable:
 
 ```sh
-make test      # 267 host assertions (path, filesystem, parser, commands)
-make check     # the above plus a 60-check scripted QEMU session
+make test      # host assertions (path, filesystem, parser and commands)
+make check     # the above plus the scripted QEMU boot/GUI session
 ```
 
 * **Host unit tests** (`tests/host/`) compile the portable filesystem and
@@ -528,8 +534,7 @@ make check     # the above plus a 60-check scripted QEMU session
   hostile-input fuzz list.
 
 * **In-kernel self-test** (`kernel/core/selftest.c`, second GRUB entry) runs
-  176 assertions inside the real kernel against the real heap and prints the
-  result to the serial port.
+  the kernel assertions against the real heap and prints the result to serial.
 
 * **Scripted QEMU session** (`tools/qemu_test.py`) boots the ISO headless,
   drives it through the QMP monitor (keystrokes, mouse moves, clicks, drags),
@@ -546,8 +551,10 @@ make check     # the above plus a 60-check scripted QEMU session
   Supplement (0xA0-0xFF: accented Western European letters). No Unicode
   beyond that, and there is no keyboard layout that can type those bytes -
   they only render if a file already contains them.
-* No networking, sound, USB, disk persistence, user accounts, SMP or
-  userspace processes - all explicitly out of scope.
+* The filesystem is session-oriented: imported FAT volumes are read-only and
+  the writable base tree is not persisted back to disk.
+* There are no user accounts, permissions, userspace processes, SMP, sound,
+  NTFS support, or USB host controllers beyond the current UHCI path.
 * The RTC is read directly, so the taskbar clock follows the host clock via
   `-rtc base=localtime`; without that flag QEMU reports UTC.
 * Only the Bochs/QEMU DISPI graphics interface is supported. On hardware or
@@ -578,6 +585,7 @@ kernel/
   dev/           serial, VGA text, PCI, VBE/DISPI, keyboard, mouse
   gfx/           framebuffer engine and the generated font
   fs/            in-memory filesystem and path helpers
+  net/           Ethernet and layered IPv4 networking protocols
   sh/            streams, parser, execution engine, built-in commands
   ui/            window manager, widgets, desktop/taskbar/start menu
   apps/          terminal, explorer, editor, system information, about
@@ -585,7 +593,8 @@ kernel/
   mm/            page frame allocator and kernel heap
   include/tinos/  public headers for all of the above
 tests/host/      native unit tests and the kernel-service shims
-tools/           run script, QEMU test driver, screen OCR, font generator
+tools/           run script, USB image helper, QEMU test driver, screen OCR
+                 and font generator
 ```
 
 `REPORT.md` records what was verified, how, and what remains incomplete.
