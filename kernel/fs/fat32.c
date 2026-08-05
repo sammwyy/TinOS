@@ -8,7 +8,7 @@
 #define FAT32_MAX_DEPTH 16
 #define FAT32_EOC        0x0FFFFFF8u
 #define FAT32_BAD        0x0FFFFFF7u
-#define FAT_READ_BATCH   8u
+#define FAT_READ_BATCH   16u
 
 typedef struct {
     uint8_t  sectors_per_cluster;

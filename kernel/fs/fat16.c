@@ -14,7 +14,7 @@
 #define FAT16_MAX_DEPTH 16
 #define FAT16_EOC        0xFFF8u
 #define FAT16_BAD        0xFFF7u
-#define FAT_READ_BATCH   8u
+#define FAT_READ_BATCH   16u
 
 typedef struct {
     uint16_t bytes_per_sector;

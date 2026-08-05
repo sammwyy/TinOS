@@ -19,7 +19,7 @@
 #define UHCI_SUBCLASS    0x03
 #define UHCI_PROG_IF     0x00
 #define UHCI_PORT_COUNT  2
-#define UHCI_TD_COUNT    65 /* 64 packets plus an inactive retirement tail */
+#define UHCI_TD_COUNT    64
 #define UHCI_TIMEOUT     1000000u
 
 #define UHCI_CMD         0x00
@@ -194,8 +194,7 @@ static bool bulk_transfer(void *context, void *buffer, size_t length,
     uint16_t max_packet = input ? state->bulk_in_max : state->bulk_out_max;
     uint8_t endpoint = input ? state->bulk_in : state->bulk_out;
     uint8_t *bytes = buffer;
-    if (!state->ready || !max_packet || length > state->transfer.size ||
-        (length + max_packet - 1) / max_packet > UHCI_TD_COUNT)
+    if (!state->ready || !max_packet || length > state->transfer.size)
         return false;
     if (!input)
         memcpy((uint8_t *)state->transfer.virt, buffer, length);
@@ -203,29 +202,21 @@ static bool bulk_transfer(void *context, void *buffer, size_t length,
     uint8_t toggle = input ? state->bulk_in_toggle : state->bulk_out_toggle;
     size_t offset = 0;
     while (offset < length) {
-        size_t packets = MIN((size_t)(UHCI_TD_COUNT - 1),
-                             (length - offset + max_packet - 1) / max_packet);
-        size_t bytes = 0;
-        for (size_t i = 0; i < packets; i++) {
-            uint16_t packet = (uint16_t)MIN(length - offset - bytes,
-                                            (size_t)max_packet);
-            uint32_t next = i + 1 < packets ? address_of(&state->tds[i + 1])
-                                             : address_of(&state->tds[packets]);
-            setup_td(&state->tds[i], input ? USB_PID_IN : USB_PID_OUT,
-                     state->address, endpoint, toggle, packet,
-                     state->transfer.phys + offset + bytes, next);
-            bytes += packet;
-            toggle ^= 1;
-        }
-        /* QEMU's UHCI model needs an inactive tail before it retires an
-         * asynchronous bulk chain from a direct frame-list schedule. */
-        state->tds[packets].link = UHCI_LINK_TERM;
-        state->tds[packets].status = 0;
-        state->tds[packets].token = 0;
-        state->tds[packets].buffer = 0;
-        if (!uhci_submit(packets + 1))
+        uint16_t packet = (uint16_t)MIN(length - offset, (size_t)max_packet);
+        setup_td(&state->tds[0], input ? USB_PID_IN : USB_PID_OUT,
+                 state->address, endpoint, toggle, packet,
+                 state->transfer.phys + offset, UHCI_LINK_TERM);
+        /* Keep an inactive tail in the schedule. QEMU's UHCI model, like
+         * PIIX hardware, needs a following TD before it retires an async
+         * bulk packet from a direct TD schedule. */
+        state->tds[1].link = UHCI_LINK_TERM;
+        state->tds[1].status = 0;
+        state->tds[1].token = 0;
+        state->tds[1].buffer = 0;
+        if (!uhci_submit(2))
             return false;
-        offset += bytes;
+        offset += packet;
+        toggle ^= 1;
     }
     if (input)
         memcpy(bytes, (uint8_t *)state->transfer.virt, length);
