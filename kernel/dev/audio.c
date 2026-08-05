@@ -23,6 +23,7 @@
 #define AC97_PO_CIV      0x14
 #define AC97_PO_LVI      0x15
 #define AC97_PO_SR       0x16
+#define AC97_PO_PICB     0x18
 #define AC97_PO_CR       0x1b
 #define AC97_GLOB_CNT    0x2c
 
@@ -35,7 +36,7 @@
 
 #define AC97_RATE        22050u
 #define AC97_BUFFER_FRAMES 2048u
-#define AC97_BUFFER_COUNT 8u
+#define AC97_BUFFER_COUNT 32u
 
 typedef struct {
     uint32_t address;
@@ -194,6 +195,22 @@ static void ac97_prepare_descriptor(uint8_t descriptor, uint32_t offset,
     descriptor_frames[descriptor] = frames;
 }
 
+static void ac97_reset_dma(void)
+{
+    outb((uint16_t)(bus_master_base + AC97_PO_CR), 0);
+    for (uint32_t i = 0; i < 100000; i++) {
+        if (inw((uint16_t)(bus_master_base + AC97_PO_SR)) & AC97_SR_DCH)
+            break;
+        io_wait();
+    }
+    outb((uint16_t)(bus_master_base + AC97_PO_CR), AC97_CR_RESET);
+    for (uint32_t i = 0; i < 100000; i++) {
+        if (!(inb((uint16_t)(bus_master_base + AC97_PO_CR)) & AC97_CR_RESET))
+            break;
+        io_wait();
+    }
+}
+
 static uint32_t ac97_next_submission(void)
 {
     uint32_t available_frames = queued_frames - submitted_frames;
@@ -279,23 +296,21 @@ void audio_poll(void)
                                        AC97_BUFFER_COUNT);
     }
 
-    if (status & (AC97_SR_LVBCI | AC97_SR_BCIS | AC97_SR_FIFOE))
-        outw((uint16_t)(bus_master_base + AC97_PO_SR),
-             status & (AC97_SR_LVBCI | AC97_SR_BCIS | AC97_SR_FIFOE));
-
-    if ((status & AC97_SR_DCH) && (status & AC97_SR_FIFOE)) {
-        submitted_frames = 0;
-        in_flight = 0;
-        dma_running = false;
-        outb((uint16_t)(bus_master_base + AC97_PO_CR), AC97_CR_RESET);
-    } else if ((status & AC97_SR_DCH) && (status & AC97_SR_LVBCI)) {
+    uint16_t remaining = inw((uint16_t)(bus_master_base + AC97_PO_PICB));
+    if ((status & AC97_SR_DCH) && (status & AC97_SR_LVBCI) &&
+        remaining == 0 && in_flight) {
         while (in_flight) {
             ac97_complete_descriptor(current_descriptor);
             current_descriptor = (uint8_t)((current_descriptor + 1) %
                                            AC97_BUFFER_COUNT);
         }
         dma_running = false;
+        ac97_reset_dma();
     }
+
+    if (status & (AC97_SR_LVBCI | AC97_SR_BCIS | AC97_SR_FIFOE))
+        outw((uint16_t)(bus_master_base + AC97_PO_SR),
+             status & (AC97_SR_LVBCI | AC97_SR_BCIS | AC97_SR_FIFOE));
 
     if (dma_running)
         ac97_extend_dma();
@@ -313,8 +328,7 @@ void audio_stream_pause(bool paused)
 void audio_stream_stop(void)
 {
     if (available) {
-        outb((uint16_t)(bus_master_base + AC97_PO_CR), 0);
-        outb((uint16_t)(bus_master_base + AC97_PO_CR), AC97_CR_RESET);
+        ac97_reset_dma();
     }
     stream_active = false;
     stream_paused = false;
