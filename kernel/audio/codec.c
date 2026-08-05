@@ -58,7 +58,7 @@ audio_decoder_t *audio_decoder_open_file(const char *path,
 {
     if (!file || file->type != FS_FILE || !file->size)
         return NULL;
-    size_t size = file->size < 65536 ? file->size : 65536;
+    size_t size = file->size < 4096 ? file->size : 4096;
     uint8_t *probe = kmalloc(size);
     if (!probe || !fs_read_at(file, 0, probe, size)) {
         kfree(probe);

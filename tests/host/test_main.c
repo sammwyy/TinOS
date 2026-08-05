@@ -664,9 +664,9 @@ static void test_audio_codecs(void)
     decoder = audio_decoder_open_file("stream.wav", &file, &format, &frames,
                                       &codec);
     CHECK(decoder != NULL && streamed_wav_reads == 1);
-    int16_t *stream_samples = malloc(8193 * 2 * sizeof(*stream_samples));
+    int16_t *stream_samples = malloc(1014 * 2 * sizeof(*stream_samples));
     CHECK(stream_samples != NULL);
-    CHECK(audio_decoder_read(decoder, stream_samples, 8192) == 8192);
+    CHECK(audio_decoder_read(decoder, stream_samples, 1013) == 1013);
     CHECK(streamed_wav_reads == 1);
     CHECK(audio_decoder_read(decoder, stream_samples, 1) == 1);
     CHECK(streamed_wav_reads == 2);
