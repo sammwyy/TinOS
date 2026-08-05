@@ -10,6 +10,7 @@
  */
 
 #include <tinos/arch.h>
+#include <tinos/audio.h>
 #include <tinos/async.h>
 #include <tinos/desktop.h>
 #include <tinos/fs.h>
@@ -992,6 +993,8 @@ void desktop_run(void)
 
     for (;;) {
         bool dirty = false;
+
+        audio_poll();
 
         /* Future network/storage workers execute outside interrupt context.
          * The budget prevents one busy subsystem from starving the GUI. */

@@ -20,13 +20,15 @@
 #define AC97_PCM_RATE    0x2c
 
 #define AC97_PO_BDBAR    0x10
+#define AC97_PO_CIV      0x14
 #define AC97_PO_LVI      0x15
 #define AC97_PO_SR       0x16
 #define AC97_PO_CR       0x1b
 #define AC97_GLOB_CNT    0x2c
 
 #define AC97_RATE        22050u
-#define AC97_MAX_FRAMES  (AC97_RATE * 2u)
+#define AC97_BUFFER_FRAMES 2048u
+#define AC97_BUFFER_COUNT 4u
 
 typedef struct {
     uint32_t address;
@@ -39,6 +41,11 @@ static uint16_t     bus_master_base;
 static bool         available;
 static dma_buffer_t descriptors;
 static dma_buffer_t samples;
+static uint32_t queued_frames;
+static uint64_t played_frames;
+static uint8_t active_buffer;
+static bool stream_active;
+static bool stream_paused;
 
 static uint16_t ac97_mixer_read(uint8_t offset)
 {
@@ -83,8 +90,8 @@ static bool ac97_probe(kernel_device_t *device)
     ac97_mixer_write(AC97_MASTER_VOL, 0);
     ac97_mixer_write(AC97_PCM_VOL, 0);
 
-    if (!dma_alloc(&descriptors, sizeof(ac97_bdle_t)) ||
-        !dma_alloc(&samples, AC97_MAX_FRAMES * 4u)) {
+    if (!dma_alloc(&descriptors, sizeof(ac97_bdle_t) * AC97_BUFFER_COUNT) ||
+        !dma_alloc(&samples, AC97_BUFFER_FRAMES * AC97_BUFFER_COUNT * 4u)) {
         dma_free(&descriptors);
         dma_free(&samples);
         return false;
@@ -101,6 +108,7 @@ static void ac97_remove(kernel_device_t *device)
 {
     (void)device;
     available = false;
+    stream_active = false;
     dma_free(&descriptors);
     dma_free(&samples);
     mixer_base = bus_master_base = 0;
@@ -124,40 +132,113 @@ bool audio_available(void)
     return available;
 }
 
-static void write_sample(uint32_t frame, uint32_t frequency)
+bool audio_stream_start(const audio_format_t *format)
 {
-    uint16_t *pcm = (uint16_t *)samples.virt;
-    uint32_t period = AC97_RATE / frequency;
-    int16_t value = ((frame % period) < period / 2) ? 10000 : -10000;
-    pcm[frame * 2] = (uint16_t)value;
-    pcm[frame * 2 + 1] = (uint16_t)value;
+    if (!available || !format || format->channels != 2 ||
+        format->bits_per_sample != 16 || format->sample_rate < 8000 ||
+        format->sample_rate > 48000)
+        return false;
+    audio_stream_stop();
+    ac97_mixer_write(AC97_PCM_RATE, (uint16_t)format->sample_rate);
+    queued_frames = 0;
+    played_frames = 0;
+    active_buffer = 0;
+    stream_active = true;
+    stream_paused = false;
+    return true;
 }
+
+size_t audio_stream_write(const int16_t *input, size_t frames)
+{
+    if (!stream_active || !input || frames == 0)
+        return 0;
+    size_t capacity = AC97_BUFFER_FRAMES * AC97_BUFFER_COUNT - queued_frames;
+    if (frames > capacity)
+        frames = capacity;
+    int16_t *output = (int16_t *)samples.virt;
+    size_t write_at = (played_frames + queued_frames) %
+                      (AC97_BUFFER_FRAMES * AC97_BUFFER_COUNT);
+    for (size_t i = 0; i < frames; i++) {
+        output[(write_at + i) * 2] = input[i * 2];
+        output[(write_at + i) * 2 + 1] = input[i * 2 + 1];
+    }
+    queued_frames += (uint32_t)frames;
+    return frames;
+}
+
+static void ac97_start_buffer(uint8_t index)
+{
+    ac97_bdle_t *bdle = (ac97_bdle_t *)descriptors.virt;
+    bdle[index].address = (uint32_t)(samples.phys +
+        index * AC97_BUFFER_FRAMES * 4u);
+    bdle[index].length = (uint16_t)(AC97_BUFFER_FRAMES * 4u);
+    bdle[index].flags = 0x8000;
+    outl((uint16_t)(bus_master_base + AC97_PO_BDBAR),
+         (uint32_t)descriptors.phys);
+    outw((uint16_t)(bus_master_base + AC97_PO_SR), 0x1c);
+    outb((uint16_t)(bus_master_base + AC97_PO_LVI), index);
+    outb((uint16_t)(bus_master_base + AC97_PO_CR), 0x01);
+}
+
+void audio_poll(void)
+{
+    if (!stream_active || stream_paused || queued_frames < AC97_BUFFER_FRAMES)
+        return;
+    uint8_t civ = inb((uint16_t)(bus_master_base + AC97_PO_CIV));
+    uint8_t next = (uint8_t)((civ + 1) % AC97_BUFFER_COUNT);
+    if (next != active_buffer && queued_frames >= AC97_BUFFER_FRAMES) {
+        played_frames += AC97_BUFFER_FRAMES;
+        queued_frames -= AC97_BUFFER_FRAMES;
+        active_buffer = next;
+        ac97_start_buffer(active_buffer);
+    } else if (!inb((uint16_t)(bus_master_base + AC97_PO_CR))) {
+        ac97_start_buffer(active_buffer);
+    }
+}
+
+void audio_stream_pause(bool paused)
+{
+    stream_paused = paused;
+    if (available && stream_active)
+        outb((uint16_t)(bus_master_base + AC97_PO_CR), paused ? 0 : 1);
+}
+
+void audio_stream_stop(void)
+{
+    if (available)
+        outb((uint16_t)(bus_master_base + AC97_PO_CR), 0);
+    stream_active = false;
+    stream_paused = false;
+    queued_frames = 0;
+}
+
+size_t audio_stream_queued_frames(void) { return queued_frames; }
+uint64_t audio_stream_position(void) { return played_frames; }
 
 bool audio_play_doremi(void)
 {
     static const uint16_t notes[] = { 262, 294, 330, 349, 392, 440, 494, 523 };
-    const uint32_t note_frames = AC97_RATE / 4;
-    const uint32_t total_frames = note_frames * ARRAY_SIZE(notes);
-    if (!available || total_frames > AC97_MAX_FRAMES)
-        return false;
-
-    uint16_t *pcm = (uint16_t *)samples.virt;
-    memset(pcm, 0, samples.size);
-    for (size_t note = 0; note < ARRAY_SIZE(notes); note++)
-        for (uint32_t frame = 0; frame < note_frames; frame++)
-            write_sample((uint32_t)note * note_frames + frame, notes[note]);
-
-    ac97_bdle_t *bdle = (ac97_bdle_t *)descriptors.virt;
-    bdle->address = (uint32_t)samples.phys;
-    bdle->length = (uint16_t)total_frames;
-    bdle->flags = 0x8000;
-
-    outl((uint16_t)(bus_master_base + AC97_PO_BDBAR),
-         (uint32_t)descriptors.phys);
-    outw((uint16_t)(bus_master_base + AC97_PO_SR), 0x1c);
-    outb((uint16_t)(bus_master_base + AC97_PO_LVI), 0);
-    outb((uint16_t)(bus_master_base + AC97_PO_CR), 0x01);
-    timer_sleep(ARRAY_SIZE(notes) * 250 + 30);
-    outb((uint16_t)(bus_master_base + AC97_PO_CR), 0);
+    audio_format_t format = { AC97_RATE, 2, 16 };
+    int16_t buffer[128 * 2];
+    if (!audio_stream_start(&format)) return false;
+    for (size_t note = 0; note < ARRAY_SIZE(notes); note++) {
+        uint32_t period = AC97_RATE / notes[note];
+        for (uint32_t sent = 0; sent < AC97_RATE / 4;) {
+            size_t count = MIN((uint32_t)ARRAY_SIZE(buffer) / 2,
+                               AC97_RATE / 4 - sent);
+            for (size_t i = 0; i < count; i++) {
+                int16_t value = ((sent + i) % period < period / 2) ? 10000 : -10000;
+                buffer[i * 2] = value; buffer[i * 2 + 1] = value;
+            }
+            size_t written = audio_stream_write(buffer, count);
+            if (!written) { audio_poll(); timer_sleep(2); continue; }
+            sent += (uint32_t)written;
+            while (audio_stream_queued_frames() > AC97_BUFFER_FRAMES * 2) {
+                audio_poll(); timer_sleep(2);
+            }
+        }
+    }
+    while (audio_stream_queued_frames()) { audio_poll(); timer_sleep(2); }
+    audio_stream_stop();
     return true;
 }
