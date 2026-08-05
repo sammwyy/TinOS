@@ -11,6 +11,8 @@
 #include <tinos/async.h>
 #include <tinos/ata.h>
 #include <tinos/fat16.h>
+#include <tinos/fat32.h>
+#include <tinos/mbr.h>
 #include <tinos/console.h>
 #include <tinos/desktop.h>
 #include <tinos/driver.h>
@@ -210,17 +212,41 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     size_t mounted = 0;
     for (size_t i = 0; i < ata_pio_count(); i++) {
         block_device_t *device = ata_pio_device(i);
+        bool raw_mounted = false;
         char mount_path[FS_PATH_MAX];
         ksnprintf(mount_path, sizeof(mount_path), "/drive/disk%u",
                   (uint32_t)mounted);
         fs_node_t *mountpoint = NULL;
-        if (fs_mkdir(fs_root(), mount_path, &mountpoint) != FS_OK)
+        if (fs_mkdir(fs_root(), mount_path, &mountpoint) == FS_OK) {
+            raw_mounted = fat16_import(device, mountpoint) ||
+                          fat32_import(device, mountpoint);
+            if (raw_mounted) {
+                klog("[fat ] mounted %s at %s\n", device->name, mount_path);
+                mounted++;
+            } else {
+                fs_remove(fs_root(), mount_path, true);
+            }
+        }
+        if (raw_mounted)
             continue;
-        if (fat16_import(device, mountpoint)) {
-            klog("[fat ] mounted %s at %s\n", device->name, mount_path);
-            mounted++;
-        } else {
-            fs_remove(fs_root(), mount_path, true);
+
+        block_device_t partitions[MBR_MAX_PARTITIONS];
+        size_t partition_count = mbr_partitions(device, partitions,
+                                                ARRAY_SIZE(partitions));
+        for (size_t p = 0; p < partition_count; p++) {
+            ksnprintf(mount_path, sizeof(mount_path), "/drive/disk%u",
+                      (uint32_t)mounted);
+            mountpoint = NULL;
+            if (fs_mkdir(fs_root(), mount_path, &mountpoint) != FS_OK)
+                continue;
+            if (fat16_import(&partitions[p], mountpoint) ||
+                fat32_import(&partitions[p], mountpoint)) {
+                klog("[fat ] mounted %s at %s\n", partitions[p].name,
+                     mount_path);
+                mounted++;
+            } else {
+                fs_remove(fs_root(), mount_path, true);
+            }
         }
     }
     boot_note("%u nodes in the initial tree", (uint32_t)fs_node_count());
