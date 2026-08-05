@@ -26,17 +26,16 @@
 #include <tinos/thread.h>
 #include <tinos/timer.h>
 
-#define MENU_WIDTH      176
-#define MENU_SUBMENU_W  252
-#define MENU_ITEM_H     32
+#define MENU_WIDTH      160
+#define MENU_SUBMENU_W  220
+#define MENU_ITEM_H     24
 #define MENU_CAT_H      24
-#define MENU_HEADER_H   44
-#define MENU_SHADOW     5
+#define MENU_HEADER_H   38
 #define MENU_MAX_CATS   8
 #define MENU_MAX_ROWS   24
-#define START_BUTTON_W  92
-#define TASK_BUTTON_W   162
-#define CLOCK_WIDTH     104
+#define START_BUTTON_W  84
+#define TASK_BUTTON_W   148
+#define CLOCK_WIDTH     88
 #define WIDGET_AREA_W   (CLOCK_WIDTH + 124) /* clock + memory gauge + label */
 #define NOTIFY_MS       2600
 
@@ -182,19 +181,26 @@ static void draw_wallpaper(void)
     gfx_gradient_v(0, 0, space.w, space.h, COLOR_DESKTOP_TOP,
                    COLOR_DESKTOP_BOTTOM);
 
-    /* A cool glow centred on the wordmark lifts the middle of the screen. */
-    wallpaper_glow(space.w / 2, space.h / 2 - 60, 260, RGB(0x3b, 0x82, 0xf6),
-                   26);
-
-    /* A few faint stars so the background is not a flat wash. */
-    uint32_t seed = 0x1234567u;
-    for (int i = 0; i < 220; i++) {
-        seed      = seed * 1103515245u + 12345u;
-        int x     = (int)((seed >> 8) % (uint32_t)space.w);
-        seed      = seed * 1103515245u + 12345u;
-        int y     = (int)((seed >> 8) % (uint32_t)space.h);
-        int shade = 0x30 + (int)((seed >> 20) & 0x5F);
-        gfx_pixel(x, y, RGB(shade, shade, shade + 0x20));
+    /* A deliberately low-resolution wireframe: metallic planes and violet
+     * construction lines read like an old workstation demo, not a modern
+     * gradient wallpaper. */
+    wallpaper_glow(space.w / 2, space.h / 2 - 80, 300, RGB(0x55, 0x63, 0x9e),
+                   24);
+    int vanishing_x = space.w / 2;
+    int vanishing_y = space.h / 2 + 28;
+    for (int x = -space.h; x < space.w + space.h; x += 48)
+        gfx_vline(x, vanishing_y, space.h - vanishing_y,
+                  RGB(0x28, 0x35, 0x50));
+    for (int y = vanishing_y; y < space.h; y += 28)
+        gfx_hline(0, y, space.w, RGB(0x27, 0x32, 0x4b));
+    for (int i = 1; i < 7; i++) {
+        int y = vanishing_y + i * i * 13;
+        gfx_hline(0, y, space.w, RGB(0x34, 0x42, 0x61));
+    }
+    for (int i = 0; i < 5; i++) {
+        int y = 70 + i * 34;
+        gfx_hline(vanishing_x - 310 + i * 18, y, 620 - i * 36,
+                  RGB(0x4e, 0x4e, 0x80));
     }
 
     /* Wordmark in the middle of the desktop. */
@@ -203,7 +209,7 @@ static void draw_wallpaper(void)
     widget_icon(cx - 24, cy - 60, 48, ICON_TINOS);
 
     const char *title = TINOS_NAME " " TINOS_VERSION;
-    gfx_text(cx - gfx_text_width(title) / 2, cy, title, COLOR_TEXT);
+    gfx_text(cx - gfx_text_width(title) / 2, cy, title, RGB(0xd5, 0xdb, 0xe7));
 
     const char *lines[] = {
         "Press Ctrl+Esc (or click Start) to open the start menu",
@@ -211,7 +217,7 @@ static void draw_wallpaper(void)
     };
     for (size_t i = 0; i < ARRAY_SIZE(lines); i++)
         gfx_text(cx - gfx_text_width(lines[i]) / 2, cy + 28 + (int)i * 20,
-                 lines[i], COLOR_TEXT_DIM);
+                 lines[i], RGB(0x9e, 0xaa, 0xc0));
 }
 
 /* ------------------------------------------------------------------ */
@@ -279,19 +285,22 @@ static void draw_taskbar(void)
 
     gfx_clip_reset();
     gfx_clip_push(bar);
-    gfx_gradient_v(bar.x, bar.y, bar.w, bar.h, RGB(0x24, 0x2b, 0x3b),
-                   COLOR_TASKBAR);
+    gfx_fill_rect(bar.x, bar.y, bar.w, bar.h, COLOR_TASKBAR);
+    gfx_bevel(bar.x, bar.y, bar.w, bar.h, COLOR_PANEL_LIGHT,
+              COLOR_TASKBAR_EDGE);
     gfx_hline(bar.x, bar.y, bar.w, COLOR_TASKBAR_EDGE);
 
     /* Start button */
     rect_t start = start_button_rect();
-    gfx_gradient_v(start.x, start.y, start.w, start.h,
-                   menu_open ? COLOR_ACCENT_DARK : COLOR_ACCENT,
-                   COLOR_ACCENT_DARK);
-    gfx_rect(start.x, start.y, start.w, start.h, RGB(0x17, 0x3a, 0xa8));
+    gfx_fill_rect(start.x, start.y, start.w, start.h,
+                  menu_open ? COLOR_ACCENT_DARK : COLOR_PANEL);
+    gfx_bevel(start.x, start.y, start.w, start.h,
+              menu_open ? COLOR_BORDER : COLOR_PANEL_LIGHT,
+              menu_open ? COLOR_PANEL_LIGHT : COLOR_BORDER);
+    gfx_rect(start.x, start.y, start.w, start.h, COLOR_BORDER);
     widget_icon(start.x + 5, start.y + 4, 18, ICON_TINOS);
     gfx_text(start.x + 30, start.y + (start.h - FONT_H) / 2, "Start",
-             COLOR_TEXT);
+             menu_open ? RGB(0xf0, 0xf2, 0xf5) : COLOR_TEXT);
 
     /* One button per window, highlighting the focused one. */
     window_t *focused = wm_focused();
@@ -302,7 +311,9 @@ static void draw_taskbar(void)
             break;
         bool active = (w == focused) && !w->minimized;
         gfx_fill_rect(r.x, r.y, r.w, r.h,
-                      active ? COLOR_PANEL_LIGHT : COLOR_PANEL);
+                      active ? COLOR_PANEL_LIGHT : COLOR_TASKBAR);
+        gfx_bevel(r.x, r.y, r.w, r.h, active ? COLOR_PANEL_LIGHT : COLOR_PANEL,
+                  active ? COLOR_BORDER : COLOR_TASKBAR_EDGE);
         gfx_rect(r.x, r.y, r.w, r.h, active ? COLOR_ACCENT : COLOR_BORDER);
         if (active)
             gfx_hline(r.x + 1, r.y + r.h - 2, r.w - 2, COLOR_ACCENT);
@@ -316,7 +327,7 @@ static void draw_taskbar(void)
 
     /* Right hand widget area: separator, memory gauge and the clock. */
     int right = bar.w - CLOCK_WIDTH - 8;
-    gfx_vline(right - 112, bar.y + 7, bar.h - 14, COLOR_BORDER);
+    gfx_vline(right - 112, bar.y + 5, bar.h - 10, COLOR_BORDER);
 
     heap_stats_t heap;
     heap_get_stats(&heap);
@@ -329,14 +340,15 @@ static void draw_taskbar(void)
                       : 0;
     gfx_text(right - 100, bar.y + (TASKBAR_HEIGHT - FONT_H) / 2, "mem",
              COLOR_TEXT_DIM);
-    gfx_fill_rect(gauge_x, gauge_y, gauge_w, 10, RGB(0x14, 0x18, 0x22));
+    gfx_fill_rect(gauge_x, gauge_y, gauge_w, 10, RGB(0x45, 0x4e, 0x5d));
     gfx_fill_rect(gauge_x, gauge_y, CLAMP(used, 1, gauge_w), 10, COLOR_ACCENT);
     gfx_rect(gauge_x, gauge_y, gauge_w, 10, COLOR_BORDER);
 
     char clock[32];
     format_clock(clock, sizeof(clock));
-    gfx_fill_rect(right, bar.y + 4, CLOCK_WIDTH, bar.h - 8, COLOR_PANEL);
-    gfx_rect(right, bar.y + 4, CLOCK_WIDTH, bar.h - 8, COLOR_BORDER);
+    gfx_fill_rect(right, bar.y + 3, CLOCK_WIDTH, bar.h - 6, COLOR_TASKBAR);
+    gfx_bevel(right, bar.y + 3, CLOCK_WIDTH, bar.h - 6, COLOR_BORDER,
+              COLOR_PANEL_LIGHT);
     widget_text_centered(rect_make(right, bar.y + 4, CLOCK_WIDTH, bar.h - 8),
                          clock, COLOR_TEXT);
 
@@ -453,14 +465,10 @@ static rect_t menu_rect(void)
                      MENU_WIDTH + MENU_SUBMENU_W, h);
 }
 
-/* The panel plus its drop shadow: the area that has to be repainted when
- * anything underneath it changes. */
+/* The menu frame is kept exact so dismissing it repaints only its bounds. */
 static rect_t menu_frame_rect(void)
 {
-    rect_t r = menu_rect();
-    r.w += MENU_SHADOW;
-    r.h += MENU_SHADOW;
-    return r;
+    return menu_rect();
 }
 
 static rect_t menu_item_rect(size_t index)
@@ -487,7 +495,7 @@ static void draw_menu_row(size_t i, rect_t item, bool selected)
 
     if (row->kind == ROW_CATEGORY) {
         if (selected) {
-            gfx_fill_rect(item.x, item.y, item.w, item.h, COLOR_PANEL_LIGHT);
+            gfx_fill_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT_DARK);
             gfx_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT);
         }
         widget_icon(item.x + 8, item.y + (item.h - 18) / 2, 18,
@@ -496,39 +504,33 @@ static void draw_menu_row(size_t i, rect_t item, bool selected)
                  '\x10', selected ? COLOR_TEXT : COLOR_ACCENT);
         gfx_text(item.x + 34, item.y + (item.h - FONT_H) / 2,
                  menu_cats[row->cat].name,
-                 selected ? COLOR_TEXT : COLOR_TEXT_DIM);
+                 selected ? RGB(0xff, 0xff, 0xff) : COLOR_TEXT);
         return;
     }
 
     const char *label;
-    const char *hint;
     icon_t      icon;
     bool        indented = row->kind == ROW_APP;
     if (row->kind == ROW_APP) {
         label = row->app->name;
-        hint  = row->app->summary;
         icon  = row->app->icon;
     } else if (row->kind == ROW_RESTART) {
         label = "Restart";
-        hint  = "Reset this machine";
         icon  = ICON_RESTART;
     } else {
         label = "Shut Down";
-        hint  = "Power off this machine";
         icon  = ICON_POWER;
     }
 
     if (selected) {
-        gfx_fill_rect(item.x, item.y, item.w, item.h, COLOR_SELECTION);
+        gfx_fill_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT_DARK);
         gfx_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT);
     }
     int ix = item.x + (indented ? 24 : 6);
     int tx = item.x + (indented ? 50 : 32);
     widget_icon(ix, item.y + (item.h - 18) / 2, 18, icon);
-    gfx_text(tx, item.y + 3, label, COLOR_TEXT);
-    gfx_clip_push(rect_make(tx, item.y, item.x + item.w - tx - 4, item.h));
-    gfx_text(tx, item.y + 17, hint, selected ? COLOR_TEXT : COLOR_TEXT_DIM);
-    gfx_clip_pop();
+    gfx_text(tx, item.y + (item.h - FONT_H) / 2, label,
+             selected ? RGB(0xff, 0xff, 0xff) : COLOR_TEXT);
 }
 
 static void draw_menu_submenu(void)
@@ -549,15 +551,12 @@ static void draw_menu_submenu(void)
         const app_entry_t *app = &apps[app_i];
         bool selected = (int)n == menu_app_index;
         if (selected) {
-            gfx_fill_rect(item.x, item.y, item.w, item.h, COLOR_SELECTION);
+            gfx_fill_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT_DARK);
             gfx_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT);
         }
         widget_icon(item.x + 8, item.y + (item.h - 18) / 2, 18, app->icon);
-        gfx_text(item.x + 34, item.y + 3, app->name, COLOR_TEXT);
-        gfx_clip_push(rect_make(item.x + 34, item.y, item.w - 38, item.h));
-        gfx_text(item.x + 34, item.y + 17, app->summary,
-                 selected ? COLOR_TEXT : COLOR_TEXT_DIM);
-        gfx_clip_pop();
+        gfx_text(item.x + 34, item.y + (item.h - FONT_H) / 2, app->name,
+                 selected ? RGB(0xff, 0xff, 0xff) : COLOR_TEXT);
         n++;
     }
 }
@@ -570,17 +569,14 @@ static void draw_menu(void)
     rect_t r = menu_rect();
     gfx_clip_reset();
 
-    /* Soft drop shadow against whatever is underneath. */
-    gfx_blend_rect(r.x + MENU_SHADOW, r.y + MENU_SHADOW, r.w, r.h,
-                   RGB(0x00, 0x00, 0x00), 90);
-
     gfx_clip_push(r);
-    widget_panel(r, COLOR_PANEL, COLOR_ACCENT);
-    gfx_gradient_v(r.x + 1, r.y + 1, r.w - 2, MENU_HEADER_H, COLOR_ACCENT_DARK,
-                   COLOR_PANEL);
+    widget_panel(r, COLOR_PANEL, COLOR_BORDER);
+    gfx_gradient_v(r.x + 2, r.y + 2, r.w - 4, MENU_HEADER_H - 4,
+                   COLOR_TITLE_ACTIVE, COLOR_ACCENT_DARK);
     widget_icon(r.x + 10, r.y + 8, 26, ICON_TINOS);
-    gfx_text(r.x + 46, r.y + 10, TINOS_NAME " " TINOS_VERSION, COLOR_TEXT);
-    gfx_text(r.x + 46, r.y + 26, "applications", COLOR_TEXT_DIM);
+    gfx_text(r.x + 46, r.y + 10, TINOS_NAME " " TINOS_VERSION,
+             RGB(0xf2, 0xf4, 0xf7));
+    gfx_text(r.x + 46, r.y + 26, "applications", RGB(0xd0, 0xda, 0xe5));
     gfx_vline(r.x + MENU_WIDTH, r.y + MENU_HEADER_H + 2,
               r.h - MENU_HEADER_H - 8, COLOR_BORDER);
 

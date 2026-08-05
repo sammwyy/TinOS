@@ -22,6 +22,7 @@
 #define PATHBAR_H    24
 #define STATUS_H     22
 #define ROW_H        20
+#define SIDEBAR_W    148
 
 typedef enum {
     MODE_BROWSE = 0,
@@ -45,6 +46,10 @@ typedef struct {
     bool            blink_on;
     uint64_t        blink_at;
     int             hot_button; /* toolbar button under the mouse, or -1 */
+    char            history[16][FS_PATH_MAX];
+    size_t          history_count;
+    size_t          history_pos;
+    bool            history_jump;
     bool            drag_armed; /* pressed on an already-selected row */
     int             drag_start_x, drag_start_y;
 } explorer_t;
@@ -66,8 +71,9 @@ typedef struct {
 } toolbar_button_t;
 
 enum {
-    BTN_UP = 0,
-    BTN_ROOT,
+    BTN_BACK = 0,
+    BTN_FORWARD,
+    BTN_UP,
     BTN_HOME,
     BTN_NEWDIR,
     BTN_NEWFILE,
@@ -80,11 +86,12 @@ enum {
 };
 
 static const toolbar_button_t toolbar[BTN_COUNT] = {
-    { "Up", 40, BTN_UP },          { "Root", 48, BTN_ROOT },
-    { "Home", 52, BTN_HOME },      { "New Dir", 68, BTN_NEWDIR },
-    { "New File", 76, BTN_NEWFILE }, { "Rename", 66, BTN_RENAME },
-    { "Delete", 62, BTN_DELETE },  { "Copy", 48, BTN_COPY },
-    { "Paste", 54, BTN_PASTE },    { "Refresh", 68, BTN_REFRESH },
+    { "", 26, BTN_BACK },      { "", 26, BTN_FORWARD },
+    { "", 26, BTN_UP },        { "", 26, BTN_HOME },
+    { "", 26, BTN_NEWDIR },    { "", 26, BTN_NEWFILE },
+    { "", 26, BTN_RENAME },    { "", 26, BTN_DELETE },
+    { "", 26, BTN_COPY },      { "", 26, BTN_PASTE },
+    { "", 26, BTN_REFRESH },
 };
 
 /* ------------------------------------------------------------------ */
@@ -123,7 +130,7 @@ static void explorer_rebuild(explorer_t *ex)
     for (int pass = 0; pass < 2; pass++) {
         fs_type_t want = pass == 0 ? FS_DIR : FS_FILE;
         for (fs_node_t *c = dir->children; c; c = c->next) {
-            if (c->type != want)
+            if (c->type != want || c->name[0] == '.')
                 continue;
             if (ex->entry_count >= ex->entry_cap) {
                 size_t cap = ex->entry_cap ? ex->entry_cap * 2 : 64;
@@ -156,6 +163,16 @@ static void explorer_navigate(window_t *win, explorer_t *ex, const char *path)
         return;
     }
     strlcpy(ex->cwd, resolved, sizeof(ex->cwd));
+    if (!ex->history_jump) {
+        if (ex->history_pos + 1 < ex->history_count)
+            ex->history_count = ex->history_pos + 1;
+        if (ex->history_count < ARRAY_SIZE(ex->history)) {
+            strlcpy(ex->history[ex->history_count], ex->cwd,
+                    sizeof(ex->history[0]));
+            ex->history_count++;
+            ex->history_pos = ex->history_count - 1;
+        }
+    }
     ex->selection = 0;
     ex->scroll    = 0;
     explorer_rebuild(ex);
@@ -164,6 +181,26 @@ static void explorer_navigate(window_t *win, explorer_t *ex, const char *path)
     ksnprintf(title, sizeof(title), "Files - %s", ex->cwd);
     wm_set_title(win, title);
     wm_invalidate(win);
+}
+
+static void explorer_history_jump(window_t *win, explorer_t *ex, int delta)
+{
+    if (ex->history_count == 0)
+        return;
+    size_t next = ex->history_pos;
+    if (delta < 0) {
+        if (next == 0)
+            return;
+        next--;
+    } else {
+        if (next + 1 >= ex->history_count)
+            return;
+        next++;
+    }
+    ex->history_pos = next;
+    ex->history_jump = true;
+    explorer_navigate(win, ex, ex->history[next]);
+    ex->history_jump = false;
 }
 
 static fs_node_t *selected_node(explorer_t *ex)
@@ -344,11 +381,14 @@ static void commit_prompt(window_t *win, explorer_t *ex)
 static void do_toolbar_action(window_t *win, explorer_t *ex, int action)
 {
     switch (action) {
+    case BTN_BACK:
+        explorer_history_jump(win, ex, -1);
+        break;
+    case BTN_FORWARD:
+        explorer_history_jump(win, ex, 1);
+        break;
     case BTN_UP:
         explorer_navigate(win, ex, "..");
-        break;
-    case BTN_ROOT:
-        explorer_navigate(win, ex, "/");
         break;
     case BTN_HOME:
         explorer_navigate(win, ex, TINOS_DEFAULT_HOME);
@@ -404,17 +444,88 @@ static size_t visible_rows(rect_t client)
     return (size_t)MAX(height / ROW_H, 1);
 }
 
+static void dotted_hline(int x, int y, int length, color_t color)
+{
+    for (int i = 0; i < length; i += 3)
+        gfx_fill_rect(x + i, y, 1, 1, color);
+}
+
+static void dotted_vline(int x, int y, int length, color_t color)
+{
+    for (int i = 0; i < length; i += 3)
+        gfx_fill_rect(x, y + i, 1, 1, color);
+}
+
+static fs_node_t *explorer_home_node(void)
+{
+    fs_node_t *home = NULL;
+    if (fs_resolve(fs_root(), TINOS_DEFAULT_HOME, &home) == FS_OK &&
+        home->type == FS_DIR)
+        return home;
+    return NULL;
+}
+
+static fs_node_t *explorer_drive_node(void)
+{
+    fs_node_t *drive = NULL;
+    if (fs_resolve(fs_root(), "/drives", &drive) == FS_OK &&
+        drive->type == FS_DIR)
+        return drive;
+    if (fs_resolve(fs_root(), "/drive", &drive) == FS_OK &&
+        drive->type == FS_DIR)
+        return drive;
+    return NULL;
+}
+
+static bool explorer_sidebar_click(window_t *win, explorer_t *ex, int ly)
+{
+    int list_top = TOOLBAR_H + PATHBAR_H;
+    if (ly < list_top)
+        return true;
+    int y = list_top + 28;
+    fs_node_t *home = explorer_home_node();
+    if (ly >= y - 16 && ly < y + 4) {
+        explorer_navigate(win, ex, TINOS_DEFAULT_HOME);
+        return true;
+    }
+    if (home) {
+        for (fs_node_t *child = home->children; child; child = child->next) {
+            if (child->type != FS_DIR || child->name[0] == '.')
+                continue;
+            if (ly >= y - 3 && ly < y + 17) {
+                char path[FS_PATH_MAX];
+                fs_path(child, path, sizeof(path));
+                explorer_navigate(win, ex, path);
+                return true;
+            }
+            y += 20;
+        }
+    }
+    fs_node_t *drive = explorer_drive_node();
+    int drives_y = y + 10;
+    if (drive && ly >= drives_y + 18 && ly < drives_y + 48) {
+        char path[FS_PATH_MAX];
+        fs_path(drive, path, sizeof(path));
+        explorer_navigate(win, ex, path);
+    }
+    return true;
+}
+
 static void draw_entry(rect_t row, fs_node_t *node, bool selected, int width)
 {
     if (selected) {
         gfx_fill_rect(row.x, row.y, width, row.h, COLOR_SELECTION);
         gfx_rect(row.x, row.y, width, row.h, COLOR_ACCENT);
+    } else {
+        gfx_hline(row.x, row.y + row.h - 1, width, RGB(0xdc, 0xdf, 0xe4));
     }
 
     widget_icon(row.x + 4, row.y + 2, 16,
                 node->type == FS_DIR ? ICON_FOLDER : ICON_FILE);
     gfx_text(row.x + 26, row.y + (row.h - FONT_H) / 2, node->name,
-             node->type == FS_DIR ? COLOR_FOLDER : COLOR_TEXT);
+             selected ? RGB(0xff, 0xff, 0xff)
+                      : (node->type == FS_DIR ? RGB(0x8b, 0x62, 0x12)
+                                              : COLOR_TEXT));
 
     char detail[32];
     if (node->type == FS_DIR)
@@ -423,7 +534,7 @@ static void draw_entry(rect_t row, fs_node_t *node, bool selected, int width)
     else
         ksnprintf(detail, sizeof(detail), "%u B", (uint32_t)node->size);
     gfx_text(row.x + width - 100, row.y + (row.h - FONT_H) / 2, detail,
-             COLOR_TEXT_DIM);
+             selected ? RGB(0xe5, 0xed, 0xf6) : COLOR_TEXT_DIM);
 }
 
 static void explorer_on_draw(window_t *win, rect_t client)
@@ -436,53 +547,118 @@ static void explorer_on_draw(window_t *win, rect_t client)
 
     gfx_fill_rect(client.x, client.y, client.w, client.h, COLOR_WINDOW_BG);
 
-    /* Toolbar */
+    /* Toolbar: compact command buttons with a visible pictogram. */
     gfx_fill_rect(client.x, client.y, client.w, TOOLBAR_H, COLOR_PANEL);
     gfx_hline(client.x, client.y + TOOLBAR_H - 1, client.w, COLOR_BORDER);
+    static const icon_t toolbar_icons[BTN_COUNT] = {
+        ICON_BACK, ICON_FORWARD, ICON_UP, ICON_HOME, ICON_FOLDER, ICON_NEW,
+        ICON_EDITOR, ICON_POWER, ICON_FILE, ICON_FILE, ICON_REFRESH,
+    };
     for (int i = 0; i < BTN_COUNT; i++) {
         rect_t r = toolbar_button_rect(client, i);
         if (r.x + r.w > client.x + client.w - 4)
             break;
-        widget_button(r, toolbar[i].label, ex->hot_button == i, false);
+        widget_button(r, "", ex->hot_button == i, false);
+        widget_icon(r.x + (r.w - 16) / 2, r.y + (r.h - 16) / 2, 16,
+                    toolbar_icons[i]);
+        if (i == BTN_HOME)
+            gfx_vline(r.x + r.w + 3, r.y + 3, r.h - 6, COLOR_BORDER);
     }
 
-    /* Path bar */
+    /* Path bar: a compact, reusable recessed input. */
     rect_t path_bar =
         rect_make(client.x, client.y + TOOLBAR_H, client.w, PATHBAR_H);
-    gfx_fill_rect(path_bar.x, path_bar.y, path_bar.w, path_bar.h,
-                  RGB(0x1c, 0x22, 0x2e));
-    gfx_text(path_bar.x + 8, path_bar.y + (PATHBAR_H - FONT_H) / 2, "path:",
+    gfx_fill_rect(path_bar.x, path_bar.y, path_bar.w, path_bar.h, COLOR_PANEL);
+    gfx_text(path_bar.x + 8, path_bar.y + (PATHBAR_H - FONT_H) / 2, "Location:",
              COLOR_TEXT_DIM);
-    gfx_clip_push(rect_make(path_bar.x + 52, path_bar.y, path_bar.w - 160,
-                            path_bar.h));
-    gfx_text(path_bar.x + 52, path_bar.y + (PATHBAR_H - FONT_H) / 2, ex->cwd,
+    rect_t location = rect_make(path_bar.x + 76, path_bar.y + 3, 286,
+                                path_bar.h - 6);
+    widget_input_frame(location);
+    gfx_clip_push(rect_make(location.x + 6, location.y, location.w - 12,
+                            location.h));
+    gfx_text(location.x + 6, location.y + (location.h - FONT_H) / 2, ex->cwd,
              COLOR_TEXT);
     gfx_clip_pop();
 
     char summary[48];
     ksnprintf(summary, sizeof(summary), "%u entries",
               (uint32_t)ex->entry_count);
-    gfx_text(path_bar.x + path_bar.w - gfx_text_width(summary) - 10,
+    gfx_text(location.x + location.w + 14,
              path_bar.y + (PATHBAR_H - FONT_H) / 2, summary, COLOR_TEXT_DIM);
 
-    /* Listing */
+    /* Sidebar and listing: the tree is intentionally textual and quiet. */
     int    list_y = client.y + TOOLBAR_H + PATHBAR_H;
     size_t rows   = visible_rows(client);
     int    list_h = (int)rows * ROW_H;
-    gfx_fill_rect(client.x, list_y, client.w, list_h, RGB(0x21, 0x27, 0x33));
+    gfx_fill_rect(client.x, list_y, SIDEBAR_W, list_h, RGB(0xe1, 0xe0, 0xe7));
+    gfx_fill_rect(client.x + SIDEBAR_W, list_y, client.w - SIDEBAR_W,
+                  list_h, RGB(0xee, 0xef, 0xf1));
+    gfx_vline(client.x + SIDEBAR_W, list_y, list_h, COLOR_BORDER);
+    widget_icon(client.x + 8, list_y + 4, 16, ICON_HOME);
+    gfx_text(client.x + 30, list_y + 8, "Home Folder", COLOR_TEXT);
+    fs_node_t *home = explorer_home_node();
+    int tree_y = list_y + 28;
+    int tree_count = 0;
+    if (home) {
+        for (fs_node_t *child = home->children; child; child = child->next)
+            if (child->type == FS_DIR && child->name[0] != '.')
+                tree_count++;
+        if (tree_count)
+            dotted_vline(client.x + 14, tree_y - 12, tree_count * 20 - 1,
+                         COLOR_TEXT_DIM);
+        tree_count = 0;
+        for (fs_node_t *child = home->children; child; child = child->next) {
+            if (child->type != FS_DIR || child->name[0] == '.')
+                continue;
+            dotted_hline(client.x + 14, tree_y + 7, 12, COLOR_TEXT_DIM);
+            widget_icon(client.x + 28, tree_y, 16, ICON_FOLDER);
+            gfx_text(client.x + 48, tree_y, child->name, COLOR_TEXT_DIM);
+            tree_y += 20;
+            tree_count++;
+        }
+    }
+    int drives_y = tree_y + 10;
+    /* A small gap separates sections; a heavy rule would fight the dotted
+     * tree grammar. */
+    widget_icon(client.x + 8, drives_y + 6, 16, ICON_DRIVE);
+    gfx_text(client.x + 30, drives_y + 10, "Drives", COLOR_TEXT);
+    fs_node_t *drive = explorer_drive_node();
+    if (drive) {
+        int drive_y = drives_y + 28;
+        bool shown = false;
+        for (fs_node_t *child = drive->children; child; child = child->next) {
+            if (child->name[0] == '.')
+                continue;
+            dotted_hline(client.x + 14, drive_y + 7, 12, COLOR_TEXT_DIM);
+            widget_icon(client.x + 42, drive_y, 16,
+                        child->type == FS_DIR ? ICON_FOLDER : ICON_FILE);
+            gfx_text(client.x + 62, drive_y, child->name, COLOR_TEXT_DIM);
+            drive_y += 20;
+            shown = true;
+        }
+        if (!shown) {
+            dotted_hline(client.x + 14, drive_y + 7, 12, COLOR_TEXT_DIM);
+            widget_icon(client.x + 28, drive_y, 16, ICON_DRIVE);
+            gfx_text(client.x + 48, drive_y, "Disk 0", COLOR_TEXT_DIM);
+        }
+    }
+
+    int list_x = client.x + SIDEBAR_W;
+    gfx_vline(list_x + (client.w - SIDEBAR_W) - 108, list_y, list_h,
+              RGB(0xc2, 0xc7, 0xcf));
 
     if (ex->entry_count == 0) {
-        gfx_text(client.x + 26, list_y + 10, "(this folder is empty)",
+        gfx_text(list_x + 18, list_y + 10, "(this folder is empty)",
                  COLOR_TEXT_DIM);
     }
     for (size_t i = 0; i < rows; i++) {
         size_t index = ex->scroll + i;
         if (index >= ex->entry_count)
             break;
-        rect_t row = rect_make(client.x, list_y + (int)i * ROW_H, client.w,
-                               ROW_H);
+        rect_t row = rect_make(list_x, list_y + (int)i * ROW_H,
+                               client.w - SIDEBAR_W, ROW_H);
         draw_entry(row, ex->entries[index], index == ex->selection,
-                   client.w - 8);
+                   client.w - SIDEBAR_W - 8);
     }
     if (ex->entry_count > rows)
         widget_scrollbar(rect_make(client.x + client.w - 6, list_y, 6, list_h),
@@ -510,9 +686,9 @@ static void explorer_on_draw(window_t *win, rect_t client)
         ksnprintf(msg, sizeof(msg), "Delete '%s'? Enter = yes, Esc = cancel",
                   node ? node->name : "");
         gfx_fill_rect(status.x, status.y + 1, status.w, status.h - 1,
-                      RGB(0x5a, 0x22, 0x22));
+                      RGB(0x9b, 0x3f, 0x3f));
         gfx_text(status.x + 8, status.y + (STATUS_H - FONT_H) / 2, msg,
-                 COLOR_TEXT);
+                 RGB(0xff, 0xff, 0xff));
         break;
     }
     default: {
@@ -706,6 +882,14 @@ static bool explorer_on_mouse(window_t *win, const mouse_event_t *ev, int lx,
         return true;
     }
 
+    /* The tree is currently a read-only navigation aid; the keyboard and
+     * toolbar remain the authoritative way to change location. */
+    if (lx < SIDEBAR_W && ly >= TOOLBAR_H + PATHBAR_H) {
+        if (ev->pressed & MOUSE_LEFT)
+            return explorer_sidebar_click(win, ex, ly);
+        return true;
+    }
+
     int list_top = TOOLBAR_H + PATHBAR_H;
     size_t rows  = visible_rows(client);
     size_t row   = (size_t)((ly - list_top) / ROW_H);
@@ -806,6 +990,9 @@ static void explorer_on_open(window_t *win, const char *arg)
         strlcpy(ex->cwd, "/", sizeof(ex->cwd));
 
     explorer_rebuild(ex);
+    strlcpy(ex->history[0], ex->cwd, sizeof(ex->history[0]));
+    ex->history_count = 1;
+    ex->history_pos = 0;
 
     char title[64];
     ksnprintf(title, sizeof(title), "Files - %s", ex->cwd);

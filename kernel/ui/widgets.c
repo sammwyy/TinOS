@@ -37,9 +37,75 @@ static void ring(int cx, int cy, int radius, int thickness, color_t color)
 /* Icons                                                               */
 /* ------------------------------------------------------------------ */
 
+typedef struct {
+    icon_t   icon;
+    uint16_t mask[16];
+} builtin_icon_t;
+
+/* One-bit 16x16 sprites. Zeroes are transparent, so the same small raster
+ * assets work on the lavender shell, light panels and dark terminal. */
+static const builtin_icon_t builtin_icons[] = {
+    { ICON_FOLDER, { 0x0000, 0x0000, 0x1f00, 0x3f80, 0x7fff, 0x7fff,
+                     0x7fff, 0x7fff, 0x7fff, 0x7fff, 0x7fff, 0x7fff,
+                     0x7fff, 0x7fff, 0x7fff, 0x0000 } },
+    { ICON_FILE, { 0x0ff0, 0x1ff8, 0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc,
+                   0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc,
+                   0x3ffc, 0x3ffc, 0x3ffc, 0x0000 } },
+    { ICON_DRIVE, { 0x0000, 0x0ff0, 0x1ff8, 0x3ffc, 0x3ffc, 0x3ffc,
+                    0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc,
+                    0x3ffc, 0x3ffc, 0x1ff8, 0x0000 } },
+    { ICON_TERMINAL, { 0x7ffe, 0x4002, 0x4802, 0x5402, 0x6202, 0x4002,
+                       0x4002, 0x4002, 0x4002, 0x4002, 0x4002, 0x4002,
+                       0x4002, 0x4002, 0x7ffe, 0x0000 } },
+};
+
+static color_t builtin_icon_color(icon_t icon)
+{
+    switch (icon) {
+    case ICON_FOLDER:
+        return COLOR_FOLDER;
+    case ICON_FILE:
+        return COLOR_TEXT_DIM;
+    case ICON_HOME:
+        return COLOR_ACCENT_DARK;
+    case ICON_DRIVE:
+        return COLOR_ACCENT_DARK;
+    case ICON_TERMINAL:
+        return COLOR_TERMINAL_TEXT;
+    default:
+        return COLOR_TEXT;
+    }
+}
+
+static bool draw_builtin_icon(int x, int y, int size, icon_t icon)
+{
+    const builtin_icon_t *sprite = NULL;
+    for (size_t i = 0; i < ARRAY_SIZE(builtin_icons); i++)
+        if (builtin_icons[i].icon == icon) {
+            sprite = &builtin_icons[i];
+            break;
+        }
+    if (!sprite)
+        return false;
+
+    color_t color = builtin_icon_color(icon);
+    for (int py = 0; py < size; py++) {
+        int sy = py * 16 / size;
+        for (int px = 0; px < size; px++) {
+            int sx = px * 16 / size;
+            if (sprite->mask[sy] & (uint16_t)(0x8000u >> sx))
+                gfx_pixel(x + px, y + py, color);
+        }
+    }
+    return true;
+}
+
 void widget_icon(int x, int y, int size, icon_t icon)
 {
     int s = size;
+
+    if (draw_builtin_icon(x, y, size, icon))
+        return;
 
     switch (icon) {
     case ICON_TERMINAL:
@@ -102,6 +168,68 @@ void widget_icon(int x, int y, int size, icon_t icon)
             gfx_hline(x + s / 2 + 1, y + 2 + i, 5 - i, COLOR_OK);
         break;
 
+    case ICON_BACK:
+    case ICON_FORWARD:
+    case ICON_UP: {
+        color_t c = COLOR_ACCENT_DARK;
+        int cy = y + s / 2;
+        if (icon == ICON_BACK || icon == ICON_FORWARD) {
+            int dir = icon == ICON_BACK ? -1 : 1;
+            gfx_hline(x + 4, cy, s - 8, c);
+            gfx_hline(x + (dir < 0 ? 3 : s - 4), cy, 1, c);
+            for (int i = 0; i < 5; i++) {
+                gfx_pixel(x + (dir < 0 ? 4 + i : s - 5 - i), cy - i, c);
+                gfx_pixel(x + (dir < 0 ? 4 + i : s - 5 - i), cy + i, c);
+            }
+        } else {
+            gfx_vline(x + s / 2, y + 4, s - 8, c);
+            for (int i = 0; i < 5; i++) {
+                gfx_pixel(x + s / 2 - i, y + 4 + i, c);
+                gfx_pixel(x + s / 2 + i, y + 4 + i, c);
+            }
+        }
+        break;
+    }
+
+    case ICON_HOME:
+        gfx_fill_rect(x + 4, y + 8, s - 8, s - 5, RGB(0xf3, 0xf2, 0xf5));
+        gfx_rect(x + 4, y + 8, s - 8, s - 5, COLOR_BORDER);
+        for (int i = 0; i < s / 2; i++) {
+            gfx_pixel(x + s / 2 - i, y + 7 - i, RGB(0xb8, 0x4f, 0x58));
+            gfx_pixel(x + s / 2 + i, y + 7 - i, RGB(0xb8, 0x4f, 0x58));
+        }
+        gfx_fill_rect(x + s / 2 - 2, y + s - 7, 4, 5, COLOR_ACCENT_DARK);
+        break;
+
+    case ICON_REFRESH:
+        ring(x + s / 2, y + s / 2, s / 2 - 3, 2, COLOR_ACCENT_DARK);
+        gfx_fill_rect(x + s / 2 + 2, y + 2, 5, 5, COLOR_PANEL);
+        gfx_hline(x + s - 7, y + 3, 4, COLOR_ACCENT_DARK);
+        gfx_vline(x + s - 4, y + 3, 4, COLOR_ACCENT_DARK);
+        break;
+
+    case ICON_SAVE:
+        gfx_fill_rect(x + 3, y + 2, s - 6, s - 4, COLOR_ACCENT_DARK);
+        gfx_rect(x + 3, y + 2, s - 6, s - 4, COLOR_BORDER);
+        gfx_fill_rect(x + 6, y + 3, s - 12, 5, COLOR_PANEL_LIGHT);
+        gfx_fill_rect(x + 6, y + s - 8, s - 12, 5, COLOR_PANEL_LIGHT);
+        break;
+
+    case ICON_NEW:
+        gfx_fill_rect(x + 3, y + 2, s - 6, s - 4, COLOR_FILE);
+        gfx_rect(x + 3, y + 2, s - 6, s - 4, COLOR_BORDER);
+        gfx_hline(x + 6, y + 6, s - 12, COLOR_BORDER);
+        gfx_hline(x + 6, y + 10, s - 12, COLOR_BORDER);
+        break;
+
+    case ICON_UNDO:
+    case ICON_REDO:
+        gfx_hline(x + 4, y + s / 2, s - 8, COLOR_ACCENT_DARK);
+        gfx_vline(icon == ICON_UNDO ? x + 4 : x + s - 5, y + 5, s - 10,
+                  COLOR_ACCENT_DARK);
+        gfx_hline(x + 4, y + 5, s - 9, COLOR_ACCENT_DARK);
+        break;
+
     case ICON_TINOS:
     default: {
         /* Four pointed star: the half width of each row falls off
@@ -131,7 +259,15 @@ void widget_icon(int x, int y, int size, icon_t icon)
 void widget_panel(rect_t r, color_t fill, color_t border)
 {
     gfx_fill_rect(r.x, r.y, r.w, r.h, fill);
+    gfx_bevel(r.x, r.y, r.w, r.h, COLOR_PANEL_LIGHT, COLOR_BORDER);
     gfx_rect(r.x, r.y, r.w, r.h, border);
+}
+
+void widget_input_frame(rect_t r)
+{
+    gfx_fill_rect(r.x, r.y, r.w, r.h, RGB(0xf4, 0xf3, 0xf6));
+    gfx_bevel(r.x, r.y, r.w, r.h, COLOR_BORDER, COLOR_PANEL_LIGHT);
+    gfx_rect(r.x, r.y, r.w, r.h, COLOR_BORDER);
 }
 
 void widget_button(rect_t r, const char *label, bool hot, bool pressed)
@@ -140,7 +276,7 @@ void widget_button(rect_t r, const char *label, bool hot, bool pressed)
                            : (hot ? COLOR_PANEL_LIGHT : COLOR_PANEL);
     gfx_fill_rect(r.x, r.y, r.w, r.h, face);
     gfx_bevel(r.x, r.y, r.w, r.h, pressed ? COLOR_BORDER : COLOR_PANEL_LIGHT,
-              pressed ? COLOR_PANEL_LIGHT : RGB(0x14, 0x18, 0x22));
+              pressed ? COLOR_PANEL_LIGHT : COLOR_BORDER);
     gfx_rect(r.x, r.y, r.w, r.h, hot ? COLOR_ACCENT : COLOR_BORDER);
     widget_text_centered(r, label, COLOR_TEXT);
 }
@@ -156,7 +292,9 @@ void widget_text_centered(rect_t r, const char *text, color_t color)
 void widget_scrollbar(rect_t track, size_t first_visible, size_t visible,
                       size_t total)
 {
-    gfx_fill_rect(track.x, track.y, track.w, track.h, RGB(0x1c, 0x21, 0x2c));
+    gfx_fill_rect(track.x, track.y, track.w, track.h, COLOR_PANEL);
+    gfx_bevel(track.x, track.y, track.w, track.h, COLOR_BORDER,
+              COLOR_PANEL_LIGHT);
     if (total == 0 || visible >= total)
         return;
 
@@ -165,8 +303,10 @@ void widget_scrollbar(rect_t track, size_t first_visible, size_t visible,
         thumb_h = 16;
     int span = track.h - thumb_h;
     int pos  = (int)((uint64_t)span * first_visible / (total - visible));
-    gfx_fill_rect(track.x + 1, track.y + pos, track.w - 2, thumb_h,
-                  COLOR_BORDER);
+    gfx_fill_rect(track.x + 2, track.y + pos, track.w - 4, thumb_h,
+                  COLOR_PANEL_LIGHT);
+    gfx_bevel(track.x + 2, track.y + pos, track.w - 4, thumb_h,
+              COLOR_PANEL_LIGHT, COLOR_BORDER);
 }
 
 /* ------------------------------------------------------------------ */
@@ -263,7 +403,8 @@ bool text_input_key(text_input_t *input, const key_event_t *ev)
 void text_input_draw(const text_input_t *input, rect_t r, const char *label,
                      bool blink_on)
 {
-    widget_panel(r, RGB(0x18, 0x1d, 0x28), COLOR_ACCENT);
+    widget_input_frame(r);
+    gfx_rect(r.x, r.y, r.w, r.h, COLOR_ACCENT);
 
     int x = r.x + 6;
     int y = r.y + (r.h - FONT_H) / 2;

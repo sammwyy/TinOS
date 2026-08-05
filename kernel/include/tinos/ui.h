@@ -11,35 +11,35 @@
 /* Theme                                                               */
 /* ------------------------------------------------------------------ */
 
-#define COLOR_DESKTOP_TOP     RGB(0x1b, 0x2c, 0x4d)
-#define COLOR_DESKTOP_BOTTOM  RGB(0x08, 0x0e, 0x1c)
-#define COLOR_TASKBAR         RGB(0x1a, 0x1f, 0x2b)
-#define COLOR_TASKBAR_EDGE    RGB(0x33, 0x3c, 0x50)
-#define COLOR_ACCENT          RGB(0x3b, 0x82, 0xf6)
-#define COLOR_ACCENT_DARK     RGB(0x1d, 0x4e, 0xd8)
-#define COLOR_PANEL           RGB(0x22, 0x28, 0x36)
-#define COLOR_PANEL_LIGHT     RGB(0x2c, 0x34, 0x45)
-#define COLOR_BORDER          RGB(0x3d, 0x47, 0x5c)
-#define COLOR_TEXT            RGB(0xe6, 0xe9, 0xef)
-#define COLOR_TEXT_DIM        RGB(0x97, 0xa1, 0xb4)
+#define COLOR_DESKTOP_TOP     RGB(0x3a, 0x49, 0x61)
+#define COLOR_DESKTOP_BOTTOM  RGB(0x18, 0x20, 0x2d)
+#define COLOR_TASKBAR         RGB(0xb8, 0xb7, 0xc3)
+#define COLOR_TASKBAR_EDGE    RGB(0x4a, 0x49, 0x59)
+#define COLOR_ACCENT          RGB(0x5f, 0x6e, 0x99)
+#define COLOR_ACCENT_DARK     RGB(0x3e, 0x4d, 0x73)
+#define COLOR_PANEL           RGB(0xc2, 0xc1, 0xcc)
+#define COLOR_PANEL_LIGHT     RGB(0xe3, 0xe1, 0xe8)
+#define COLOR_BORDER          RGB(0x5c, 0x5b, 0x6c)
+#define COLOR_TEXT            RGB(0x16, 0x1b, 0x24)
+#define COLOR_TEXT_DIM        RGB(0x4f, 0x5a, 0x69)
 #define COLOR_TEXT_DARK       RGB(0x10, 0x14, 0x1c)
-#define COLOR_WINDOW_BG       RGB(0x27, 0x2e, 0x3d)
-#define COLOR_TITLE_ACTIVE    RGB(0x2f, 0x63, 0xc0)
-#define COLOR_TITLE_INACTIVE  RGB(0x39, 0x41, 0x52)
+#define COLOR_WINDOW_BG       RGB(0xd0, 0xcf, 0xda)
+#define COLOR_TITLE_ACTIVE    RGB(0x5e, 0x6d, 0x98)
+#define COLOR_TITLE_INACTIVE  RGB(0x8c, 0x8c, 0x9b)
 #define COLOR_TERMINAL_BG     RGB(0x0d, 0x11, 0x18)
 #define COLOR_TERMINAL_TEXT   RGB(0xd6, 0xe2, 0xf0)
 #define COLOR_TERMINAL_PROMPT RGB(0x6e, 0xe7, 0xb7)
 #define COLOR_TERMINAL_ERROR  RGB(0xff, 0x8a, 0x8a)
-#define COLOR_SELECTION       RGB(0x2f, 0x63, 0xc0)
+#define COLOR_SELECTION       RGB(0x5b, 0x80, 0xa8)
 #define COLOR_FOLDER          RGB(0xf2, 0xc0, 0x54)
 #define COLOR_FILE            RGB(0xd6, 0xdd, 0xe8)
 #define COLOR_DANGER          RGB(0xe0, 0x5c, 0x5c)
 #define COLOR_OK              RGB(0x5c, 0xd0, 0x8a)
 
-#define TASKBAR_HEIGHT 34
-#define TITLEBAR_HEIGHT 24
-#define WINDOW_BORDER 1
-#define RESIZE_GRIP 14
+#define TASKBAR_HEIGHT 28
+#define TITLEBAR_HEIGHT 20
+#define WINDOW_BORDER 2
+#define RESIZE_GRIP 12
 #define WINDOW_MIN_W 180
 #define WINDOW_MIN_H 120
 
@@ -69,6 +69,8 @@ struct window {
     int                 id;
     char                title[64];
     rect_t              frame;
+    rect_t              restore_frame;
+    bool                maximized;
     bool                minimized;
     bool                needs_redraw;
     uint32_t           *surface;
@@ -130,12 +132,23 @@ typedef enum {
     ICON_RESTART,
     ICON_EDITOR,
     ICON_TINOS,
+    ICON_BACK,
+    ICON_FORWARD,
+    ICON_UP,
+    ICON_HOME,
+    ICON_DRIVE,
+    ICON_REFRESH,
+    ICON_SAVE,
+    ICON_NEW,
+    ICON_UNDO,
+    ICON_REDO,
 } icon_t;
 
 void widget_icon(int x, int y, int size, icon_t icon);
 void widget_button(rect_t r, const char *label, bool hot, bool pressed);
 void widget_panel(rect_t r, color_t fill, color_t border);
 void widget_text_centered(rect_t r, const char *text, color_t color);
+void widget_input_frame(rect_t r);
 void widget_scrollbar(rect_t track, size_t first_visible, size_t visible,
                       size_t total);
 

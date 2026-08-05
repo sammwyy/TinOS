@@ -11,8 +11,8 @@
 #include <tinos/string.h>
 #include <tinos/ui.h>
 
-#define BUTTON_SIZE 16
-#define BUTTON_GAP  6
+#define BUTTON_SIZE TITLEBAR_HEIGHT
+#define BUTTON_GAP  0
 
 static window_t *bottom_window;
 static window_t *top_window;
@@ -88,6 +88,13 @@ static rect_t minimize_button_rect(const window_t *win)
     rect_t close = close_button_rect(win);
     return rect_make(close.x - BUTTON_SIZE - BUTTON_GAP, close.y, BUTTON_SIZE,
                      BUTTON_SIZE);
+}
+
+static rect_t maximize_button_rect(const window_t *win)
+{
+    rect_t mini = minimize_button_rect(win);
+    return rect_make(mini.x - BUTTON_SIZE - BUTTON_GAP, mini.y,
+                     BUTTON_SIZE, BUTTON_SIZE);
 }
 
 static rect_t resize_grip_rect(const window_t *win)
@@ -358,6 +365,12 @@ static void draw_button_glyph(rect_t r, bool close_button, color_t color)
     }
 }
 
+static void draw_maximize_glyph(rect_t r, color_t color)
+{
+    gfx_rect(r.x + 4, r.y + 4, r.w - 8, r.h - 8, color);
+    gfx_hline(r.x + 4, r.y + 4, r.w - 8, color);
+}
+
 void wm_draw_window(window_t *win)
 {
     if (!win || win->minimized)
@@ -373,26 +386,41 @@ void wm_draw_window(window_t *win)
     /* Frame */
     gfx_fill_rect(win->frame.x, win->frame.y, win->frame.w, win->frame.h,
                   COLOR_WINDOW_BG);
+    gfx_bevel(win->frame.x, win->frame.y, win->frame.w, win->frame.h,
+              COLOR_PANEL_LIGHT, COLOR_BORDER);
     gfx_gradient_v(win->frame.x, win->frame.y, win->frame.w, TITLEBAR_HEIGHT,
                    title, focused ? COLOR_ACCENT_DARK : COLOR_PANEL);
     gfx_rect(win->frame.x, win->frame.y, win->frame.w, win->frame.h, border);
     gfx_hline(win->frame.x, win->frame.y + TITLEBAR_HEIGHT, win->frame.w,
               border);
 
-    /* Title text, clipped so it can never overrun the buttons. */
-    rect_t title_area =
-        rect_make(win->frame.x + 8, win->frame.y,
-                  win->frame.w - 2 * (BUTTON_SIZE + BUTTON_GAP) - 16,
-                  TITLEBAR_HEIGHT);
+    /* Center the caption in the frame, independently of the controls. */
+    rect_t title_area = rect_make(win->frame.x + 8, win->frame.y,
+                                  win->frame.w - 16, TITLEBAR_HEIGHT);
     gfx_clip_push(title_area);
-    gfx_text(title_area.x, win->frame.y + (TITLEBAR_HEIGHT - FONT_H) / 2,
-             win->title, focused ? COLOR_TEXT : COLOR_TEXT_DIM);
+    int title_x = win->frame.x + (win->frame.w - gfx_text_width(win->title)) / 2;
+    gfx_text(title_x, win->frame.y + (TITLEBAR_HEIGHT - FONT_H) / 2,
+             win->title, RGB(0xf5, 0xf5, 0xfa));
     gfx_clip_pop();
 
     rect_t close = close_button_rect(win);
     rect_t mini  = minimize_button_rect(win);
-    draw_button_glyph(close, true, focused ? COLOR_TEXT : COLOR_TEXT_DIM);
-    draw_button_glyph(mini, false, focused ? COLOR_TEXT : COLOR_TEXT_DIM);
+    rect_t maxi  = maximize_button_rect(win);
+    gfx_fill_rect(maxi.x, maxi.y, maxi.w, maxi.h, title);
+    gfx_bevel(maxi.x + 1, maxi.y + 1, maxi.w - 2, maxi.h - 2,
+              RGB(0xa4, 0xad, 0xc7), COLOR_ACCENT_DARK);
+    gfx_vline(maxi.x, maxi.y, maxi.h, RGB(0xd0, 0xd5, 0xe2));
+    gfx_fill_rect(mini.x, mini.y, mini.w, mini.h, title);
+    gfx_bevel(mini.x + 1, mini.y + 1, mini.w - 2, mini.h - 2,
+              RGB(0xa4, 0xad, 0xc7), COLOR_ACCENT_DARK);
+    gfx_vline(mini.x, mini.y, mini.h, RGB(0xd0, 0xd5, 0xe2));
+    gfx_fill_rect(close.x, close.y, close.w, close.h, title);
+    gfx_bevel(close.x + 1, close.y + 1, close.w - 2, close.h - 2,
+              RGB(0xa4, 0xad, 0xc7), COLOR_ACCENT_DARK);
+    gfx_vline(close.x, close.y, close.h, RGB(0xd0, 0xd5, 0xe2));
+    draw_maximize_glyph(maxi, RGB(0xff, 0xff, 0xff));
+    draw_button_glyph(close, true, RGB(0xff, 0xff, 0xff));
+    draw_button_glyph(mini, false, RGB(0xff, 0xff, 0xff));
 
     /* Resize grip: three dots stepping diagonally into the corner. */
     rect_t  grip = resize_grip_rect(win);
@@ -558,6 +586,18 @@ bool wm_handle_mouse(const mouse_event_t *ev)
 
         if (rect_contains(close_button_rect(win), ev->x, ev->y)) {
             wm_close(win);
+            return true;
+        }
+        if (rect_contains(maximize_button_rect(win), ev->x, ev->y)) {
+            if (win->maximized) {
+                win->frame = win->restore_frame;
+                win->maximized = false;
+            } else {
+                win->restore_frame = win->frame;
+                win->frame = wm_workspace();
+                win->maximized = true;
+            }
+            wm_invalidate_all();
             return true;
         }
         if (rect_contains(minimize_button_rect(win), ev->x, ev->y)) {

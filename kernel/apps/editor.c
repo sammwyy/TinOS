@@ -17,6 +17,7 @@
 
 #define PADDING          6
 #define STATUS_H         20
+#define TOOLBAR_H        30
 
 typedef struct {
     char   path[FS_PATH_MAX];
@@ -240,12 +241,12 @@ static void editor_on_open(window_t *win, const char *arg)
         return;
     }
     win->priv = ed;
-    path_normalize(arg && arg[0] ? arg : "/README.txt", ed->path,
+    path_normalize(arg && arg[0] ? arg : "/untitled.txt", ed->path,
                    sizeof(ed->path));
 
     rect_t client = wm_client_rect(win);
     ed->cols      = (client.w - 2 * PADDING) / FONT_W;
-    ed->rows      = (client.h - STATUS_H - 2 * PADDING) / FONT_H;
+    ed->rows      = (client.h - TOOLBAR_H - STATUS_H - 2 * PADDING) / FONT_H;
 
     if (!editor_load(ed)) {
         if (!ensure_capacity(ed, 64)) {
@@ -290,7 +291,7 @@ static void editor_on_resize(window_t *win, rect_t client)
     if (!ed)
         return;
     ed->cols = (client.w - 2 * PADDING) / FONT_W;
-    ed->rows = (client.h - STATUS_H - 2 * PADDING) / FONT_H;
+    ed->rows = (client.h - TOOLBAR_H - STATUS_H - 2 * PADDING) / FONT_H;
     editor_scroll_to_cursor(ed);
 }
 
@@ -298,7 +299,7 @@ static void editor_on_resize(window_t *win, rect_t client)
  * inverse of the row/column layout editor_on_draw uses. */
 static size_t offset_from_xy(editor_t *ed, int lx, int ly)
 {
-    int row = (ly - PADDING) / FONT_H;
+    int row = (ly - TOOLBAR_H - PADDING) / FONT_H;
     int col = (lx - PADDING) / FONT_W;
     if (row < 0)
         row = 0;
@@ -322,6 +323,43 @@ static bool editor_on_mouse(window_t *win, const mouse_event_t *ev, int lx,
     editor_t *ed = win->priv;
     if (!ed)
         return true;
+
+    if (ly < TOOLBAR_H) {
+        if (ev->pressed & MOUSE_LEFT) {
+            int x = 4;
+            for (int i = 0; i < 7; i++) {
+                int width = i == 0 ? 56 : 52;
+                if (lx >= x && lx < x + width) {
+                    if (i == 0) {
+                        editor_save(win, ed);
+                    } else if (i == 1) {
+                        ed->length = 0;
+                        ed->cursor = 0;
+                        ed->top_line = 0;
+                        ed->left_column = 0;
+                        ed->buffer[0] = '\0';
+                        ed->modified = false;
+                        strlcpy(ed->path, "/untitled.txt", sizeof(ed->path));
+                        editor_update_title(win, ed);
+                    } else if (i == 4) {
+                        selection_copy(ed);
+                        selection_delete(ed);
+                    } else if (i == 5) {
+                        selection_copy(ed);
+                    } else if (i == 6) {
+                        selection_delete(ed);
+                        if (editor_clipboard)
+                            insert_text(ed, editor_clipboard,
+                                        editor_clipboard_len);
+                    }
+                    wm_invalidate(win);
+                    return true;
+                }
+                x += width + 3;
+            }
+        }
+        return true;
+    }
 
     if (ev->pressed & MOUSE_LEFT) {
         ed->cursor          = offset_from_xy(ed, lx, ly);
@@ -353,10 +391,30 @@ static void editor_on_draw(window_t *win, rect_t client)
     if (!ed)
         return;
 
-    gfx_fill_rect(client.x, client.y, client.w, client.h, COLOR_TERMINAL_BG);
+    gfx_fill_rect(client.x, client.y, client.w, client.h, RGB(0xf0, 0xef, 0xf4));
+
+    static const icon_t toolbar_icons[] = {
+        ICON_SAVE, ICON_NEW, ICON_UNDO, ICON_REDO, ICON_FILE, ICON_EDITOR,
+        ICON_FILE,
+    };
+    static const char *toolbar_labels[] = {
+        "Save", "New", "Undo", "Redo", "Cut", "Copy", "Paste",
+    };
+    int toolbar_x = client.x + 4;
+    gfx_fill_rect(client.x, client.y, client.w, TOOLBAR_H, COLOR_PANEL);
+    gfx_hline(client.x, client.y + TOOLBAR_H - 1, client.w, COLOR_BORDER);
+    for (size_t i = 0; i < ARRAY_SIZE(toolbar_icons); i++) {
+        rect_t r = rect_make(toolbar_x, client.y + 3,
+                             i == 0 ? 56 : 52, TOOLBAR_H - 6);
+        widget_button(r, "", false, false);
+        widget_icon(r.x + 3, r.y + (r.h - 16) / 2, 16, toolbar_icons[i]);
+        gfx_text(r.x + 22, r.y + (r.h - FONT_H) / 2, toolbar_labels[i],
+                 COLOR_TEXT);
+        toolbar_x += r.w + 3;
+    }
 
     int x = client.x + PADDING;
-    int y = client.y + PADDING;
+    int y = client.y + TOOLBAR_H + PADDING;
 
     size_t sel_start = 0, sel_end = 0;
     if (ed->has_selection)
@@ -395,8 +453,8 @@ static void editor_on_draw(window_t *win, rect_t client)
 
         if (len > ed->left_column) {
             size_t visible = MIN(len - ed->left_column, (size_t)ed->cols);
-            gfx_text_n(x, y + row * FONT_H, ed->buffer + offset +
-                       ed->left_column, visible, COLOR_TERMINAL_TEXT);
+        gfx_text_n(x, y + row * FONT_H, ed->buffer + offset +
+                       ed->left_column, visible, COLOR_TEXT);
         }
         if (end >= ed->length)
             break;
@@ -411,7 +469,7 @@ static void editor_on_draw(window_t *win, rect_t client)
             column >= ed->left_column) {
             int cx = x + (int)(column - ed->left_column) * FONT_W;
             int cy = y + (int)(line - ed->top_line) * FONT_H;
-            gfx_fill_rect(cx, cy, 2, FONT_H, COLOR_TERMINAL_PROMPT);
+            gfx_fill_rect(cx, cy, 2, FONT_H, COLOR_ACCENT);
         }
     }
 
