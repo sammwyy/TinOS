@@ -370,9 +370,11 @@ qemu-system-i386 -cdrom build/tinos.iso \
 
 The storage stack is layered: block devices provide sectors, partition
 readers describe ranges of sectors, filesystems interpret those ranges, and
-the VFS exposes mounted trees. MBR partition discovery and FAT32 are the next
-storage layer; USB mass storage and VirtIO block devices can then reuse the
-same filesystem code.
+the VFS exposes mounted trees. MBR partition discovery and FAT32 are
+supported, and a transitional VirtIO block device can be attached explicitly
+with QEMU's `-device virtio-blk-pci`; both transports reuse the same
+filesystem code. USB mass storage remains a separate host-controller
+milestone.
 
 Every application holds *paths*, not node pointers, and re-resolves them, so
 deleting a directory from one window cannot leave another window pointing at

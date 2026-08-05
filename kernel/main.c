@@ -11,6 +11,7 @@
 #include <tinos/async.h>
 #include <tinos/ata.h>
 #include <tinos/storage.h>
+#include <tinos/virtio_blk.h>
 #include <tinos/console.h>
 #include <tinos/desktop.h>
 #include <tinos/driver.h>
@@ -181,6 +182,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     ktimer_init();
     driver_model_init();
     e1000_driver_register();
+    virtio_blk_driver_register();
     boot_step("Memory manager online");
     boot_note("Asynchronous worker runtime online");
     boot_note("Kernel thread scheduler online (private stacks, PIT preemption)");
@@ -227,6 +229,8 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     /* --- graphics ------------------------------------------------- */
     size_t devices = pci_scan();
     size_t bound = driver_bind_all();
+    for (size_t i = 0; i < virtio_blk_count(); i++)
+        storage_mount_device(virtio_blk_device(i), &mounted);
     bool network = net_init();
     if (network)
         net_async_init();
