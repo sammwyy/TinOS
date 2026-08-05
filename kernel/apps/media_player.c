@@ -31,11 +31,13 @@ typedef struct {
     char message[96];
     int hot;
     kernel_thread_t *loader;
+    kernel_thread_t *playback;
     audio_decoder_t *loaded_decoder;
     const audio_codec_t *loaded_codec;
     audio_format_t loaded_format;
     uint64_t loaded_total;
     bool load_ok;
+    bool eof;
     bool closing;
 } media_player_t;
 
@@ -75,9 +77,9 @@ static void player_load_worker(void *arg)
     fs_node_t *node = NULL;
     if (fs_resolve(fs_root(), p->tracks[p->current].path, &node) == FS_OK &&
         node->type == FS_FILE && !thread_cancelled()) {
-        p->loaded_decoder = audio_decoder_open(
-            p->tracks[p->current].path, fs_data(node), fs_size(node),
-            &p->loaded_format, &p->loaded_total, &p->loaded_codec);
+        p->loaded_decoder = audio_decoder_open_file(
+            p->tracks[p->current].path, node, &p->loaded_format,
+            &p->loaded_total, &p->loaded_codec);
         p->load_ok = p->loaded_decoder != NULL;
     }
     if (p->closing) {
@@ -88,9 +90,36 @@ static void player_load_worker(void *arg)
     thread_exit();
 }
 
+static void player_playback_worker(void *arg)
+{
+    media_player_t *p = arg;
+    int16_t buffer[512 * 2];
+    while (!thread_cancelled() && !p->closing && p->decoder) {
+        if (audio_stream_queued_frames() > 6144) {
+            audio_poll();
+            thread_yield();
+            continue;
+        }
+        size_t n = audio_decoder_read(p->decoder, buffer, 512);
+        if (!n) { p->eof = true; break; }
+        size_t written = audio_stream_write(buffer, n);
+        p->decoded += written;
+        if (!written) {
+            audio_poll();
+            thread_yield();
+        }
+    }
+    if (p->closing) {
+        if (p->decoder) audio_decoder_close(p->decoder);
+        audio_stream_stop();
+        kfree(p);
+    }
+    thread_exit();
+}
+
 static bool player_load(media_player_t *p, size_t index)
 {
-    if (index >= p->count) return false;
+    if (index >= p->count || p->loader || p->playback) return false;
     if (p->loader) return false;
     fs_node_t *node = NULL;
     if (fs_resolve(fs_root(), p->tracks[index].path, &node) != FS_OK)
@@ -101,6 +130,7 @@ static bool player_load(media_player_t *p, size_t index)
     p->loaded_codec = NULL;
     p->loaded_total = 0;
     p->load_ok = false;
+    p->eof = false;
     p->message[0] = '\0';
     p->state = PLAYER_LOADING;
     p->loader = thread_spawn("audio-load", player_load_worker, p);
@@ -114,7 +144,7 @@ static bool player_load(media_player_t *p, size_t index)
 
 static void player_next(media_player_t *p)
 {
-    if (p->loader)
+    if (p->loader || p->playback)
         return;
     if (p->count && !player_load(p, (p->current + 1) % p->count))
         p->state = PLAYER_ERROR;
@@ -157,6 +187,22 @@ static void player_on_close(window_t *win)
                 win->priv = NULL;
                 return;
             }
+        }
+        if (p->playback) {
+            if (thread_state(p->playback) == THREAD_DEAD) {
+                thread_join(p->playback);
+                p->playback = NULL;
+                player_stop_decoder(p);
+                kfree(p);
+                win->priv = NULL;
+                return;
+            }
+            p->closing = true;
+            thread_cancel(p->playback);
+            thread_detach(p->playback);
+            audio_stream_stop();
+            win->priv = NULL;
+            return;
         }
         if (p->loaded_decoder)
             audio_decoder_close(p->loaded_decoder);
@@ -248,7 +294,11 @@ static bool player_on_mouse(window_t *win, const mouse_event_t *ev, int x, int y
         else if (x < 154) {
             if (p->state == PLAYER_PLAYING) { audio_stream_pause(true); p->state = PLAYER_PAUSED; }
             else if (p->state == PLAYER_PAUSED) { audio_stream_pause(false); p->state = PLAYER_PLAYING; }
-        } else if (x < 220) { player_stop_decoder(p); p->state = PLAYER_STOPPED; }
+        } else if (x < 220) {
+            audio_stream_stop();
+            p->state = PLAYER_STOPPED;
+            if (!p->playback) player_stop_decoder(p);
+        }
         else if (p->count) player_next(p);
         wm_invalidate(win); return true;
     }
@@ -263,6 +313,17 @@ static bool player_on_mouse(window_t *win, const mouse_event_t *ev, int x, int y
 static bool player_on_tick(window_t *win)
 {
     media_player_t *p = win->priv;
+    if (p && p->playback && thread_state(p->playback) == THREAD_DEAD) {
+        thread_join(p->playback);
+        p->playback = NULL;
+        if (p->eof && p->state == PLAYER_PLAYING) {
+            player_stop_decoder(p);
+            player_next(p);
+        } else if (p->state == PLAYER_STOPPED) {
+            player_stop_decoder(p);
+        }
+        wm_invalidate(win);
+    }
     if (p && p->loader && p->state != PLAYER_LOADING) {
         if (thread_state(p->loader) == THREAD_DEAD) {
             thread_join(p->loader);
@@ -300,15 +361,16 @@ static bool player_on_tick(window_t *win)
             return true;
         }
         p->state = PLAYER_PLAYING;
+        p->playback = thread_spawn("audio-play", player_playback_worker, p);
+        if (!p->playback) {
+            strlcpy(p->message, "Unable to start audio playback",
+                    sizeof(p->message));
+            player_stop_decoder(p);
+            p->state = PLAYER_ERROR;
+        }
         return true;
     }
     if (!p || p->state != PLAYER_PLAYING || !p->decoder) return false;
-    int16_t buffer[512 * 2];
-    if (audio_stream_queued_frames() > 6144) return false;
-    size_t n = audio_decoder_read(p->decoder, buffer, 512);
-    if (!n) { player_next(p); wm_invalidate(win); return true; }
-    size_t written = audio_stream_write(buffer, n);
-    p->decoded += written;
     return true;
 }
 

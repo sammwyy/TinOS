@@ -20,6 +20,7 @@
 #define UHCI_PROG_IF     0x00
 #define UHCI_PORT_COUNT  2
 #define UHCI_TD_COUNT    64
+#define UHCI_BULK_TD_BATCH 8
 #define UHCI_TIMEOUT     1000000u
 
 #define UHCI_CMD         0x00
@@ -202,21 +203,32 @@ static bool bulk_transfer(void *context, void *buffer, size_t length,
     uint8_t toggle = input ? state->bulk_in_toggle : state->bulk_out_toggle;
     size_t offset = 0;
     while (offset < length) {
-        uint16_t packet = (uint16_t)MIN(length - offset, (size_t)max_packet);
-        setup_td(&state->tds[0], input ? USB_PID_IN : USB_PID_OUT,
-                 state->address, endpoint, toggle, packet,
-                 state->transfer.phys + offset, UHCI_LINK_TERM);
+        size_t count = 0;
+        size_t batch_offset = offset;
+        uint8_t batch_toggle = toggle;
+        while (batch_offset < length && count < UHCI_BULK_TD_BATCH) {
+            uint16_t packet = (uint16_t)MIN(length - batch_offset,
+                                            (size_t)max_packet);
+            setup_td(&state->tds[count], input ? USB_PID_IN : USB_PID_OUT,
+                     state->address, endpoint, batch_toggle, packet,
+                     state->transfer.phys + batch_offset, UHCI_LINK_TERM);
+            if (count)
+                state->tds[count - 1].link = address_of(&state->tds[count]);
+            batch_offset += packet;
+            batch_toggle ^= 1;
+            count++;
+        }
         /* Keep an inactive tail in the schedule. QEMU's UHCI model, like
          * PIIX hardware, needs a following TD before it retires an async
-         * bulk packet from a direct TD schedule. */
-        state->tds[1].link = UHCI_LINK_TERM;
-        state->tds[1].status = 0;
-        state->tds[1].token = 0;
-        state->tds[1].buffer = 0;
-        if (!uhci_submit(2))
+         * bulk packet chain from a direct TD schedule. */
+        state->tds[count].link = UHCI_LINK_TERM;
+        state->tds[count].status = 0;
+        state->tds[count].token = 0;
+        state->tds[count].buffer = 0;
+        if (!uhci_submit(count + 1))
             return false;
-        offset += packet;
-        toggle ^= 1;
+        offset = batch_offset;
+        toggle = batch_toggle;
     }
     if (input)
         memcpy(bytes, (uint8_t *)state->transfer.virt, length);

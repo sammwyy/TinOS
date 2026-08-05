@@ -11,6 +11,11 @@ typedef struct {
     uint16_t bits;
     uint32_t rate;
     uint32_t block_align;
+    const fs_node_t *file;
+    size_t data_offset;
+    uint8_t *chunk;
+    size_t chunk_at;
+    size_t chunk_size;
 } wav_decoder_t;
 
 static uint16_t le16(const uint8_t *p) { return p[0] | ((uint16_t)p[1] << 8); }
@@ -27,27 +32,30 @@ static bool wav_matches(const char *path, const uint8_t *data, size_t size)
     return size >= 12 && tag(data, "RIFF") && tag(data + 8, "WAVE");
 }
 
-static audio_decoder_t *wav_open(const uint8_t *data, size_t size,
-                                 audio_format_t *format,
-                                 uint64_t *total_frames)
+static audio_decoder_t *wav_open_impl(const uint8_t *data, size_t size,
+                                      audio_format_t *format,
+                                      uint64_t *total_frames,
+                                      size_t *data_offset, bool partial)
 {
     if (!wav_matches(NULL, data, size))
         return NULL;
     uint32_t riff_size = le32(data + 4);
-    if (riff_size < 4 || riff_size > size - 8)
+    if (riff_size < 4 || (!partial && riff_size > size - 8))
         return NULL;
     size_t at = 12, fmt_at = 0, fmt_size = 0, pcm_at = 0, pcm_size = 0;
     while (at + 8 <= size) {
         uint32_t chunk = le32(data + at + 4);
         size_t next = at + 8u + chunk + (chunk & 1u);
-        if (next < at + 8 || next > size)
+        if (next < at + 8 || (next > size &&
+                              (!partial || !tag(data + at, "data"))))
             return NULL;
         if (tag(data + at, "fmt ")) { fmt_at = at + 8; fmt_size = chunk; }
         if (tag(data + at, "data")) { pcm_at = at + 8; pcm_size = chunk; }
+        if (partial && tag(data + at, "data")) break;
         at = next;
     }
     if (!fmt_at || !pcm_at || fmt_size < 16 || pcm_size == 0 ||
-        fmt_at + fmt_size > size || pcm_at + pcm_size > size)
+        fmt_at + fmt_size > size || (!partial && pcm_at + pcm_size > size))
         return NULL;
     uint16_t format_tag = le16(data + fmt_at);
     uint16_t channels = le16(data + fmt_at + 2);
@@ -72,6 +80,42 @@ static audio_decoder_t *wav_open(const uint8_t *data, size_t size,
     format->channels = 2;
     format->bits_per_sample = 16;
     *total_frames = pcm_size / align;
+    if (data_offset) *data_offset = pcm_at;
+    return (audio_decoder_t *)decoder;
+}
+
+static audio_decoder_t *wav_open(const uint8_t *data, size_t size,
+                                 audio_format_t *format,
+                                 uint64_t *total_frames)
+{
+    return wav_open_impl(data, size, format, total_frames, NULL, false);
+}
+
+static audio_decoder_t *wav_open_file(const char *path, const fs_node_t *file,
+                                      audio_format_t *format,
+                                      uint64_t *total_frames)
+{
+    (void)path;
+    size_t size = file->size < 65536 ? file->size : 65536;
+    uint8_t *probe = kmalloc(size);
+    if (!probe || !fs_read_at(file, 0, probe, size)) {
+        kfree(probe);
+        return NULL;
+    }
+    size_t data_offset = 0;
+    wav_decoder_t *decoder = (wav_decoder_t *)wav_open_impl(
+        probe, size, format, total_frames, &data_offset, true);
+    kfree(probe);
+    if (!decoder) return NULL;
+    if (data_offset > file->size || decoder->bytes > file->size - data_offset) {
+        kfree(decoder);
+        return NULL;
+    }
+    decoder->data = NULL;
+    decoder->file = file;
+    decoder->data_offset = data_offset;
+    decoder->chunk = kmalloc(32768);
+    if (!decoder->chunk) { kfree(decoder); return NULL; }
     return (audio_decoder_t *)decoder;
 }
 
@@ -81,7 +125,23 @@ static size_t wav_read(audio_decoder_t *base, int16_t *out, size_t frames)
     size_t available = (decoder->bytes - decoder->cursor) / decoder->block_align;
     if (frames > available) frames = available;
     for (size_t i = 0; i < frames; i++) {
-        const uint8_t *p = decoder->data + decoder->cursor;
+        const uint8_t *p;
+        if (decoder->file) {
+            size_t absolute = decoder->cursor;
+            if (absolute < decoder->chunk_at ||
+                absolute >= decoder->chunk_at + decoder->chunk_size) {
+                decoder->chunk_at = absolute & ~(size_t)32767;
+                size_t remaining = decoder->bytes - decoder->chunk_at;
+                size_t want = remaining < (size_t)32768 ? remaining : 32768;
+                if (!fs_read_at(decoder->file,
+                                decoder->data_offset + decoder->chunk_at,
+                                decoder->chunk, want)) return i;
+                decoder->chunk_size = want;
+            }
+            p = decoder->chunk + (absolute - decoder->chunk_at);
+        } else {
+            p = decoder->data + decoder->cursor;
+        }
         int16_t left = decoder->bits == 8 ? (int16_t)(((int)p[0] - 128) << 8)
                                           : (int16_t)le16(p);
         int16_t right = left;
@@ -94,10 +154,16 @@ static size_t wav_read(audio_decoder_t *base, int16_t *out, size_t frames)
     return frames;
 }
 
-static void wav_close(audio_decoder_t *decoder) { kfree(decoder); }
+static void wav_close(audio_decoder_t *decoder)
+{
+    wav_decoder_t *wav = (wav_decoder_t *)decoder;
+    kfree(wav->chunk);
+    kfree(wav);
+}
 
 static audio_codec_t wav_codec = {
     .name = "wav", .matches = wav_matches, .open = wav_open,
+    .open_file = wav_open_file,
     .read = wav_read, .close = wav_close,
 };
 

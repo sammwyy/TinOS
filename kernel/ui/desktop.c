@@ -1003,7 +1003,7 @@ void desktop_run(void)
          * per frame.  A USB/FAT operation may be slow, so several resumptions
          * here would make the desktop appear frozen even though interrupts
          * remain enabled. */
-        thread_run(1);
+        thread_run(8);
         fs_io_poll();
         ktimer_poll(4);
 

@@ -1,5 +1,4 @@
 #define STB_VORBIS_NO_STDIO
-#define STB_VORBIS_NO_PUSHDATA_API
 #define STB_VORBIS_NO_CRT
 #define STB_VORBIS_MAX_CHANNELS 2
 
@@ -611,10 +610,6 @@ enum STBVorbisError
    #define alloca __builtin_alloca
    static int abs(int value) { return value < 0 ? -value : value; }
    #define assert(x) ((void)0)
-   static int tinos_float_floor(float x) { int n = (int)x; return x < n ? n - 1 : n; }
-   static float tinos_float_pow(float x, int n) {
-      float result = 1.0f; while (n-- > 0) result *= x; return result;
-   }
    static float tinos_float_sin(float x) {
       while (x > M_PI) x -= 2 * M_PI;
       while (x < -M_PI) x += 2 * M_PI;
@@ -624,27 +619,13 @@ enum STBVorbisError
    static float tinos_float_cos(float x) {
       return tinos_float_sin(x + (float)(M_PI / 2.0));
    }
-   static float tinos_float_log(float x) {
-      float y = (x - 1.0f) / (x + 1.0f), term = y, result = 0.0f;
-      for (int i = 1; i < 20; i += 2) { result += term / i; term *= y * y; }
-      return 2.0f * result;
-   }
-   static float tinos_float_exp(float x) {
-      float result = 1.0f, term = 1.0f;
-      for (int i = 1; i < 18; ++i) { term *= x / i; result += term; }
-      return result;
-   }
    static float tinos_float_ldexp(float x, int e) {
       while (e > 0) { x *= 2.0f; --e; }
       while (e < 0) { x *= 0.5f; ++e; }
       return x;
    }
-   #define floor tinos_float_floor
-   #define pow(x,n) tinos_float_pow((x),(int)(n))
    #define sin tinos_float_sin
    #define cos tinos_float_cos
-   #define log tinos_float_log
-   #define exp tinos_float_exp
    #define ldexp tinos_float_ldexp
    static void tinos_qsort(void *base, size_t count, size_t size,
                            int (*compare)(const void *, const void *)) {
@@ -1308,14 +1289,21 @@ static int vorbis_validate(uint8 *data)
 // (formula implied by specification)
 static int lookup1_values(int entries, int dim)
 {
-   int r = (int) floor(exp((float) log((float) entries) / dim));
-   if ((int) floor(pow((float) r+1, dim)) <= entries)   // (int) cast for MinGW warning;
-      ++r;                                              // floor() to avoid _ftol() when non-CRT
-   if (pow((float) r+1, dim) <= entries)
-      return -1;
-   if ((int) floor(pow((float) r, dim)) > entries)
-      return -1;
-   return r;
+   /* This is an integer floor(entries^(1/dim)).  The original stb_vorbis
+    * expression uses log/exp, but TinOS builds without libc and its small
+    * software approximations are not accurate enough for Vorbis codebooks. */
+   int r = 0;
+   for (;;) {
+      int candidate = r + 1;
+      uint64_t value = 1;
+      for (int i = 0; i < dim; ++i) {
+         value *= (uint32)candidate;
+         if (value > (uint32)entries) break;
+      }
+      if (value > (uint32)entries) break;
+      r = candidate;
+   }
+   return r > 0 ? r : -1;
 }
 
 // called twice per file

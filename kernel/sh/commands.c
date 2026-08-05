@@ -15,6 +15,21 @@
 #include <tinos/regex.h>
 #include <tinos/sh.h>
 #include <tinos/string.h>
+#ifndef TINOS_HOST
+#include <tinos/thread.h>
+#endif
+
+#ifndef TINOS_HOST
+static volatile bool doremi_running;
+
+static void doremi_worker(void *arg)
+{
+    (void)arg;
+    audio_play_doremi();
+    doremi_running = false;
+    thread_exit();
+}
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -534,11 +549,30 @@ static int cmd_doremi(shell_t *sh, int argc, char **argv, stream_t *in,
                       stream_t *out, stream_t *err)
 {
     if (argc != 1) { usage_error(err, "doremi"); return 2; }
-    if (!audio_available() || !audio_play_doremi()) {
+    if (!audio_available()) {
+        stream_puts(err, "doremi: AC'97 audio test unavailable\n");
+        return 1;
+    }
+#ifdef TINOS_HOST
+    if (!audio_play_doremi()) {
         stream_puts(err, "doremi: AC'97 audio test unavailable\n");
         return 1;
     }
     stream_puts(out, "doremi: AC'97 audio test passed\n");
+#else
+    if (doremi_running) {
+        stream_puts(out, "doremi: audio test already running\n");
+        return 0;
+    }
+    kernel_thread_t *worker = thread_spawn("doremi", doremi_worker, NULL);
+    if (!worker) {
+        stream_puts(err, "doremi: unable to start audio test\n");
+        return 1;
+    }
+    doremi_running = true;
+    thread_detach(worker);
+    stream_puts(out, "doremi: audio test started\n");
+#endif
     return 0;
 }
 
