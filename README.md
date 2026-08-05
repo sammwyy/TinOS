@@ -96,7 +96,7 @@ The exact QEMU invocation (also in `tools/run.sh`):
 ```sh
 qemu-system-i386 -cdrom build/tinos.iso -m 256 -vga std \
                  -machine pc,pcspk-audiodev=tinos-audio \
-                 -audiodev driver=none,id=tinos-audio \
+                 -audiodev driver=pipewire,id=tinos-audio \
                  -device AC97,audiodev=tinos-audio \
                  -boot order=d -rtc base=localtime \
                  -drive file=build/tinos-usb.img,if=none,id=tinos-usb-disk,format=raw \
@@ -121,10 +121,10 @@ Override the image and source directory with `USB_IMAGE` and `USB_SOURCE`.
 registers of the standard VGA adapter. `-m 256` is a comfortable default;
 TinOS runs in far less.
 
-The default QEMU run uses an AC'97 device with the `none` audio backend so
-headless tests do not require a host sound server. Set `AUDIODEV`, for example
-to `driver=pipewire,id=tinos-audio` or `driver=pa,id=tinos-audio`, to hear
-`doremi` through a host audio backend.
+The default QEMU run uses an AC'97 device with the PipeWire audio backend, so
+`doremi` and `beep` are audible through the host sound server. Set `AUDIODEV`,
+for example to `driver=pa,id=tinos-audio` or `driver=none,id=tinos-audio`, when
+another backend is required. Automated headless tests select `none` explicitly.
 
 The GRUB menu has two entries:
 

@@ -17,7 +17,7 @@ MEM=${MEM:-256}
 QEMU=${QEMU:-qemu-system-i386}
 USB_IMAGE=${USB_IMAGE:-build/tinos-usb.img}
 USB_SOURCE=${USB_SOURCE:-build/usb-root}
-AUDIODEV=${AUDIODEV:-driver=none,id=tinos-audio}
+AUDIODEV=${AUDIODEV:-driver=pipewire,id=tinos-audio}
 
 if [[ ! -f $ISO ]]; then
     echo "$ISO not found - run 'make' first" >&2
