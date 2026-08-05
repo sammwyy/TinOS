@@ -240,6 +240,9 @@ static void action_open(window_t *win, explorer_t *ex)
                          kstrcasecmp(dot + 1, "webp") == 0);
     if (image)
         app_image_viewer_open(path);
+    else if (dot && (kstrcasecmp(dot + 1, "wav") == 0 ||
+                     kstrcasecmp(dot + 1, "ogg") == 0))
+        app_media_player_open(path);
     else
         app_editor_open(path);
 }
