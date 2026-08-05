@@ -342,13 +342,37 @@ def run_scenario(iso, shots_dir):
         print("\n== start menu ==")
         vm.key("ctrl", "esc")
         menu = shot("start-menu")
-        for entry in ["Terminal", "File Explorer", "Text Editor",
-                      "System Information", "About TinOS", "Restart",
-                      "Shut Down"]:
+        for entry in ["Accessories", "System", "File Explorer", "Text Editor",
+                      "Restart", "Shut Down"]:
             c.check(menu.has(entry), "start menu lists '%s'" % entry)
+        c.check(menu.missing("Terminal"),
+                "apps inside a collapsed category stay hidden")
+
+        # Down to the System header (past the two expanded Accessories apps),
+        # Enter unfolds the category and lands on its first app.
+        vm.key("down")
+        vm.key("down")
+        vm.key("down")
+        vm.key("ret")
+        expanded = shot("start-menu-system")
+        for entry in ["Terminal", "System Information", "About TinOS"]:
+            c.check(expanded.has(entry),
+                    "expanding the System category reveals '%s'" % entry)
+
+        # Up to the Accessories header and Enter folds it back up.
+        for _ in range(4):
+            vm.key("up")
+        vm.key("ret")
+        collapsed = shot("start-menu-collapsed")
+        c.check(collapsed.missing("File Explorer"),
+                "collapsing the Accessories category hides its apps")
+        vm.key("ret")  # unfold again; selection lands on File Explorer
 
         # ---------------------------------------------------------------
         print("\n== terminal ==")
+        vm.key("down")  # Text Editor
+        vm.key("down")  # System header
+        vm.key("down")  # Terminal
         vm.key("ret")
         term = shot("terminal", settle=0.8)
         c.check(term.has("tinos:/home$"), "terminal shows a prompt with the cwd")
@@ -603,9 +627,7 @@ def run_scenario(iso, shots_dir):
 
         # ---------------------------------------------------------------
         print("\n== stability ==")
-        vm.key("ctrl", "esc")
-        time.sleep(0.2)
-        vm.key("ret")
+        vm.key("ctrl", "alt", "t")
         time.sleep(0.8)
         for junk in ["", "   ", "|", "&&", ">", "cat /", "cd ../../..",
                      "rm -rf /", "echo 'unterminated", "ls | | ls",

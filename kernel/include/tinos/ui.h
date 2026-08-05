@@ -159,6 +159,7 @@ void text_input_draw(const text_input_t *input, rect_t r, const char *label,
 typedef struct {
     const char *name;
     const char *summary;
+    const char *category; /* start menu grouping, e.g. "Accessories" */
     icon_t      icon;
     window_t *(*launch)(const char *arg);
 } app_entry_t;

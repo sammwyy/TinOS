@@ -13,7 +13,13 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
+# The bold weight is preferred: at 8x16 a regular weight rasterises to
+# one-pixel strokes that are hard to read on screen, while the bold weight
+# stays crisp and legible at the same size.
 FONT_CANDIDATES = [
+    "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Bold.ttf",
+    "/usr/share/fonts/liberation-mono/LiberationMono-Bold.ttf",
+    "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono-Bold.ttf",
     "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Regular.ttf",
     "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
     "/usr/share/fonts/adobe-source-code-pro-fonts/SourceCodePro-Regular.otf",
@@ -25,8 +31,8 @@ FIRST, LAST = 0x20, 0x7E
 # Latin-1 Supplement: accented Western European letters and punctuation.
 # 0x80-0x9F (C1 controls) stay blank, same as the other unprintable codes.
 EXT_FIRST, EXT_LAST = 0xA0, 0xFF
-SIZE = 14
-BASELINE = 12          # pixel row of the baseline inside the 16px cell
+SIZE = 15
+BASELINE = 13          # pixel row of the baseline inside the 16px cell
 X_OFFSET = 0
 THRESHOLD = 110
 

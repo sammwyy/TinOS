@@ -90,7 +90,14 @@ The GRUB menu has two entries:
 | Key | Action |
 |-----|--------|
 | `Ctrl+Esc` or `F12` | open / close the start menu |
-| `Up` `Down` `Enter` `Esc` | navigate the start menu |
+| `Up` `Down` | move through the start menu |
+| `Enter` | expand / collapse a category, launch the selected app |
+| `Right` / `Left` | expand a category / collapse it or jump back to its header |
+| `Esc` | close the start menu |
+
+The start menu groups the applications into collapsible categories
+(*Accessories*, *System*): opening a category with `Enter` or a click unfolds
+its apps underneath, and the power actions sit at the bottom.
 | `Alt+Tab` | switch to the next window |
 | `Alt+F4` | close the focused window |
 | `Ctrl+Alt+T` / `Ctrl+Alt+E` | new terminal / new file explorer |

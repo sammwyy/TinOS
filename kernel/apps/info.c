@@ -206,14 +206,16 @@ static window_t *launch_editor(const char *arg)
 }
 
 static const app_entry_t registry[] = {
-    { "Terminal", "command line", ICON_TERMINAL,
-      launch_terminal },
-    { "File Explorer", "browse files", ICON_FOLDER,
+    { "File Explorer", "browse files", "Accessories", ICON_FOLDER,
       launch_explorer },
-    { "Text Editor", "write text", ICON_EDITOR, launch_editor },
-    { "System Information", "system details", ICON_CHIP,
+    { "Text Editor", "write text", "Accessories", ICON_EDITOR,
+      launch_editor },
+    { "Terminal", "command line", "System", ICON_TERMINAL,
+      launch_terminal },
+    { "System Information", "system details", "System", ICON_CHIP,
       app_sysinfo_open },
-    { "About TinOS", "version and info", ICON_INFO, app_about_open },
+    { "About TinOS", "version and info", "System", ICON_INFO,
+      app_about_open },
 };
 
 const app_entry_t *apps_registry(size_t *count)

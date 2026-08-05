@@ -22,9 +22,14 @@
 #include <tinos/string.h>
 #include <tinos/ui.h>
 
-#define MENU_WIDTH      252
-#define MENU_ITEM_H     30
+#define MENU_WIDTH      176
+#define MENU_SUBMENU_W  252
+#define MENU_ITEM_H     32
+#define MENU_CAT_H      24
 #define MENU_HEADER_H   44
+#define MENU_SHADOW     5
+#define MENU_MAX_CATS   8
+#define MENU_MAX_ROWS   24
 #define START_BUTTON_W  92
 #define TASK_BUTTON_W   162
 #define CLOCK_WIDTH     104
@@ -32,25 +37,32 @@
 #define NOTIFY_MS       2600
 
 typedef enum {
-    MENU_ACTION_APP = 0,
-    MENU_ACTION_SEPARATOR,
-    MENU_ACTION_RESTART,
-    MENU_ACTION_SHUTDOWN,
-} menu_action_t;
+    ROW_APP = 0,
+    ROW_CATEGORY,
+    ROW_SEPARATOR,
+    ROW_RESTART,
+    ROW_SHUTDOWN,
+} menu_row_kind_t;
 
 typedef struct {
-    const char   *label;
-    const char   *hint;
-    icon_t        icon;
-    menu_action_t action;
-    const app_entry_t *app;
-} menu_item_t;
+    const char *name;
+    icon_t      icon;
+} menu_category_t;
 
-static menu_item_t menu_items[16];
-static size_t      menu_item_count;
+typedef struct {
+    menu_row_kind_t   kind;
+    size_t            cat; /* ROW_CATEGORY: index into menu_cats */
+    const app_entry_t *app; /* ROW_APP: the application          */
+} menu_row_t;
+
+static menu_category_t menu_cats[MENU_MAX_CATS];
+static size_t          menu_cat_count;
+static menu_row_t      menu_rows[MENU_MAX_ROWS];
+static size_t          menu_row_count;
 
 static bool   menu_open;
 static int    menu_index;
+static int    menu_app_index = -1;
 static bool   taskbar_dirty = true;
 static bool   menu_dirty    = true;
 static char   notification[96];
@@ -137,6 +149,25 @@ static void cursor_restore(void)
 /* Wallpaper                                                           */
 /* ------------------------------------------------------------------ */
 
+/* A soft radial glow, blended in concentric bands so it fades towards the
+ * edges. Drawn per scanline (one blend call each), which keeps it cheap
+ * enough to repaint whenever a window uncovers part of the desktop. */
+static void wallpaper_glow(int cx, int cy, int radius, color_t color,
+                           uint8_t max_alpha)
+{
+    for (int dy = -radius; dy <= radius; dy++) {
+        int span = 0;
+        while (span * span + dy * dy <= radius * radius)
+            span++;
+        span--;
+        if (span <= 0)
+            continue;
+        int dist    = dy < 0 ? -dy : dy;
+        int alpha   = max_alpha * (radius - dist) / radius;
+        gfx_blend_rect(cx - span, cy + dy, span * 2, 1, color, (uint8_t)alpha);
+    }
+}
+
 /* Callers set the clip: the full workspace for a full repaint, or a single
  * exposed rect when repairing the area a moved/closed/minimised window
  * uncovered. */
@@ -146,6 +177,10 @@ static void draw_wallpaper(void)
 
     gfx_gradient_v(0, 0, space.w, space.h, COLOR_DESKTOP_TOP,
                    COLOR_DESKTOP_BOTTOM);
+
+    /* A cool glow centred on the wordmark lifts the middle of the screen. */
+    wallpaper_glow(space.w / 2, space.h / 2 - 60, 260, RGB(0x3b, 0x82, 0xf6),
+                   26);
 
     /* A few faint stars so the background is not a flat wash. */
     uint32_t seed = 0x1234567u;
@@ -240,14 +275,16 @@ static void draw_taskbar(void)
 
     gfx_clip_reset();
     gfx_clip_push(bar);
-    gfx_fill_rect(bar.x, bar.y, bar.w, bar.h, COLOR_TASKBAR);
+    gfx_gradient_v(bar.x, bar.y, bar.w, bar.h, RGB(0x24, 0x2b, 0x3b),
+                   COLOR_TASKBAR);
     gfx_hline(bar.x, bar.y, bar.w, COLOR_TASKBAR_EDGE);
 
     /* Start button */
     rect_t start = start_button_rect();
-    gfx_fill_rect(start.x, start.y, start.w, start.h,
-                  menu_open ? COLOR_ACCENT_DARK : COLOR_ACCENT);
-    gfx_rect(start.x, start.y, start.w, start.h, COLOR_ACCENT_DARK);
+    gfx_gradient_v(start.x, start.y, start.w, start.h,
+                   menu_open ? COLOR_ACCENT_DARK : COLOR_ACCENT,
+                   COLOR_ACCENT_DARK);
+    gfx_rect(start.x, start.y, start.w, start.h, RGB(0x17, 0x3a, 0xa8));
     widget_icon(start.x + 5, start.y + 4, 18, ICON_TINOS);
     gfx_text(start.x + 30, start.y + (start.h - FONT_H) / 2, "Start",
              COLOR_TEXT);
@@ -307,54 +344,218 @@ static void draw_taskbar(void)
 /* Start menu                                                          */
 /* ------------------------------------------------------------------ */
 
+static void menu_rebuild_rows(void);
+
+static icon_t menu_category_icon(const char *name)
+{
+    if (strcmp(name, "Accessories") == 0)
+        return ICON_FOLDER;
+    if (strcmp(name, "System") == 0)
+        return ICON_CHIP;
+    return ICON_INFO;
+}
+
+/* Group the registered applications into categories, in first-seen order,
+ * and select the first category so its submenu is immediately visible. */
 static void build_menu(void)
 {
     size_t             app_count = 0;
     const app_entry_t *apps      = apps_registry(&app_count);
 
-    menu_item_count = 0;
-    for (size_t i = 0; i < app_count && menu_item_count < ARRAY_SIZE(menu_items);
-         i++) {
-        menu_items[menu_item_count++] = (menu_item_t){
-            apps[i].name, apps[i].summary, apps[i].icon, MENU_ACTION_APP,
-            &apps[i]
-        };
+    menu_cat_count = 0;
+    for (size_t i = 0; i < app_count; i++) {
+        const char *name = apps[i].category ? apps[i].category : "Other";
+        size_t      c;
+        for (c = 0; c < menu_cat_count; c++)
+            if (strcmp(menu_cats[c].name, name) == 0)
+                break;
+        if (c < menu_cat_count || menu_cat_count >= MENU_MAX_CATS)
+            continue;
+        menu_cats[menu_cat_count] =
+            (menu_category_t){ name, menu_category_icon(name) };
+        menu_cat_count++;
     }
-    menu_items[menu_item_count++] =
-        (menu_item_t){ NULL, NULL, ICON_INFO, MENU_ACTION_SEPARATOR, NULL };
-    menu_items[menu_item_count++] = (menu_item_t){
-        "Restart", "Reset this machine", ICON_RESTART,
-        MENU_ACTION_RESTART, NULL
-    };
-    menu_items[menu_item_count++] = (menu_item_t){
-        "Shut Down", "Power off this machine", ICON_POWER,
-        MENU_ACTION_SHUTDOWN, NULL
-    };
+    menu_rebuild_rows();
+}
+
+/* The n-th application registered under category `cat`, or SIZE_MAX. */
+static size_t cat_app_at(size_t cat, size_t n)
+{
+    size_t             app_count = 0;
+    const app_entry_t *apps      = apps_registry(&app_count);
+    const char        *name      = menu_cats[cat].name;
+
+    for (size_t i = 0; i < app_count; i++) {
+        const char *app_cat = apps[i].category ? apps[i].category : "Other";
+        if (strcmp(app_cat, name) == 0 && n-- == 0)
+            return i;
+    }
+    return SIZE_MAX;
+}
+
+/* Rebuild the flat list of visible rows from the categories and their
+ * then the power actions at the bottom. Applications are drawn in the
+ * right-hand submenu instead of being inserted into this list. */
+static void menu_rebuild_rows(void)
+{
+    menu_row_count = 0;
+    for (size_t c = 0; c < menu_cat_count; c++) {
+        menu_rows[menu_row_count++] = (menu_row_t){ ROW_CATEGORY, c, NULL };
+    }
+    menu_rows[menu_row_count++] = (menu_row_t){ ROW_SEPARATOR, 0, NULL };
+    menu_rows[menu_row_count++] = (menu_row_t){ ROW_RESTART, 0, NULL };
+    menu_rows[menu_row_count++] = (menu_row_t){ ROW_SHUTDOWN, 0, NULL };
+}
+
+static int menu_row_height(const menu_row_t *row)
+{
+    switch (row->kind) {
+    case ROW_CATEGORY:
+        return MENU_CAT_H;
+    case ROW_SEPARATOR:
+        return 9;
+    default:
+        return MENU_ITEM_H;
+    }
 }
 
 static int menu_height(void)
 {
     int height = MENU_HEADER_H + 8;
-    for (size_t i = 0; i < menu_item_count; i++)
-        height += menu_items[i].action == MENU_ACTION_SEPARATOR ? 9
-                                                                : MENU_ITEM_H;
+    for (size_t i = 0; i < menu_row_count; i++)
+        height += menu_row_height(&menu_rows[i]);
+    int app_count = 0;
+    if (menu_cat_count) {
+        for (size_t n = 0; cat_app_at(0, n) != SIZE_MAX; n++)
+            app_count++;
+    }
+    for (size_t c = 1; c < menu_cat_count; c++) {
+        int count = 0;
+        for (size_t n = 0; cat_app_at(c, n) != SIZE_MAX; n++)
+            count++;
+        if (count > app_count)
+            app_count = count;
+    }
+    int submenu_height = app_count * MENU_ITEM_H + 12;
+    if (submenu_height > height)
+        height = submenu_height;
     return height + 6;
 }
 
 static rect_t menu_rect(void)
 {
     int h = menu_height();
-    return rect_make(4, gfx_height() - TASKBAR_HEIGHT - h, MENU_WIDTH, h);
+    return rect_make(4, gfx_height() - TASKBAR_HEIGHT - h,
+                     MENU_WIDTH + MENU_SUBMENU_W, h);
+}
+
+/* The panel plus its drop shadow: the area that has to be repainted when
+ * anything underneath it changes. */
+static rect_t menu_frame_rect(void)
+{
+    rect_t r = menu_rect();
+    r.w += MENU_SHADOW;
+    r.h += MENU_SHADOW;
+    return r;
 }
 
 static rect_t menu_item_rect(size_t index)
 {
     rect_t r = menu_rect();
     int    y = r.y + MENU_HEADER_H + 6;
-    for (size_t i = 0; i < index && i < menu_item_count; i++)
-        y += menu_items[i].action == MENU_ACTION_SEPARATOR ? 9 : MENU_ITEM_H;
-    int h = menu_items[index].action == MENU_ACTION_SEPARATOR ? 9 : MENU_ITEM_H;
-    return rect_make(r.x + 4, y, r.w - 8, h);
+    for (size_t i = 0; i < index && i < menu_row_count; i++)
+        y += menu_row_height(&menu_rows[i]);
+    return rect_make(r.x + 4, y, MENU_WIDTH - 8,
+                     menu_row_height(&menu_rows[index]));
+}
+
+static rect_t menu_app_rect(size_t index)
+{
+    rect_t r = menu_rect();
+    return rect_make(r.x + MENU_WIDTH + 4,
+                     r.y + MENU_HEADER_H + 6 + (int)index * MENU_ITEM_H,
+                     MENU_SUBMENU_W - 8, MENU_ITEM_H);
+}
+
+static void draw_menu_row(size_t i, rect_t item, bool selected)
+{
+    const menu_row_t *row = &menu_rows[i];
+
+    if (row->kind == ROW_CATEGORY) {
+        if (selected) {
+            gfx_fill_rect(item.x, item.y, item.w, item.h, COLOR_PANEL_LIGHT);
+            gfx_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT);
+        }
+        widget_icon(item.x + 8, item.y + (item.h - 18) / 2, 18,
+                    menu_cats[row->cat].icon);
+        gfx_char(item.x + item.w - 16, item.y + (item.h - FONT_H) / 2,
+                 '\x10', selected ? COLOR_TEXT : COLOR_ACCENT);
+        gfx_text(item.x + 34, item.y + (item.h - FONT_H) / 2,
+                 menu_cats[row->cat].name,
+                 selected ? COLOR_TEXT : COLOR_TEXT_DIM);
+        return;
+    }
+
+    const char *label;
+    const char *hint;
+    icon_t      icon;
+    bool        indented = row->kind == ROW_APP;
+    if (row->kind == ROW_APP) {
+        label = row->app->name;
+        hint  = row->app->summary;
+        icon  = row->app->icon;
+    } else if (row->kind == ROW_RESTART) {
+        label = "Restart";
+        hint  = "Reset this machine";
+        icon  = ICON_RESTART;
+    } else {
+        label = "Shut Down";
+        hint  = "Power off this machine";
+        icon  = ICON_POWER;
+    }
+
+    if (selected) {
+        gfx_fill_rect(item.x, item.y, item.w, item.h, COLOR_SELECTION);
+        gfx_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT);
+    }
+    int ix = item.x + (indented ? 24 : 6);
+    int tx = item.x + (indented ? 50 : 32);
+    widget_icon(ix, item.y + (item.h - 18) / 2, 18, icon);
+    gfx_text(tx, item.y + 3, label, COLOR_TEXT);
+    gfx_clip_push(rect_make(tx, item.y, item.x + item.w - tx - 4, item.h));
+    gfx_text(tx, item.y + 17, hint, selected ? COLOR_TEXT : COLOR_TEXT_DIM);
+    gfx_clip_pop();
+}
+
+static void draw_menu_submenu(void)
+{
+    if (menu_index < 0 || menu_index >= (int)menu_row_count ||
+        menu_rows[menu_index].kind != ROW_CATEGORY)
+        return;
+
+    size_t cat = menu_rows[menu_index].cat;
+    size_t app_count = 0;
+    const app_entry_t *apps = apps_registry(&app_count);
+    size_t n = 0;
+    for (;;) {
+        size_t app_i = cat_app_at(cat, n);
+        if (app_i == SIZE_MAX)
+            break;
+        rect_t item = menu_app_rect(n);
+        const app_entry_t *app = &apps[app_i];
+        bool selected = (int)n == menu_app_index;
+        if (selected) {
+            gfx_fill_rect(item.x, item.y, item.w, item.h, COLOR_SELECTION);
+            gfx_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT);
+        }
+        widget_icon(item.x + 8, item.y + (item.h - 18) / 2, 18, app->icon);
+        gfx_text(item.x + 34, item.y + 3, app->name, COLOR_TEXT);
+        gfx_clip_push(rect_make(item.x + 34, item.y, item.w - 38, item.h));
+        gfx_text(item.x + 34, item.y + 17, app->summary,
+                 selected ? COLOR_TEXT : COLOR_TEXT_DIM);
+        gfx_clip_pop();
+        n++;
+    }
 }
 
 static void draw_menu(void)
@@ -364,34 +565,30 @@ static void draw_menu(void)
 
     rect_t r = menu_rect();
     gfx_clip_reset();
-    gfx_clip_push(r);
 
+    /* Soft drop shadow against whatever is underneath. */
+    gfx_blend_rect(r.x + MENU_SHADOW, r.y + MENU_SHADOW, r.w, r.h,
+                   RGB(0x00, 0x00, 0x00), 90);
+
+    gfx_clip_push(r);
     widget_panel(r, COLOR_PANEL, COLOR_ACCENT);
     gfx_gradient_v(r.x + 1, r.y + 1, r.w - 2, MENU_HEADER_H, COLOR_ACCENT_DARK,
                    COLOR_PANEL);
     widget_icon(r.x + 10, r.y + 8, 26, ICON_TINOS);
     gfx_text(r.x + 46, r.y + 10, TINOS_NAME " " TINOS_VERSION, COLOR_TEXT);
     gfx_text(r.x + 46, r.y + 26, "applications", COLOR_TEXT_DIM);
+    gfx_vline(r.x + MENU_WIDTH, r.y + MENU_HEADER_H + 2,
+              r.h - MENU_HEADER_H - 8, COLOR_BORDER);
 
-    for (size_t i = 0; i < menu_item_count; i++) {
+    for (size_t i = 0; i < menu_row_count; i++) {
         rect_t item = menu_item_rect(i);
-        if (menu_items[i].action == MENU_ACTION_SEPARATOR) {
+        if (menu_rows[i].kind == ROW_SEPARATOR) {
             gfx_hline(item.x + 6, item.y + 4, item.w - 12, COLOR_BORDER);
             continue;
         }
-        bool selected = (int)i == menu_index;
-        if (selected) {
-            gfx_fill_rect(item.x, item.y, item.w, item.h, COLOR_SELECTION);
-            gfx_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT);
-        }
-        widget_icon(item.x + 6, item.y + (item.h - 18) / 2, 18,
-                    menu_items[i].icon);
-        gfx_text(item.x + 32, item.y + 4, menu_items[i].label, COLOR_TEXT);
-        gfx_clip_push(rect_make(item.x + 32, item.y, item.w - 36, item.h));
-        gfx_text(item.x + 32, item.y + 16, menu_items[i].hint,
-                 selected ? COLOR_TEXT : COLOR_TEXT_DIM);
-        gfx_clip_pop();
+        draw_menu_row(i, item, (int)i == menu_index);
     }
+    draw_menu_submenu();
 
     gfx_clip_pop();
     menu_dirty = false;
@@ -402,6 +599,7 @@ static void menu_toggle(void)
     menu_open = !menu_open;
     if (menu_open) {
         menu_index = 0;
+        menu_app_index = -1;
         menu_dirty = true;
     }
     /* Opening or closing the menu uncovers part of the desktop. */
@@ -411,43 +609,48 @@ static void menu_toggle(void)
 
 static void menu_move(int delta)
 {
-    if (menu_item_count == 0)
+    if (menu_row_count == 0)
         return;
     int index = menu_index;
-    for (int guard = 0; guard < (int)menu_item_count * 2; guard++) {
+    for (int guard = 0; guard < (int)menu_row_count * 2; guard++) {
         index += delta;
         if (index < 0)
-            index = (int)menu_item_count - 1;
-        if (index >= (int)menu_item_count)
+            index = (int)menu_row_count - 1;
+        if (index >= (int)menu_row_count)
             index = 0;
-        if (menu_items[index].action != MENU_ACTION_SEPARATOR)
+        if (menu_rows[index].kind != ROW_SEPARATOR)
             break;
     }
     menu_index = index;
+    menu_app_index = -1;
     menu_dirty = true;
 }
 
 static void menu_activate(size_t index)
 {
-    if (index >= menu_item_count)
+    if (index >= menu_row_count)
         return;
-    menu_item_t *item = &menu_items[index];
+    menu_row_t *row = &menu_rows[index];
 
-    switch (item->action) {
-    case MENU_ACTION_APP:
+    switch (row->kind) {
+    case ROW_APP:
         menu_open = false;
         wm_invalidate_all();
         taskbar_dirty = true;
-        if (item->app && item->app->launch)
-            item->app->launch(NULL);
+        if (row->app && row->app->launch)
+            row->app->launch(NULL);
         break;
-    case MENU_ACTION_RESTART:
+    case ROW_CATEGORY:
+        menu_app_index = 0;
+        menu_dirty = true;
+        break;
+    case ROW_RESTART:
         desktop_shutdown(true);
         break;
-    case MENU_ACTION_SHUTDOWN:
+    case ROW_SHUTDOWN:
         desktop_shutdown(false);
         break;
-    case MENU_ACTION_SEPARATOR:
+    case ROW_SEPARATOR:
         break;
     }
 }
@@ -528,7 +731,31 @@ static bool handle_global_key(const key_event_t *ev)
             menu_move(1);
             return true;
         case KEY_ENTER:
-            menu_activate((size_t)menu_index);
+            if (menu_app_index >= 0 &&
+                menu_rows[menu_index].kind == ROW_CATEGORY) {
+                size_t app_count = 0;
+                const app_entry_t *apps = apps_registry(&app_count);
+                size_t app_i = cat_app_at(menu_rows[menu_index].cat,
+                                          (size_t)menu_app_index);
+                if (app_i != SIZE_MAX && apps[app_i].launch) {
+                    menu_open = false;
+                    wm_invalidate_all();
+                    taskbar_dirty = true;
+                    apps[app_i].launch(NULL);
+                }
+            } else {
+                menu_activate((size_t)menu_index);
+            }
+            return true;
+        case KEY_RIGHT:
+            if (menu_index >= 0 &&
+                menu_rows[menu_index].kind == ROW_CATEGORY)
+                menu_app_index = 0;
+            menu_dirty = true;
+            return true;
+        case KEY_LEFT:
+            menu_app_index = -1;
+            menu_dirty = true;
             return true;
         default:
             break;
@@ -596,15 +823,39 @@ static void handle_mouse_event(const mouse_event_t *ev)
     if (menu_open) {
         rect_t r = menu_rect();
         if (rect_contains(r, ev->x, ev->y)) {
-            for (size_t i = 0; i < menu_item_count; i++) {
-                if (menu_items[i].action == MENU_ACTION_SEPARATOR)
+            if (ev->x >= r.x + MENU_WIDTH) {
+                for (size_t n = 0;; n++) {
+                    size_t app_i = cat_app_at(menu_rows[menu_index].cat, n);
+                    if (app_i == SIZE_MAX)
+                        break;
+                    if (!rect_contains(menu_app_rect(n), ev->x, ev->y))
+                        continue;
+                    menu_app_index = (int)n;
+                    menu_dirty = true;
+                    if (ev->pressed & MOUSE_LEFT) {
+                        size_t app_count = 0;
+                        const app_entry_t *apps = apps_registry(&app_count);
+                        menu_open = false;
+                        wm_invalidate_all();
+                        taskbar_dirty = true;
+                        if (apps[app_i].launch)
+                            apps[app_i].launch(NULL);
+                    }
+                    return;
+                }
+                return;
+            }
+            for (size_t i = 0; i < menu_row_count; i++) {
+                if (menu_rows[i].kind == ROW_SEPARATOR)
                     continue;
                 if (rect_contains(menu_item_rect(i), ev->x, ev->y)) {
                     if ((int)i != menu_index) {
                         menu_index = (int)i;
+                        menu_app_index = -1;
                         menu_dirty = true;
                     }
-                    if (ev->pressed & MOUSE_LEFT)
+                    if ((ev->pressed & MOUSE_LEFT) &&
+                        menu_rows[i].kind != ROW_CATEGORY)
                         menu_activate(i);
                     return;
                 }
@@ -660,23 +911,31 @@ static void composite(bool full)
         gfx_clip_pop();
         if (rects_overlap(taskbar_rect(), exposed[i]))
             taskbar_dirty = true;
-        if (menu_open && rects_overlap(menu_rect(), exposed[i]))
+        if (menu_open && rects_overlap(menu_frame_rect(), exposed[i]))
             menu_dirty = true;
     }
 
+    /* A window can overlap an exposed region without being the window that
+     * caused it (for example, when the top window is moved or closed).  Draw
+     * every intersecting window in z-order, otherwise the repaired wallpaper
+     * can remain visible on top of a window. */
     for (window_t *w = wm_bottom(); w; w = w->above) {
-        if (!w->needs_redraw || w->minimized)
+        if (w->minimized)
             continue;
-        rect_t area = w->frame;
-        wm_draw_window(w);
 
-        /* Anything stacked above the repainted window must be redrawn too. */
-        for (window_t *upper = w->above; upper; upper = upper->above)
-            if (!upper->minimized && rects_overlap(upper->frame, area))
-                wm_draw_window(upper);
-        if (rects_overlap(taskbar_rect(), area))
+        bool redraw = w->needs_redraw;
+        for (size_t i = 0; i < nexposed; i++)
+            if (rects_overlap(w->frame, exposed[i])) {
+                redraw = true;
+                break;
+            }
+        if (!redraw)
+            continue;
+
+        wm_draw_window(w);
+        if (rects_overlap(taskbar_rect(), w->frame))
             taskbar_dirty = true;
-        if (menu_open && rects_overlap(menu_rect(), area))
+        if (menu_open && rects_overlap(menu_frame_rect(), w->frame))
             menu_dirty = true;
     }
 
@@ -698,8 +957,8 @@ void desktop_run(void)
     build_menu();
     mouse_set_bounds(gfx_width(), gfx_height());
 
-    klog("[desk] desktop starting (%dx%d, %u menu entries)\n", gfx_width(),
-         gfx_height(), (uint32_t)menu_item_count);
+    klog("[desk] desktop starting (%dx%d, %u menu categories)\n", gfx_width(),
+         gfx_height(), (uint32_t)menu_cat_count);
 
     composite(true);
     int mx, my;
