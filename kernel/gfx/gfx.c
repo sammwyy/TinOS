@@ -317,6 +317,44 @@ void gfx_blend_rect(int x, int y, int w, int h, color_t color, uint8_t alpha)
     gfx_mark_dirty(r.x, r.y, r.w, r.h);
 }
 
+void gfx_blit_image(rect_t dst, const uint32_t *pixels, int width, int height)
+{
+    if (!fb.active || !pixels || width <= 0 || height <= 0 || dst.w <= 0 ||
+        dst.h <= 0)
+        return;
+    rect_t r = rect_intersect(dst, clip);
+    if (rect_empty(r))
+        return;
+    for (int y = r.y; y < r.y + r.h; y++) {
+        int sy = (int)(((int64_t)(y - dst.y) * height) / dst.h);
+        if (sy >= height)
+            sy = height - 1;
+        for (int x = r.x; x < r.x + r.w; x++) {
+            int sx = (int)(((int64_t)(x - dst.x) * width) / dst.w);
+            if (sx >= width)
+                sx = width - 1;
+            uint32_t source = pixels[(size_t)sy * width + sx];
+            uint32_t alpha = source >> 24;
+            uint32_t *target = fb.back + (size_t)y * fb.width + x;
+            if (alpha == 255) {
+                *target = source & 0x00ffffff;
+            } else if (alpha) {
+                uint32_t dest = *target;
+                uint32_t sr = (source >> 16) & 0xff;
+                uint32_t sg = (source >> 8) & 0xff;
+                uint32_t sb = source & 0xff;
+                uint32_t dr = (dest >> 16) & 0xff;
+                uint32_t dg = (dest >> 8) & 0xff;
+                uint32_t db = dest & 0xff;
+                *target = RGB((sr * alpha + dr * (255 - alpha)) / 255,
+                              (sg * alpha + dg * (255 - alpha)) / 255,
+                              (sb * alpha + db * (255 - alpha)) / 255);
+            }
+        }
+    }
+    gfx_mark_dirty(r.x, r.y, r.w, r.h);
+}
+
 /* ------------------------------------------------------------------ */
 /* Text                                                               */
 /* ------------------------------------------------------------------ */

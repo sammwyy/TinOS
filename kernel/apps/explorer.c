@@ -10,6 +10,7 @@
 
 #include <tinos/arch.h>
 #include <tinos/fs.h>
+#include <tinos/image.h>
 #include <tinos/gfx.h>
 #include <tinos/heap.h>
 #include <tinos/kernel.h>
@@ -232,7 +233,15 @@ static void action_open(window_t *win, explorer_t *ex)
     }
     char path[FS_PATH_MAX];
     fs_path(node, path, sizeof(path));
-    app_editor_open(path);
+    const char *dot = strrchr(node->name, '.');
+    bool image = dot && (kstrcasecmp(dot + 1, "png") == 0 ||
+                         kstrcasecmp(dot + 1, "jpg") == 0 ||
+                         kstrcasecmp(dot + 1, "jpeg") == 0 ||
+                         kstrcasecmp(dot + 1, "webp") == 0);
+    if (image)
+        app_image_viewer_open(path);
+    else
+        app_editor_open(path);
 }
 
 static void action_copy(explorer_t *ex, bool cut)

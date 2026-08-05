@@ -190,6 +190,7 @@ const app_entry_t *apps_registry(size_t *count);
 window_t *app_terminal_open(const char *cwd);
 window_t *app_explorer_open(const char *path);
 window_t *app_editor_open(const char *path);
+window_t *app_image_viewer_open(const char *path);
 window_t *app_about_open(const char *arg);
 window_t *app_sysinfo_open(const char *arg);
 

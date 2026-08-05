@@ -64,6 +64,7 @@ void gfx_vline(int x, int y, int h, color_t color);
 void gfx_gradient_v(int x, int y, int w, int h, color_t top, color_t bottom);
 void gfx_bevel(int x, int y, int w, int h, color_t light, color_t dark);
 void gfx_blend_rect(int x, int y, int w, int h, color_t color, uint8_t alpha);
+void gfx_blit_image(rect_t dst, const uint32_t *pixels, int width, int height);
 
 /* Text ---------------------------------------------------------------- */
 void gfx_char(int x, int y, char c, color_t fg);
