@@ -1,6 +1,7 @@
 /* Networking core: device state, frame dispatch and public utilities. */
 
 #include <tinos/e1000.h>
+#include <tinos/bus.h>
 #include <tinos/kernel.h>
 #include <tinos/net.h>
 #include <tinos/printf.h>
@@ -78,6 +79,31 @@ bool net_init(void)
 
 bool net_available(void) { return net.initialized && e1000_available(); }
 const net_config_t *net_config(void) { return &net.config; }
+
+bool net_request_dhcp(void)
+{
+    if (!net_available())
+        return false;
+    bool result = net_dhcp_exchange();
+    if (result)
+        bus_publish(&(bus_event_t){ BUS_NETWORK_CHANGED, 1, 0, 0 });
+    return result;
+}
+
+bool net_configure_manual(uint32_t address, uint32_t netmask,
+                          uint32_t gateway, uint32_t dns)
+{
+    if (!net_available() || !address || !netmask)
+        return false;
+    net.config.address = address;
+    net.config.netmask = netmask;
+    net.config.gateway = gateway;
+    net.config.dns = dns;
+    net.config.configured = true;
+    net.arp_valid = false;
+    bus_publish(&(bus_event_t){ BUS_NETWORK_CHANGED, 2, 0, 0 });
+    return true;
+}
 
 void net_format_address(uint32_t address, char *out, size_t size)
 {

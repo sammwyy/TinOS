@@ -1,5 +1,6 @@
 #include <tinos/audio.h>
 #include <tinos/arch.h>
+#include <tinos/bus.h>
 #include <tinos/dma.h>
 #include <tinos/driver.h>
 #include <tinos/io.h>
@@ -60,6 +61,8 @@ static bool stream_active;
 static bool stream_paused;
 static bool stream_draining;
 static bool dma_running;
+static uint8_t volume = 80;
+static bool muted;
 
 static uint16_t ac97_mixer_read(uint8_t offset)
 {
@@ -145,6 +148,28 @@ bool audio_available(void)
 {
     return available;
 }
+
+void audio_set_volume(uint8_t value)
+{
+    volume = value > 100 ? 100 : value;
+    if (!available)
+        return;
+    uint16_t attenuation = (uint16_t)((100 - volume) * 31 / 100);
+    ac97_mixer_write(AC97_MASTER_VOL,
+                     (uint16_t)(attenuation | (attenuation << 8) |
+                                (muted ? 0x8000 : 0)));
+    bus_publish(&(bus_event_t){ BUS_AUDIO_CHANGED, volume, muted, 0 });
+}
+
+uint8_t audio_get_volume(void) { return volume; }
+
+void audio_set_muted(bool value)
+{
+    muted = value;
+    audio_set_volume(volume);
+}
+
+bool audio_is_muted(void) { return muted; }
 
 bool audio_stream_start(const audio_format_t *format)
 {

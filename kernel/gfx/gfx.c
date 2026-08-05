@@ -9,6 +9,7 @@
  */
 
 #include <tinos/gfx.h>
+#include <tinos/bus.h>
 #include <tinos/heap.h>
 #include <tinos/io.h>
 #include <tinos/kernel.h>
@@ -75,6 +76,31 @@ bool gfx_init(int width, int height)
     gfx_present();
     klog("[gfx ] %dx%dx%d back buffer %p -> lfb 0x%08x\n", width, height,
          fb.bpp, fb.back, (uint32_t)fb.phys);
+    return true;
+}
+
+bool gfx_resize(int width, int height)
+{
+    if (width < 640 || height < 480)
+        return false;
+    uint32_t *back = kmalloc((size_t)width * (size_t)height * 4);
+    if (!back)
+        return false;
+    if (!vbe_set_mode((uint16_t)width, (uint16_t)height, 32)) {
+        kfree(back);
+        return false;
+    }
+    kfree(fb.back);
+    fb.width = width;
+    fb.height = height;
+    fb.pitch = width * 4;
+    fb.back = back;
+    memset(fb.back, 0, (size_t)width * (size_t)height * 4);
+    gfx_clip_reset();
+    gfx_mark_all_dirty();
+    gfx_present();
+    bus_publish(&(bus_event_t){ BUS_DISPLAY_CHANGED, (uint32_t)width,
+                                (uint32_t)height, 0 });
     return true;
 }
 

@@ -38,6 +38,7 @@ extern const uint8_t font8x16[256][16];
 
 /* Mode setting ------------------------------------------------------- */
 bool             gfx_init(int width, int height);
+bool             gfx_resize(int width, int height);
 const fb_info_t *gfx_info(void);
 bool             gfx_active(void);
 int              gfx_width(void);

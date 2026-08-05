@@ -10,6 +10,7 @@
 #include <tinos/arch.h>
 #include <tinos/async.h>
 #include <tinos/audio.h>
+#include <tinos/bus.h>
 #include <tinos/codec.h>
 #include <tinos/ata.h>
 #include <tinos/storage.h>
@@ -193,6 +194,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     pmm_init(mbi);
     heap_init();
     async_init();
+    bus_init();
     thread_init();
     ktimer_init();
     driver_model_init();

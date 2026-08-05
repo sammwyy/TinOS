@@ -12,6 +12,7 @@
 #include <tinos/arch.h>
 #include <tinos/audio.h>
 #include <tinos/async.h>
+#include <tinos/bus.h>
 #include <tinos/desktop.h>
 #include <tinos/fs.h>
 #include <tinos/gfx.h>
@@ -72,6 +73,9 @@ static bool   menu_dirty    = true;
 static char   notification[96];
 static uint64_t notification_until;
 static uint32_t last_clock_second = 0xFFFFFFFF;
+static desktop_wallpaper_mode_t wallpaper_mode = DESKTOP_WALLPAPER_DEFAULT;
+static color_t wallpaper_top = COLOR_DESKTOP_TOP;
+static color_t wallpaper_bottom = COLOR_DESKTOP_BOTTOM;
 
 /* ------------------------------------------------------------------ */
 /* Mouse cursor                                                        */
@@ -179,6 +183,16 @@ static void draw_wallpaper(void)
 {
     rect_t space = wm_workspace();
 
+    if (wallpaper_mode == DESKTOP_WALLPAPER_SOLID) {
+        gfx_fill_rect(0, 0, space.w, space.h, wallpaper_top);
+        return;
+    }
+    if (wallpaper_mode == DESKTOP_WALLPAPER_GRADIENT) {
+        gfx_gradient_v(0, 0, space.w, space.h, wallpaper_top,
+                       wallpaper_bottom);
+        return;
+    }
+
     gfx_gradient_v(0, 0, space.w, space.h, COLOR_DESKTOP_TOP,
                    COLOR_DESKTOP_BOTTOM);
 
@@ -219,6 +233,21 @@ static void draw_wallpaper(void)
     for (size_t i = 0; i < ARRAY_SIZE(lines); i++)
         gfx_text(cx - gfx_text_width(lines[i]) / 2, cy + 28 + (int)i * 20,
                  lines[i], RGB(0x9e, 0xaa, 0xc0));
+}
+
+void desktop_set_wallpaper(desktop_wallpaper_mode_t mode, color_t top,
+                           color_t bottom)
+{
+    wallpaper_mode = mode;
+    wallpaper_top = top;
+    wallpaper_bottom = bottom;
+    bus_publish(&(bus_event_t){ BUS_WALLPAPER_CHANGED, mode, top, bottom });
+    wm_invalidate_all();
+}
+
+desktop_wallpaper_mode_t desktop_wallpaper_mode(void)
+{
+    return wallpaper_mode;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1027,6 +1056,7 @@ void desktop_run(void)
         bool dirty = false;
 
         audio_poll();
+        bus_dispatch(16);
 
         /* Future network/storage workers execute outside interrupt context.
          * The budget prevents one busy subsystem from starving the GUI. */

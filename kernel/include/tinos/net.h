@@ -28,6 +28,9 @@ bool net_init(void);
 void net_poll(void);
 bool net_available(void);
 const net_config_t *net_config(void);
+bool net_request_dhcp(void);
+bool net_configure_manual(uint32_t address, uint32_t netmask,
+                          uint32_t gateway, uint32_t dns);
 void net_format_address(uint32_t address, char *out, size_t size);
 bool net_parse_address(const char *text, uint32_t *out);
 bool net_ping(uint32_t address, uint32_t timeout_ms, uint32_t *elapsed_ms);

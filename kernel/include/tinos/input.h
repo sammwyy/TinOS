@@ -63,6 +63,9 @@ typedef struct {
 } mouse_event_t;
 
 void keyboard_init(void);
+typedef enum { KEYBOARD_LAYOUT_US, KEYBOARD_LAYOUT_ES } keyboard_layout_t;
+void keyboard_set_layout(keyboard_layout_t layout);
+keyboard_layout_t keyboard_get_layout(void);
 bool keyboard_poll(key_event_t *out);
 uint8_t keyboard_mods(void);
 

@@ -148,8 +148,16 @@ The GRUB menu has two entries:
 | `Esc` | close the start menu |
 
 The start menu groups the applications into collapsible categories
-(*Accessories*, *Multimedia*, *System* and *Config*): opening a category with `Enter` or a click unfolds
+(*Accessories*, *Multimedia* and *System*): opening a category with `Enter` or a click unfolds
 its apps underneath, and the power actions sit at the bottom.
+
+The Control Panel replaces the old Network Config window. It provides a
+sidebar with Network, Display, Sound and Keyboard categories; Network includes
+DHCP/manual IPv4 configuration and DNS/ping diagnostics.
+
+Subsystem settings publish typed notifications through the kernel event bus.
+The Control Panel subscribes to those notifications so changes made by another
+module are reflected in the open panel.
 | `Alt+Tab` | switch to the next window |
 | `Alt+F4` | close the focused window |
 | `Ctrl+Alt+T` / `Ctrl+Alt+E` | new terminal / new file explorer |

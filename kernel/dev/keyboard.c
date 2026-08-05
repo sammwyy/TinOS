@@ -8,6 +8,7 @@
 
 #include <tinos/input.h>
 #include <tinos/arch.h>
+#include <tinos/bus.h>
 #include <tinos/io.h>
 #include <tinos/kernel.h>
 
@@ -20,6 +21,7 @@ static volatile key_event_t queue[QUEUE_SIZE];
 static volatile uint32_t    q_head, q_tail;
 static uint8_t              mods;
 static bool                 extended;
+static keyboard_layout_t    layout = KEYBOARD_LAYOUT_US;
 
 /* Unshifted characters for scancode set 1, index = make code. */
 static const char keymap[128] = {
@@ -49,6 +51,28 @@ static const char keymap_shift[128] = {
     '8',  '9', '-', '4', '5', '6', '+', '1',
     '2',  '3', '0', '.', 0,   0,   0,   0,
 };
+
+/* Latin Spanish keeps the alphanumeric block unchanged and maps the
+ * punctuation positions commonly used by the PS/2 Spanish layout. */
+static const char keymap_es[128] = {
+    0, 0, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '\'', '?',
+    '\b', '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '`', '+',
+    '\n', 0, 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'n', '\'', 'c',
+    'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '-', 0, '*', 0, ' ', 0, 0,
+};
+static const char keymap_es_shift[128] = {
+    0, 0, '!', '"', '#', '$', '%', '&', '/', '(', ')', '=', '?', '?',
+    '\b', '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '^', '*',
+    '\n', 0, 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', 'N', '"', 'C',
+    'Z', 'X', 'C', 'V', 'B', 'N', 'M', ';', ':', '_', 0, '*', 0, ' ', 0, 0,
+};
+
+void keyboard_set_layout(keyboard_layout_t value)
+{
+    layout = value;
+    bus_publish(&(bus_event_t){ BUS_KEYBOARD_CHANGED, value, 0, 0 });
+}
+keyboard_layout_t keyboard_get_layout(void) { return layout; }
 
 static void push_event(uint16_t code, char ch)
 {
@@ -174,7 +198,10 @@ static void keyboard_isr(regs_t *regs)
         return;
     }
 
-    char ch = (mods & KMOD_SHIFT) ? keymap_shift[code] : keymap[code];
+    const char *normal = layout == KEYBOARD_LAYOUT_ES ? keymap_es : keymap;
+    const char *shifted = layout == KEYBOARD_LAYOUT_ES ? keymap_es_shift :
+                                                        keymap_shift;
+    char ch = (mods & KMOD_SHIFT) ? shifted[code] : normal[code];
     if (!ch)
         return;
 

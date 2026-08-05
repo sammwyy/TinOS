@@ -133,6 +133,8 @@ bool net_dhcp_exchange(void)
 {
     net.xid = 0x54494E4Fu ^ (uint32_t)timer_ticks();
     net.config.address = net.config.netmask = net.config.gateway = 0;
+    net.config.dns = 0;
+    net.config.configured = false;
     net.dhcp_offer_received = false;
     send_dhcp(1, 0, 0);
     uint64_t deadline = timer_ticks() + 3000;

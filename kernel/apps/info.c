@@ -188,65 +188,6 @@ window_t *app_sysinfo_open(const char *arg)
 }
 
 /* ------------------------------------------------------------------ */
-/* Network configuration                                               */
-
-typedef struct { uint32_t last_second; } network_state_t;
-
-static void network_on_draw(window_t *win, rect_t client)
-{
-    gfx_fill_rect(client.x, client.y, client.w, client.h, COLOR_WINDOW_BG);
-    widget_icon(client.x + 16, client.y + 14, 32, ICON_CHIP);
-    gfx_text(client.x + 60, client.y + 22, "Network Config", COLOR_TEXT);
-    gfx_hline(client.x + 12, client.y + 56, client.w - 24, COLOR_BORDER);
-    const net_config_t *c = net_config();
-    int y = client.y + 78;
-    if (!net_available()) {
-        gfx_text(client.x + 18, y, "Adapter: unavailable", COLOR_DANGER);
-        return;
-    }
-    gfx_text(client.x + 18, y, c->configured ? "Status: DHCP configured" :
-             "Status: waiting for DHCP", c->configured ? COLOR_OK : COLOR_TEXT_DIM);
-    y += 30;
-    char ip[20], mask[20], gateway[20], dns[20];
-    net_format_address(c->address, ip, sizeof(ip)); net_format_address(c->netmask, mask, sizeof(mask));
-    net_format_address(c->gateway, gateway, sizeof(gateway)); net_format_address(c->dns, dns, sizeof(dns));
-    row(client.x + 18, &y, "address", ip);
-    row(client.x + 18, &y, "netmask", mask);
-    row(client.x + 18, &y, "gateway", gateway);
-    row(client.x + 18, &y, "DNS", dns);
-}
-
-static bool network_on_tick(window_t *win)
-{
-    network_state_t *state = win->priv;
-    uint32_t second = (uint32_t)(timer_ticks() / 1000);
-    if (!state || state->last_second == second) return false;
-    state->last_second = second;
-    return true;
-}
-
-static void network_on_open(window_t *win, const char *arg)
-{
-    win->priv = kcalloc(1, sizeof(network_state_t));
-}
-
-static void network_on_close(window_t *win)
-{
-    kfree(win->priv);
-    win->priv = NULL;
-}
-
-static const app_class_t network_class = {
-    .name = "network", .on_open = network_on_open, .on_close = network_on_close,
-    .on_draw = network_on_draw, .on_tick = network_on_tick,
-};
-
-window_t *app_network_open(const char *arg)
-{
-    return wm_open(&network_class, 460, 300, "Network Config", arg);
-}
-
-/* ------------------------------------------------------------------ */
 /* Application registry (drives the start menu)                        */
 /* ------------------------------------------------------------------ */
 
@@ -275,14 +216,14 @@ static window_t *launch_media_player(const char *arg)
     return app_media_player_open(arg);
 }
 
-static window_t *launch_network(const char *arg)
-{
-    return app_network_open(arg);
-}
-
 static window_t *launch_calculator(const char *arg)
 {
     return app_calculator_open(arg);
+}
+
+static window_t *launch_control_panel(const char *arg)
+{
+    return app_control_panel_open(arg);
 }
 
 static const app_entry_t registry[] = {
@@ -300,8 +241,8 @@ static const app_entry_t registry[] = {
       launch_terminal },
     { "System Information", "system details", "System", ICON_CHIP,
       app_sysinfo_open },
-    { "Network Config", "DHCP, IP and DNS", "Config", ICON_CHIP,
-      launch_network },
+    { "Control Panel", "network and system settings", "System", ICON_CHIP,
+      launch_control_panel },
     { "About TinOS", "version and info", "System", ICON_INFO,
       app_about_open },
 };

@@ -4,6 +4,10 @@
 #include <tinos/types.h>
 
 bool audio_available(void);
+void audio_set_volume(uint8_t volume);
+uint8_t audio_get_volume(void);
+void audio_set_muted(bool muted);
+bool audio_is_muted(void);
 bool audio_play_doremi(void);
 typedef struct {
     uint32_t sample_rate;

@@ -193,8 +193,19 @@ window_t *app_editor_open(const char *path);
 window_t *app_image_viewer_open(const char *path);
 window_t *app_media_player_open(const char *path);
 window_t *app_calculator_open(const char *arg);
+window_t *app_control_panel_open(const char *arg);
 window_t *app_about_open(const char *arg);
 window_t *app_sysinfo_open(const char *arg);
+
+typedef enum {
+    DESKTOP_WALLPAPER_DEFAULT,
+    DESKTOP_WALLPAPER_SOLID,
+    DESKTOP_WALLPAPER_GRADIENT,
+} desktop_wallpaper_mode_t;
+
+void desktop_set_wallpaper(desktop_wallpaper_mode_t mode, color_t top,
+                           color_t bottom);
+desktop_wallpaper_mode_t desktop_wallpaper_mode(void);
 
 /* Used by applications to raise a transient message on the desktop. */
 void desktop_notify(const char *fmt, ...) PRINTFLIKE(1, 2);
