@@ -299,7 +299,7 @@ static void draw_taskbar(void)
               menu_open ? COLOR_BORDER : COLOR_PANEL_LIGHT,
               menu_open ? COLOR_PANEL_LIGHT : COLOR_BORDER);
     gfx_rect(start.x, start.y, start.w, start.h, COLOR_BORDER);
-    widget_icon(start.x + 5, start.y + 4, 18, ICON_TINOS);
+    widget_icon(start.x + 5, start.y + 1, 18, ICON_TINOS);
     gfx_text(start.x + 30, start.y + (start.h - FONT_H) / 2, "Start",
              menu_open ? RGB(0xf0, 0xf2, 0xf5) : COLOR_TEXT);
 
@@ -318,7 +318,7 @@ static void draw_taskbar(void)
         gfx_rect(r.x, r.y, r.w, r.h, active ? COLOR_ACCENT : COLOR_BORDER);
         if (active)
             gfx_hline(r.x + 1, r.y + r.h - 2, r.w - 2, COLOR_ACCENT);
-        widget_icon(r.x + 4, r.y + 4, 16, window_icon(w));
+        widget_icon(r.x + 4, r.y + 2, 16, window_icon(w));
 
         gfx_clip_push(rect_make(r.x + 24, r.y, r.w - 28, r.h));
         gfx_text(r.x + 26, r.y + (r.h - FONT_H) / 2, w->title,
@@ -369,6 +369,8 @@ static icon_t menu_category_icon(const char *name)
         return ICON_FOLDER;
     if (strcmp(name, "System") == 0)
         return ICON_CHIP;
+    if (strcmp(name, "Multimedia") == 0)
+        return ICON_FILE;
     return ICON_INFO;
 }
 
@@ -575,9 +577,8 @@ static void draw_menu(void)
     gfx_gradient_v(r.x + 2, r.y + 2, r.w - 4, MENU_HEADER_H - 4,
                    COLOR_TITLE_ACTIVE, COLOR_ACCENT_DARK);
     widget_icon(r.x + 10, r.y + 8, 26, ICON_TINOS);
-    gfx_text(r.x + 46, r.y + 10, TINOS_NAME " " TINOS_VERSION,
+    gfx_text(r.x + 46, r.y + 10, TINOS_DEFAULT_USER,
              RGB(0xf2, 0xf4, 0xf7));
-    gfx_text(r.x + 46, r.y + 26, "applications", RGB(0xd0, 0xda, 0xe5));
     gfx_vline(r.x + MENU_WIDTH, r.y + MENU_HEADER_H + 2,
               r.h - MENU_HEADER_H - 8, COLOR_BORDER);
 
@@ -624,6 +625,31 @@ static void menu_move(int delta)
     }
     menu_index = index;
     menu_app_index = -1;
+    menu_dirty = true;
+}
+
+static int menu_app_count(size_t cat)
+{
+    int count = 0;
+    for (size_t n = 0; cat_app_at(cat, n) != SIZE_MAX; n++)
+        count++;
+    return count;
+}
+
+static void menu_move_app(int delta)
+{
+    if (menu_index < 0 || menu_index >= (int)menu_row_count ||
+        menu_rows[menu_index].kind != ROW_CATEGORY)
+        return;
+    int count = menu_app_count(menu_rows[menu_index].cat);
+    if (count == 0)
+        return;
+    int index = menu_app_index + delta;
+    if (index < 0)
+        index = count - 1;
+    if (index >= count)
+        index = 0;
+    menu_app_index = index;
     menu_dirty = true;
 }
 
@@ -726,10 +752,16 @@ static bool handle_global_key(const key_event_t *ev)
             menu_toggle();
             return true;
         case KEY_UP:
-            menu_move(-1);
+            if (menu_app_index >= 0)
+                menu_move_app(-1);
+            else
+                menu_move(-1);
             return true;
         case KEY_DOWN:
-            menu_move(1);
+            if (menu_app_index >= 0)
+                menu_move_app(1);
+            else
+                menu_move(1);
             return true;
         case KEY_ENTER:
             if (menu_app_index >= 0 &&
@@ -749,9 +781,9 @@ static bool handle_global_key(const key_event_t *ev)
             }
             return true;
         case KEY_RIGHT:
-            if (menu_index >= 0 &&
+            if (menu_index >= 0 && menu_index < (int)menu_row_count &&
                 menu_rows[menu_index].kind == ROW_CATEGORY)
-                menu_app_index = 0;
+                menu_app_index = menu_app_count(menu_rows[menu_index].cat) ? 0 : -1;
             menu_dirty = true;
             return true;
         case KEY_LEFT:

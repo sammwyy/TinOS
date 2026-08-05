@@ -51,8 +51,12 @@ typedef struct {
     size_t          history_count;
     size_t          history_pos;
     bool            history_jump;
-    bool            drag_armed; /* pressed on an already-selected row */
+    bool            drag_armed; /* row press may become a drag or click */
     int             drag_start_x, drag_start_y;
+    uint64_t        last_click_at;
+    int             last_click_x, last_click_y;
+    size_t          last_click_index;
+    bool            has_last_click;
 } explorer_t;
 
 /* The clipboard is shared by every explorer window, like a real desktop. */
@@ -515,10 +519,19 @@ static bool explorer_sidebar_click(window_t *win, explorer_t *ex, int ly)
     }
     fs_node_t *drive = explorer_drive_node();
     int drives_y = y + 10;
-    if (drive && ly >= drives_y + 18 && ly < drives_y + 48) {
-        char path[FS_PATH_MAX];
-        fs_path(drive, path, sizeof(path));
-        explorer_navigate(win, ex, path);
+    if (drive) {
+        int drive_y = drives_y + 28;
+        for (fs_node_t *child = drive->children; child; child = child->next) {
+            if (child->name[0] == '.')
+                continue;
+            if (ly >= drive_y && ly < drive_y + 20) {
+                char path[FS_PATH_MAX];
+                if (fs_path(child, path, sizeof(path)))
+                    explorer_navigate(win, ex, path);
+                return true;
+            }
+            drive_y += 20;
+        }
     }
     return true;
 }
@@ -909,15 +922,14 @@ static bool explorer_on_mouse(window_t *win, const mouse_event_t *ev, int lx,
     bool   in_row = ly >= list_top && row < rows && index < ex->entry_count;
 
     if (ev->pressed & MOUSE_LEFT) {
-        if (in_row && index == ex->selection) {
-            /* Pressing an already-selected row could be the start of a
-             * drag; whether it turns out to be a click is decided on
-             * release, once we know the mouse never moved far enough. */
+        if (in_row) {
+            /* A row press can become either a drag or a click. Decide which
+             * one it was on release, so a first click can select a new row
+             * and still count toward a double click. */
+            ex->selection = index;
             ex->drag_armed   = true;
             ex->drag_start_x = ev->x;
             ex->drag_start_y = ev->y;
-        } else if (in_row) {
-            ex->selection = index;
             wm_invalidate(win);
         }
         return true;
@@ -939,6 +951,7 @@ static bool explorer_on_mouse(window_t *win, const mouse_event_t *ev, int lx,
     if (ev->released & MOUSE_LEFT) {
         if (drag_active) {
             drag_active = false;
+            ex->has_last_click = false;
             if (in_row) {
                 fs_node_t *target = ex->entries[index];
                 char       dst[FS_PATH_MAX];
@@ -953,7 +966,23 @@ static bool explorer_on_mouse(window_t *win, const mouse_event_t *ev, int lx,
                 }
             }
         } else if (ex->drag_armed && in_row && index == ex->selection) {
-            action_open(win, ex); /* it was a click, not a drag */
+            uint64_t now = timer_ticks();
+            int dx = ev->x - ex->last_click_x;
+            int dy = ev->y - ex->last_click_y;
+            bool double_click = ex->has_last_click &&
+                                ex->last_click_index == index &&
+                                now - ex->last_click_at <= 450 &&
+                                dx >= -8 && dx <= 8 && dy >= -8 && dy <= 8;
+            if (double_click) {
+                ex->has_last_click = false;
+                action_open(win, ex);
+            } else {
+                ex->has_last_click = true;
+                ex->last_click_at = now;
+                ex->last_click_x = ev->x;
+                ex->last_click_y = ev->y;
+                ex->last_click_index = index;
+            }
         }
         ex->drag_armed = false;
     }

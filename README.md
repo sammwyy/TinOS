@@ -142,13 +142,13 @@ The GRUB menu has two entries:
 | Key | Action |
 |-----|--------|
 | `Win`, `Ctrl+Esc` or `F12` | open / close the start menu |
-| `Up` `Down` | move through the start menu |
+| `Up` `Down` | move through the focused categories or apps |
 | `Enter` | expand / collapse a category, launch the selected app |
-| `Right` / `Left` | expand a category / collapse it or jump back to its header |
+| `Right` / `Left` | focus the category's apps / return to the categories |
 | `Esc` | close the start menu |
 
 The start menu groups the applications into collapsible categories
-(*Accessories*, *System*): opening a category with `Enter` or a click unfolds
+(*Accessories*, *Multimedia*, *System* and *Config*): opening a category with `Enter` or a click unfolds
 its apps underneath, and the power actions sit at the bottom.
 | `Alt+Tab` | switch to the next window |
 | `Alt+F4` | close the focused window |
@@ -193,11 +193,11 @@ The mouse wheel scrolls the scrollback (3 lines per notch).
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | copy / cut / paste |
 | `Ctrl+N` / `Ctrl+T` | new folder / new file |
 
-Every action also has a toolbar button. Clicking an already-selected row
-opens it; clicking and dragging an already-selected row onto a folder row
-moves it there (in the same window or a different one). The mouse wheel
-scrolls the list. In a rename box the old name starts out selected, so
-typing replaces it; `Esc` cancels any prompt.
+Every action also has a toolbar button. Double-clicking a row opens it;
+clicking and dragging a row onto a folder row moves it there (in the same
+window or a different one). The mouse wheel scrolls the list. In a rename box
+the old name starts out selected, so typing replaces it; `Esc` cancels any
+prompt.
 
 ### Text editor
 

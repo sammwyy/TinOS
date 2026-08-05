@@ -83,17 +83,17 @@ static rect_t close_button_rect(const window_t *win)
                      BUTTON_SIZE, BUTTON_SIZE);
 }
 
-static rect_t minimize_button_rect(const window_t *win)
-{
-    rect_t close = close_button_rect(win);
-    return rect_make(close.x - BUTTON_SIZE - BUTTON_GAP, close.y, BUTTON_SIZE,
-                     BUTTON_SIZE);
-}
-
 static rect_t maximize_button_rect(const window_t *win)
 {
-    rect_t mini = minimize_button_rect(win);
-    return rect_make(mini.x - BUTTON_SIZE - BUTTON_GAP, mini.y,
+    rect_t close = close_button_rect(win);
+    return rect_make(close.x - BUTTON_SIZE - BUTTON_GAP, close.y,
+                     BUTTON_SIZE, BUTTON_SIZE);
+}
+
+static rect_t minimize_button_rect(const window_t *win)
+{
+    rect_t maximize = maximize_button_rect(win);
+    return rect_make(maximize.x - BUTTON_SIZE - BUTTON_GAP, maximize.y,
                      BUTTON_SIZE, BUTTON_SIZE);
 }
 
