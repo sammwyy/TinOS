@@ -20,7 +20,7 @@
 #define UHCI_PROG_IF     0x00
 #define UHCI_PORT_COUNT  2
 #define UHCI_TD_COUNT    64
-#define UHCI_BULK_TD_BATCH 8
+#define UHCI_BULK_TD_BATCH 32
 #define UHCI_TIMEOUT     1000000u
 
 #define UHCI_CMD         0x00
@@ -114,7 +114,7 @@ static bool uhci_submit(size_t count)
         if (!active)
             break;
         io_wait();
-        if ((i & 0x0FFFu) == 0x0FFFu)
+        if ((i & 0x00FFu) == 0x00FFu)
             thread_yield();
     }
     for (size_t n = 0; n < count; n++)
