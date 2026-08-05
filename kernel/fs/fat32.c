@@ -239,25 +239,37 @@ static bool import_directory(block_device_t *device,
 {
     uint32_t cluster = first_cluster;
     uint32_t guard = 0;
-    uint8_t sector[BLOCK_SECTOR_SIZE];
+    uint8_t *sectors = kmalloc(BLOCK_SECTOR_SIZE * FAT_READ_BATCH);
+    if (!sectors)
+        return false;
+    bool result = false;
     while (cluster_valid(volume, cluster) && cluster < FAT32_EOC &&
            guard++ <= volume->cluster_count) {
         uint32_t lba = cluster_lba(volume, cluster);
-        for (uint32_t s = 0; s < volume->sectors_per_cluster; s++) {
-            if (!sector_read(device, lba + s, sector))
-                return false;
-            for (size_t offset = 0; offset < BLOCK_SECTOR_SIZE; offset += 32) {
-                if (sector[offset] == 0x00)
-                    return true;
-                if (!import_entry(device, volume, parent, sector + offset,
+        for (uint32_t s = 0; s < volume->sectors_per_cluster;) {
+            uint32_t batch = MIN((uint32_t)FAT_READ_BATCH,
+                                 volume->sectors_per_cluster - s);
+            if (!block_read(device, lba + s, sectors, batch))
+                goto done;
+            size_t bytes = (size_t)batch * BLOCK_SECTOR_SIZE;
+            for (size_t offset = 0; offset < bytes; offset += 32) {
+                if (sectors[offset] == 0x00) {
+                    result = true;
+                    goto done;
+                }
+                if (!import_entry(device, volume, parent, sectors + offset,
                                   depth))
-                    return false;
+                    goto done;
             }
+            s += batch;
         }
         if (!next_cluster(device, volume, cluster, &cluster))
-            return false;
+            goto done;
     }
-    return cluster >= FAT32_EOC;
+    result = cluster >= FAT32_EOC;
+done:
+    kfree(sectors);
+    return result;
 }
 
 bool fat32_import(block_device_t *device, fs_node_t *mountpoint)

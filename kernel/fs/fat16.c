@@ -256,20 +256,30 @@ static bool fat16_import_directory(block_device_t *device,
                                    fs_node_t *parent, uint16_t first_cluster,
                                    bool root, unsigned depth)
 {
-    uint8_t sector[BLOCK_SECTOR_SIZE];
+    uint8_t *sectors = kmalloc(BLOCK_SECTOR_SIZE * FAT_READ_BATCH);
+    if (!sectors)
+        return false;
+    bool result = false;
     if (root) {
-        for (uint32_t s = 0; s < volume->root_sectors; s++) {
-            if (!fat16_sector(device, volume->root_lba + s, sector))
-                return false;
-            for (size_t offset = 0; offset < BLOCK_SECTOR_SIZE; offset += 32) {
-                if (sector[offset] == 0x00)
-                    return true;
+        for (uint32_t s = 0; s < volume->root_sectors;) {
+            uint32_t batch = MIN((uint32_t)FAT_READ_BATCH,
+                                 volume->root_sectors - s);
+            if (!block_read(device, volume->root_lba + s, sectors, batch))
+                goto done;
+            size_t bytes = (size_t)batch * BLOCK_SECTOR_SIZE;
+            for (size_t offset = 0; offset < bytes; offset += 32) {
+                if (sectors[offset] == 0x00) {
+                    result = true;
+                    goto done;
+                }
                 if (!fat16_import_entry(device, volume, parent,
-                                        sector + offset, depth))
-                    return false;
+                                        sectors + offset, depth))
+                    goto done;
             }
+            s += batch;
         }
-        return true;
+        result = true;
+        goto done;
     }
 
     uint16_t cluster = first_cluster;
@@ -277,21 +287,30 @@ static bool fat16_import_directory(block_device_t *device,
     while (fat16_cluster_valid(volume, cluster) &&
            cluster < FAT16_EOC && guard++ <= volume->cluster_count) {
         uint32_t lba = fat16_cluster_lba(volume, cluster);
-        for (uint32_t s = 0; s < volume->sectors_per_cluster; s++) {
-            if (!fat16_sector(device, lba + s, sector))
-                return false;
-            for (size_t offset = 0; offset < BLOCK_SECTOR_SIZE; offset += 32) {
-                if (sector[offset] == 0x00)
-                    return true;
+        for (uint32_t s = 0; s < volume->sectors_per_cluster;) {
+            uint32_t batch = MIN((uint32_t)FAT_READ_BATCH,
+                                 volume->sectors_per_cluster - s);
+            if (!block_read(device, lba + s, sectors, batch))
+                goto done;
+            size_t bytes = (size_t)batch * BLOCK_SECTOR_SIZE;
+            for (size_t offset = 0; offset < bytes; offset += 32) {
+                if (sectors[offset] == 0x00) {
+                    result = true;
+                    goto done;
+                }
                 if (!fat16_import_entry(device, volume, parent,
-                                        sector + offset, depth))
-                    return false;
+                                        sectors + offset, depth))
+                    goto done;
             }
+            s += batch;
         }
         if (!fat16_next(device, volume, cluster, &cluster))
-            return false;
+            goto done;
     }
-    return cluster >= FAT16_EOC;
+    result = cluster >= FAT16_EOC;
+done:
+    kfree(sectors);
+    return result;
 }
 
 bool fat16_import(block_device_t *device, fs_node_t *mountpoint)
