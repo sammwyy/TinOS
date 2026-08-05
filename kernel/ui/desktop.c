@@ -212,7 +212,7 @@ static void draw_wallpaper(void)
     gfx_text(cx - gfx_text_width(title) / 2, cy, title, RGB(0xd5, 0xdb, 0xe7));
 
     const char *lines[] = {
-        "Press Ctrl+Esc (or click Start) to open the start menu",
+        "Press Win or Ctrl+Esc (or click Start) to open the start menu",
         "Alt+Tab switches windows, Alt+F4 closes the focused one",
     };
     for (size_t i = 0; i < ARRAY_SIZE(lines); i++)
@@ -763,6 +763,10 @@ static bool handle_global_key(const key_event_t *ev)
     }
 
     if ((ev->mods & KMOD_CTRL) && ev->code == KEY_ESCAPE) {
+        menu_toggle();
+        return true;
+    }
+    if (ev->code == KEY_SUPER) {
         menu_toggle();
         return true;
     }

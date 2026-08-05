@@ -131,7 +131,7 @@ The GRUB menu has two entries:
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+Esc` or `F12` | open / close the start menu |
+| `Win`, `Ctrl+Esc` or `F12` | open / close the start menu |
 | `Up` `Down` | move through the start menu |
 | `Enter` | expand / collapse a category, launch the selected app |
 | `Right` / `Left` | expand a category / collapse it or jump back to its header |

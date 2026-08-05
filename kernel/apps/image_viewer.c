@@ -32,8 +32,12 @@ static void image_viewer_on_open(window_t *win, const char *arg)
     win->priv = viewer;
 
     fs_node_t *node = NULL;
-    if (!arg || fs_resolve(fs_root(), arg, &node) != FS_OK ||
-        node->type != FS_FILE) {
+    if (!arg) {
+        strlcpy(viewer->error, "Open an image from File Explorer",
+                sizeof(viewer->error));
+        return;
+    }
+    if (fs_resolve(fs_root(), arg, &node) != FS_OK || node->type != FS_FILE) {
         strlcpy(viewer->error, "File not found", sizeof(viewer->error));
         return;
     }

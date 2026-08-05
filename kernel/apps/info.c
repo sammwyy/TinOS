@@ -25,7 +25,7 @@ static const char *const about_lines[] = {
     "Everything here runs from memory, so the system feels",
     "fast and responsive, just like a real desktop.",
     "",
-    "Shortcuts: Ctrl+Esc start menu, Alt+Tab switch windows,",
+    "Shortcuts: Win/Ctrl+Esc start menu, Alt+Tab switch windows,",
     "Alt+F4 close the current window.",
 };
 
@@ -265,6 +265,11 @@ static window_t *launch_editor(const char *arg)
     return app_editor_open(arg);
 }
 
+static window_t *launch_image_viewer(const char *arg)
+{
+    return app_image_viewer_open(arg);
+}
+
 static window_t *launch_network(const char *arg)
 {
     return app_network_open(arg);
@@ -275,6 +280,8 @@ static const app_entry_t registry[] = {
       launch_explorer },
     { "Text Editor", "write text", "Accessories", ICON_EDITOR,
       launch_editor },
+    { "Image Viewer", "view JPG, PNG and WebP images", "Accessories", ICON_FILE,
+      launch_image_viewer },
     { "Terminal", "command line", "System", ICON_TERMINAL,
       launch_terminal },
     { "System Information", "system details", "System", ICON_CHIP,
