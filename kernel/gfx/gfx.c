@@ -1,9 +1,8 @@
 /* Framebuffer graphics engine.
  *
  * Everything is drawn into a back buffer held in ordinary system memory and
- * copied to the adapter once per frame.  A single dirty bounding rectangle
- * keeps the copy cheap: a desktop where only the clock changed uploads a few
- * scanlines instead of three megabytes.
+ * copied to the adapter once per frame.  A small set of dirty rectangles keeps
+ * unrelated changes from expanding into one large bounding-box upload.
  *
  * A small clip stack lets windows draw with absolute screen coordinates
  * while being confined to their own frame.
@@ -22,8 +21,9 @@ static fb_info_t fb;
 static rect_t    clip_stack[CLIP_STACK_DEPTH];
 static int       clip_depth;
 static rect_t    clip;
-static rect_t    dirty;
-static bool      dirty_valid;
+#define MAX_DIRTY_RECTS 32
+static rect_t dirty_rects[MAX_DIRTY_RECTS];
+static size_t dirty_count;
 
 /* ------------------------------------------------------------------ */
 /* Rectangles                                                          */
@@ -111,36 +111,75 @@ void gfx_mark_dirty(int x, int y, int w, int h)
     if (rect_empty(r))
         return;
 
-    if (!dirty_valid) {
-        dirty       = r;
-        dirty_valid = true;
+    for (size_t i = 0; i < dirty_count; i++) {
+        rect_t old = dirty_rects[i];
+        if (r.x > old.x + old.w || old.x > r.x + r.w ||
+            r.y > old.y + old.h || old.y > r.y + r.h)
+            continue;
+        int x0 = MIN(old.x, r.x);
+        int y0 = MIN(old.y, r.y);
+        int x1 = MAX(old.x + old.w, r.x + r.w);
+        int y1 = MAX(old.y + old.h, r.y + r.h);
+        dirty_rects[i] = rect_make(x0, y0, x1 - x0, y1 - y0);
+        /* Recheck against earlier rectangles after growing this one. */
+        for (size_t j = 0; j < i; j++) {
+            rect_t prior = dirty_rects[j];
+            if (dirty_rects[i].x > prior.x + prior.w ||
+                prior.x > dirty_rects[i].x + dirty_rects[i].w ||
+                dirty_rects[i].y > prior.y + prior.h ||
+                prior.y > dirty_rects[i].y + dirty_rects[i].h)
+                continue;
+            int ux0 = MIN(prior.x, dirty_rects[i].x);
+            int uy0 = MIN(prior.y, dirty_rects[i].y);
+            int ux1 = MAX(prior.x + prior.w,
+                          dirty_rects[i].x + dirty_rects[i].w);
+            int uy1 = MAX(prior.y + prior.h,
+                          dirty_rects[i].y + dirty_rects[i].h);
+            dirty_rects[j] = rect_make(ux0, uy0, ux1 - ux0, uy1 - uy0);
+            dirty_rects[i] = dirty_rects[--dirty_count];
+            gfx_mark_dirty(dirty_rects[j].x, dirty_rects[j].y,
+                           dirty_rects[j].w, dirty_rects[j].h);
+            return;
+        }
         return;
     }
-    int x0 = MIN(dirty.x, r.x);
-    int y0 = MIN(dirty.y, r.y);
-    int x1 = MAX(dirty.x + dirty.w, r.x + r.w);
-    int y1 = MAX(dirty.y + dirty.h, r.y + r.h);
-    dirty  = rect_make(x0, y0, x1 - x0, y1 - y0);
+    if (dirty_count < MAX_DIRTY_RECTS) {
+        dirty_rects[dirty_count++] = r;
+        return;
+    }
+    /* Too many small regions: one bounded upload is cheaper than bookkeeping. */
+    int x0 = r.x, y0 = r.y, x1 = r.x + r.w, y1 = r.y + r.h;
+    for (size_t i = 0; i < dirty_count; i++) {
+        x0 = MIN(x0, dirty_rects[i].x);
+        y0 = MIN(y0, dirty_rects[i].y);
+        x1 = MAX(x1, dirty_rects[i].x + dirty_rects[i].w);
+        y1 = MAX(y1, dirty_rects[i].y + dirty_rects[i].h);
+    }
+    dirty_rects[0] = rect_make(x0, y0, x1 - x0, y1 - y0);
+    dirty_count = 1;
 }
 
 void gfx_mark_all_dirty(void)
 {
-    dirty       = rect_make(0, 0, fb.width, fb.height);
-    dirty_valid = true;
+    dirty_rects[0] = rect_make(0, 0, fb.width, fb.height);
+    dirty_count = 1;
 }
 
 void gfx_present(void)
 {
-    if (!fb.active || !dirty_valid)
+    if (!fb.active || dirty_count == 0)
         return;
 
     volatile uint8_t *lfb = (volatile uint8_t *)fb.phys;
-    for (int y = dirty.y; y < dirty.y + dirty.h; y++) {
-        void       *dst = (void *)(lfb + (size_t)y * fb.pitch + dirty.x * 4);
-        const void *src = fb.back + (size_t)y * fb.width + dirty.x;
-        memcpy(dst, src, (size_t)dirty.w * 4);
+    for (size_t i = 0; i < dirty_count; i++) {
+        rect_t r = dirty_rects[i];
+        for (int y = r.y; y < r.y + r.h; y++) {
+            void       *dst = (void *)(lfb + (size_t)y * fb.pitch + r.x * 4);
+            const void *src = fb.back + (size_t)y * fb.width + r.x;
+            memcpy(dst, src, (size_t)r.w * 4);
+        }
     }
-    dirty_valid = false;
+    dirty_count = 0;
 }
 
 /* ------------------------------------------------------------------ */

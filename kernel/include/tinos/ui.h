@@ -71,6 +71,9 @@ struct window {
     rect_t              frame;
     bool                minimized;
     bool                needs_redraw;
+    uint32_t           *surface;
+    size_t              surface_words;
+    bool                surface_valid;
     const app_class_t  *cls;
     void               *priv;
     window_t           *below; /* z-order: NULL for the bottom window */
@@ -94,6 +97,8 @@ bool      wm_take_full_redraw(void);
  * Returns the number written to `out` (capped at `max`) and clears them. */
 size_t    wm_take_exposed(rect_t *out, size_t max);
 void      wm_draw_window(window_t *win); /* frame + client contents */
+bool      wm_window_cached(const window_t *win);
+void      wm_blit_window(window_t *win);
 rect_t    wm_client_rect(const window_t *win);
 void      wm_set_title(window_t *win, const char *title);
 void      wm_cycle_focus(void);

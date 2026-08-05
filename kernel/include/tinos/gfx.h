@@ -1,7 +1,7 @@
 /* Graphics: linear framebuffer, double buffering and drawing primitives.
  *
  * All drawing happens into a system-memory back buffer; gfx_present() copies
- * only the rows that changed into the adapter's linear framebuffer.
+ * only the changed regions into the adapter's linear framebuffer.
  */
 #ifndef TINOS_GFX_H
 #define TINOS_GFX_H

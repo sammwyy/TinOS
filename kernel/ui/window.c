@@ -131,6 +131,26 @@ static void push_to_top(window_t *win)
         bottom_window = win;
 }
 
+static bool surface_resize(window_t *win)
+{
+    size_t words = (size_t)MAX(0, win->frame.w) *
+                   (size_t)MAX(0, win->frame.h);
+    if (win->surface && win->surface_words == words)
+        return true;
+    if (win->surface)
+        kfree(win->surface);
+    win->surface = NULL;
+    win->surface_words = 0;
+    win->surface_valid = false;
+    if (!words)
+        return false;
+    win->surface = (uint32_t *)kmalloc(words * sizeof(uint32_t));
+    if (!win->surface)
+        return false;
+    win->surface_words = words;
+    return true;
+}
+
 void wm_invalidate(window_t *win)
 {
     if (!win)
@@ -185,6 +205,18 @@ static void wm_expose(rect_t r)
 {
     if (rect_empty(r))
         return;
+    for (size_t i = 0; i < exposed_count; i++) {
+        rect_t old = exposed_rects[i];
+        if (r.x > old.x + old.w || old.x > r.x + r.w ||
+            r.y > old.y + old.h || old.y > r.y + r.h)
+            continue;
+        int x0 = MIN(old.x, r.x);
+        int y0 = MIN(old.y, r.y);
+        int x1 = MAX(old.x + old.w, r.x + r.w);
+        int y1 = MAX(old.y + old.h, r.y + r.h);
+        exposed_rects[i] = rect_make(x0, y0, x1 - x0, y1 - y0);
+        return;
+    }
     if (exposed_count < WM_MAX_EXPOSED)
         exposed_rects[exposed_count++] = r;
     else
@@ -296,6 +328,8 @@ void wm_close(window_t *win)
     rect_t old = win->frame;
     unlink_window(win);
     window_count--;
+    if (win->surface)
+        kfree(win->surface);
     klog("[wm  ] closed window %d '%s'\n", win->id, win->title);
     kfree(win);
 
@@ -377,7 +411,46 @@ void wm_draw_window(window_t *win)
     gfx_clip_pop();
     gfx_clip_reset();
 
+    if (surface_resize(win)) {
+        const fb_info_t *fb = gfx_info();
+        rect_t visible = rect_intersect(
+            win->frame, rect_make(0, 0, fb->width, fb->height));
+        for (int y = visible.y; y < visible.y + visible.h; y++) {
+            int sy = y - win->frame.y;
+            int sx = visible.x - win->frame.x;
+            memcpy(win->surface + (size_t)sy * win->frame.w + sx,
+                   fb->back + (size_t)y * fb->width + visible.x,
+                   (size_t)visible.w * sizeof(uint32_t));
+        }
+        win->surface_valid = true;
+    }
     win->needs_redraw = false;
+}
+
+bool wm_window_cached(const window_t *win)
+{
+    return win && win->surface_valid && win->surface &&
+           win->surface_words ==
+               (size_t)MAX(0, win->frame.w) * (size_t)MAX(0, win->frame.h);
+}
+
+void wm_blit_window(window_t *win)
+{
+    if (!wm_window_cached(win))
+        return;
+    const fb_info_t *fb = gfx_info();
+    rect_t visible = rect_intersect(win->frame,
+                                    rect_make(0, 0, fb->width, fb->height));
+    if (rect_empty(visible))
+        return;
+    for (int y = visible.y; y < visible.y + visible.h; y++) {
+        int sy = y - win->frame.y;
+        int sx = visible.x - win->frame.x;
+        memcpy(fb->back + (size_t)y * fb->width + visible.x,
+               win->surface + (size_t)sy * win->frame.w + sx,
+               (size_t)visible.w * sizeof(uint32_t));
+    }
+    gfx_mark_dirty(visible.x, visible.y, visible.w, visible.h);
 }
 
 /* ------------------------------------------------------------------ */
@@ -443,8 +516,10 @@ bool wm_handle_mouse(const mouse_event_t *ev)
             dragging->frame.x = nx;
             dragging->frame.y = ny;
             wm_expose(old);
+            wm_expose(dragging->frame);
             wm_invalidate_rect(old);
-            wm_invalidate(dragging);
+            /* The window contents did not change; use its cached surface. */
+            dragging->needs_redraw = false;
         }
         return true;
     }

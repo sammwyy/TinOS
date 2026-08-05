@@ -256,7 +256,7 @@ to the nearest surviving ancestor.
 | Arch | `kernel/arch/x86/` | GDT, IDT + 48 interrupt stubs, 8259A PIC, PIT, CMOS RTC, CPUID, reboot/power-off |
 | Memory | `kernel/mm/` | bitmap page frame allocator over the Multiboot2 memory map; first-fit heap with coalescing that grows by taking new arenas from the frame allocator |
 | Devices | `kernel/dev/` | COM1 serial log, VGA text console, PCI enumeration, Bochs DISPI mode setting, PS/2 keyboard, PS/2 mouse with IntelliMouse wheel support |
-| Graphics | `kernel/gfx/` | double-buffered framebuffer with dirty-rectangle upload, rectangles, lines, gradients, alpha blending, clipping stack, 8x16 bitmap font |
+| Graphics | `kernel/gfx/` | double-buffered framebuffer with multi-region dirty upload, rectangles, lines, gradients, alpha blending, clipping stack, 8x16 bitmap font |
 | Filesystem | `kernel/fs/` | node tree, path resolution, textual path helpers |
 | Shell | `kernel/sh/` | byte streams, tokeniser/parser, execution engine, 32 built-ins |
 | UI | `kernel/ui/` | window manager, widgets and icons, desktop/taskbar/start menu/event loop |
@@ -280,14 +280,16 @@ framebuffer address out of BAR0 of the PCI display device, rather than
 hardcoding QEMU's 0xFD000000 or dropping to real mode for a BIOS call.
 
 **Damage-based compositing.** Drawing goes into a system-memory back buffer;
-`gfx_present()` copies only the changed rows to the adapter. Windows repaint
-when their content changes; moving, closing or minimising one repaints only
+`gfx_present()` copies only the changed regions to the adapter. Windows keep a
+cached surface of their last rendered frame, so moving one blits cached pixels
+instead of calling the application's draw routine again. Closing or minimising
+one repaints only
 the rectangle it uncovered (the wallpaper there, plus any window now exposed
 by it), not the whole desktop. A full repaint is reserved for opening a
 window or a z-order change (focus, Alt-Tab), where recomputing what is
 visible everywhere is simplest. The mouse cursor is painted on top of the
-finished frame and lifted off again, so moving the mouse uploads a few
-hundred pixels rather than three megabytes. A frame takes 1-3 ms in QEMU.
+finished frame and lifted off again, so moving the mouse uploads a small region
+rather than three megabytes.
 
 **Streams, not terminals, in the shell.** Commands read and write
 `stream_t` byte buffers. That is what makes pipelines and `>` redirection

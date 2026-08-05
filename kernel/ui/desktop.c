@@ -932,10 +932,19 @@ static void composite(bool full)
                 redraw = true;
                 break;
             }
-        if (!redraw)
+        bool overlaps_exposed = false;
+        for (size_t i = 0; i < nexposed; i++)
+            if (rects_overlap(w->frame, exposed[i])) {
+                overlaps_exposed = true;
+                break;
+            }
+        if (!redraw && !overlaps_exposed)
             continue;
 
-        wm_draw_window(w);
+        if (redraw || !wm_window_cached(w))
+            wm_draw_window(w);
+        else
+            wm_blit_window(w);
         if (rects_overlap(taskbar_rect(), w->frame))
             taskbar_dirty = true;
         if (menu_open && rects_overlap(menu_frame_rect(), w->frame))
