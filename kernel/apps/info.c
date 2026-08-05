@@ -214,8 +214,6 @@ static void network_on_draw(window_t *win, rect_t client)
     row(client.x + 18, &y, "netmask", mask);
     row(client.x + 18, &y, "gateway", gateway);
     row(client.x + 18, &y, "DNS", dns);
-    y += 12;
-    gfx_text(client.x + 18, y, "Use ping and nslookup in Terminal", COLOR_TEXT_DIM);
 }
 
 static bool network_on_tick(window_t *win)
