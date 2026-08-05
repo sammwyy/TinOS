@@ -91,6 +91,8 @@ static bool transfer(msc_disk_t *msc, uint8_t command, uint32_t lba,
     result = csw.signature == MSC_CSW_SIGNATURE && csw.tag == cbw.tag &&
              csw.status == 0;
 done:
+    if (!result && msc->transport->reset)
+        msc->transport->reset(msc->transport->context);
     if (locked)
         kmutex_unlock(&msc->lock);
     return result;

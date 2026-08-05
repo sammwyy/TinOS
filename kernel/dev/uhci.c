@@ -12,6 +12,7 @@
 #include <tinos/pci.h>
 #include <tinos/string.h>
 #include <tinos/thread.h>
+#include <tinos/timer.h>
 #include <tinos/uhci.h>
 #include <tinos/usb_msc.h>
 
@@ -20,8 +21,8 @@
 #define UHCI_PROG_IF     0x00
 #define UHCI_PORT_COUNT  2
 #define UHCI_TD_COUNT    64
-#define UHCI_BULK_TD_BATCH 32
-#define UHCI_TIMEOUT     1000000u
+#define UHCI_BULK_TD_BATCH 8
+#define UHCI_TIMEOUT_MS  5000u
 
 #define UHCI_CMD         0x00
 #define UHCI_STATUS      0x02
@@ -82,7 +83,6 @@ typedef struct {
     usb_msc_transport_t msc_transport;
     block_device_t block;
     bool ready;
-    bool schedule_linked;
 } uhci_state_t;
 
 static uhci_state_t uhci;
@@ -100,23 +100,25 @@ static void delay(void)
 
 static bool uhci_submit(size_t count)
 {
-    if (!uhci.schedule_linked) {
-        for (size_t i = 0; i < 1024; i++)
-            uhci.frames[i] = address_of(uhci.tds);
-        uhci.schedule_linked = true;
-    }
+    for (size_t i = 0; i < 1024; i++)
+        uhci.frames[i] = address_of(uhci.tds);
     __asm__ volatile("" ::: "memory");
     outw(uhci.io + UHCI_CMD, UHCI_CMD_RUN | UHCI_CMD_CONFIG | UHCI_CMD_MAXP);
-    for (uint32_t i = 0; i < UHCI_TIMEOUT; i++) {
+    uint64_t deadline = timer_ticks() + UHCI_TIMEOUT_MS;
+    uint32_t polls = 0;
+    while (timer_ticks() < deadline) {
         bool active = false;
         for (size_t n = 0; n < count; n++)
             active |= (uhci.tds[n].status & UHCI_TD_ACTIVE) != 0;
         if (!active)
             break;
         io_wait();
-        if ((i & 0x00FFu) == 0x00FFu)
+        if ((polls++ & 0x00FFu) == 0x00FFu)
             thread_yield();
     }
+    for (size_t i = 0; i < 1024; i++)
+        uhci.frames[i] = UHCI_LINK_TERM;
+    __asm__ volatile("" ::: "memory");
     for (size_t n = 0; n < count; n++)
         if ((uhci.tds[n].status & UHCI_TD_ACTIVE) ||
             (uhci.tds[n].status & UHCI_TD_ERROR)) {
@@ -125,9 +127,6 @@ static bool uhci_submit(size_t count)
             klog("[uhci] submit cmd=0x%04x status=0x%04x frame=0x%04x\n",
                  inw(uhci.io + UHCI_CMD), inw(uhci.io + UHCI_STATUS),
                  inw(uhci.io + UHCI_FRAME));
-            for (size_t i = 0; i < 1024; i++)
-                uhci.frames[i] = UHCI_LINK_TERM;
-            uhci.schedule_linked = false;
             return false;
         }
     return true;
