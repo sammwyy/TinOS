@@ -17,7 +17,7 @@ libgcc's 64-bit arithmetic helpers).
    |            gdt -> idt/pic -> pit/rtc -> pmm/heap ->        |
    |            keyboard/mouse -> ramfs -> pci -> vbe           |
    |                              |                             |
-   |                     kernel/ui/desktop.c                    |
+   |                     desktop/desktop.c                      |
    |          window manager, taskbar, start menu, cursor       |
    |            /            |             |          \         |
    |      terminal      explorer        editor      sysinfo     |
@@ -460,9 +460,20 @@ to the nearest surviving ancestor.
 | Graphics | `kernel/gfx/` | double-buffered framebuffer with multi-region dirty upload, rectangles, lines, gradients, alpha blending, clipping stack, 8x16 bitmap font |
 | Filesystem | `kernel/fs/` | node tree, path resolution, textual path helpers |
 | Shell | `kernel/sh/` | byte streams, tokeniser/parser, execution engine, 32 built-ins |
-| UI | `kernel/ui/` | window manager, widgets and icons, desktop/taskbar/start menu/event loop |
-| Applications | `kernel/apps/` | terminal, file explorer, text editor, system information, about |
 | Networking | `kernel/net/` | Ethernet, ARP, IPv4, ICMP, UDP, DHCP, DNS, TCP/HTTP and async jobs |
+| Libraries | `libraries/image/` | PNG, JPEG and WebP decoding on top of stb_image/simplewebp |
+| Libraries | `libraries/audio/` | WAV and Ogg Vorbis decoding, codec dispatch |
+| Desktop | `desktop/` | window manager, widgets and icons, taskbar/start menu/event loop |
+| Applications | `apps/` | terminal, file explorer, text editor, system information, about |
+
+Each self-contained unit owns its own public headers under its own
+`include/tinos/` tree - `kernel/include/tinos/` for the kernel core (shared
+by everything, since `dev`/`fs`/`net`/`core` are tightly coupled),
+`desktop/include/tinos/` for the window manager API, and
+`libraries/image/include/tinos/` / `libraries/audio/include/tinos/` for the
+format codecs. `#include <tinos/...>` never changes when a file moves within
+a unit; only that unit's `-I` flag would need to go if it were ever pulled
+out.
 
 ### Decisions worth knowing
 
@@ -504,7 +515,7 @@ what is dirty and then `hlt`s until the next interrupt. Interrupt handlers
 only enqueue events. Applications are C structs with a vtable
 (`app_class_t`), not separate address spaces. Nothing shipped needs more
 than this - there is no user-defined iteration for a command to hang in, and
-no callback in `kernel/apps/` runs longer than a screen redraw - but it is
+no callback in `apps/` runs longer than a screen redraw - but it is
 worth being explicit that a genuinely misbehaving callback (an infinite
 loop, a slow computation) would stall the whole desktop, since one C
 function call is the entire scheduling unit.

@@ -2,6 +2,9 @@
 CompileFlags:
   Add:
     - -Ikernel/include
+    - -Idesktop/include
+    - -Ilibraries/image/include
+    - -Ilibraries/audio/include
     - -ffreestanding
     - -nostdinc
     - -std=gnu11

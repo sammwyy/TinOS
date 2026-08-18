@@ -24,6 +24,12 @@ LD        := ld
 OBJCOPY   := objcopy
 GRUB_ISO  := $(shell command -v grub2-mkrescue 2>/dev/null || command -v grub-mkrescue 2>/dev/null)
 
+# Each self-contained unit (kernel core, the desktop/window manager, and the
+# image/audio format libraries) owns its own public headers under its own
+# include/tinos/ tree, so pulling one out only means dropping its -I flag.
+INCLUDES := -Ikernel/include -Idesktop/include \
+            -Ilibraries/image/include -Ilibraries/audio/include
+
 # Freestanding 32-bit code: no libc, no SSE/MMX (we never save FPU state),
 # no PIC, and no stack protector.  -mgeneral-regs-only keeps the compiler
 # from using vector registers inside interrupt paths.
@@ -32,14 +38,14 @@ CFLAGS := -m32 -std=gnu11 -O2 -g \
           -fno-pic -fno-pie -fno-asynchronous-unwind-tables \
           -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -mgeneral-regs-only \
           -Wall -Wextra -Wno-unused-parameter -Wno-address-of-packed-member \
-          -Ikernel/include -I$(BUILD)/generated
+          $(INCLUDES) -I$(BUILD)/generated
 ASFLAGS := -m32 -g -Ikernel/include
 LDFLAGS := -m elf_i386 -T boot/linker.ld -nostdlib -z noexecstack \
            --build-id=none -Map=$(MAP)
 LIBGCC  := $(shell $(CC) -m32 -print-libgcc-file-name)
 
 # --- sources ----------------------------------------------------------
-SRCS_C := $(sort $(shell find kernel -name '*.c'))
+SRCS_C := $(sort $(shell find kernel apps desktop libraries -name '*.c'))
 SRCS_S := $(sort $(shell find kernel boot -name '*.S'))
 OBJS   := $(patsubst %.c,$(BUILD)/%.c.o,$(SRCS_C)) \
           $(patsubst %.S,$(BUILD)/%.S.o,$(SRCS_S))
@@ -52,8 +58,8 @@ FORCE:
 
 # --- host unit tests --------------------------------------------------
 HOST_SRCS   := $(sort $(wildcard kernel/fs/*.c) $(wildcard kernel/sh/*.c) \
-                      kernel/audio/codec.c kernel/audio/wav.c \
-                      kernel/audio/vorbis.c kernel/lib/printf.c \
+                      libraries/audio/codec.c libraries/audio/wav.c \
+                      libraries/audio/vorbis.c kernel/lib/printf.c \
                       $(wildcard tests/host/*.c))
 HOST_BIN    := $(BUILD)/tests/tinos-tests
 # AddressSanitizer catches filesystem/parser memory bugs on the host, but the
@@ -62,7 +68,8 @@ HOST_SAN := $(shell echo 'int main(void){return 0;}' | \
               $(CC) -fsanitize=address,undefined -x c - -o /dev/null \
               >/dev/null 2>&1 && echo -fsanitize=address,undefined)
 HOST_CFLAGS := -std=gnu11 -g -O1 -Wall -Wextra -Wno-unused-parameter \
-               -DTINOS_HOST=1 -Ikernel/include -Itests/host $(HOST_SAN)
+               -DTINOS_HOST=1 -Ikernel/include -Ilibraries/audio/include \
+               -Itests/host $(HOST_SAN)
 
 .PHONY: all iso kernel resources run run-serial run-headless runvnc usb-image test check verify-reproducible clean distclean
 
@@ -96,7 +103,7 @@ $(BUILD)/%.c.o: %.c
 # stb_vorbis uses the x87 FPU for its portable transform math. It runs only
 # in the desktop loop, outside interrupt handlers, so this one translation
 # unit does not use the general-register-only interrupt-path restriction.
-$(BUILD)/kernel/audio/vorbis.c.o: CFLAGS := $(filter-out -mgeneral-regs-only,$(CFLAGS))
+$(BUILD)/libraries/audio/vorbis.c.o: CFLAGS := $(filter-out -mgeneral-regs-only,$(CFLAGS))
 
 $(BUILD)/%.S.o: %.S
 	@mkdir -p $(dir $@)
@@ -171,7 +178,8 @@ usb-image:
 	tools/make_usb_image.sh
 
 # --- tests ------------------------------------------------------------
-$(HOST_BIN): $(HOST_SRCS) $(wildcard kernel/include/tinos/*.h) $(wildcard tests/host/*.h)
+$(HOST_BIN): $(HOST_SRCS) $(wildcard kernel/include/tinos/*.h) \
+             $(wildcard libraries/audio/include/tinos/*.h) $(wildcard tests/host/*.h)
 	@mkdir -p $(dir $@)
 	$(CC) $(HOST_CFLAGS) $(HOST_SRCS) -o $@
 
