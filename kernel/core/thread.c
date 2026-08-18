@@ -32,12 +32,29 @@ struct kernel_thread {
     kernel_thread_t *wait_next;
     thread_wait_queue_t *waiting_on;
     char name[24];
+    /* FXSAVE area (x87 + MMX + SSE/SSE2 state, 512 bytes, 16-byte aligned
+     * as FXSAVE/FXRSTOR require). Threads that never touch SSE just carry
+     * this around unused. */
+    uint8_t fpu[512] __attribute__((aligned(16)));
 };
 
 extern void arch_context_switch(thread_context_t *from,
                                 const thread_context_t *to);
 extern void arch_resume_irq(void);
 extern void arch_resume_context(void);
+
+/* A freshly spawned thread has never run, so it has no saved FPU/SSE state
+ * to restore - the CPU's current register contents simply carry over
+ * untouched, which is safe since the thread cannot have read them yet. */
+static inline void fpu_save(void *buf)
+{
+    __asm__ volatile("fxsave (%0)" : : "r"(buf) : "memory");
+}
+
+static inline void fpu_restore(const void *buf)
+{
+    __asm__ volatile("fxrstor (%0)" : : "r"(buf) : "memory");
+}
 
 static kernel_thread_t threads[THREAD_MAX];
 static thread_context_t scheduler_context;
@@ -117,7 +134,9 @@ static void wait_remove(kernel_thread_t *thread)
 static void switch_to_scheduler(void)
 {
     kernel_thread_t *thread = current;
+    fpu_save(thread->fpu);
     arch_context_switch(&thread->context, &scheduler_context);
+    fpu_restore(thread->fpu);
 }
 
 kernel_thread_t *thread_spawn(const char *name, thread_entry_fn entry,
@@ -337,7 +356,15 @@ size_t thread_run(size_t budget)
 
         current = thread;
         thread->state = THREAD_RUNNING;
+        /* Only a thread resuming mid-instruction after a timer preemption
+         * needs its FPU state restored here - a first-ever run has none to
+         * restore, and a thread resuming from a cooperative yield restores
+         * its own state right after arch_context_switch() in
+         * switch_to_scheduler(). */
+        bool resuming_irq = thread->started && thread->irq_frame_valid;
         thread->started = true;
+        if (resuming_irq)
+            fpu_restore(thread->fpu);
         scheduler_switching = true;
         arch_context_switch(&scheduler_context, &thread->context);
         scheduler_switching = false;
@@ -397,6 +424,11 @@ regs_t *thread_preempt(regs_t *frame)
         return frame;
     }
 
+    /* `old` is mid-instruction (interrupted by the timer), so its FPU/SSE
+     * state is live in the hardware registers right now and must be
+     * captured before anything else can touch them. */
+    fpu_save(old->fpu);
+
     old->irq_frame_ptr = frame;
     old->irq_frame_valid = true;
     prepare_irq_resume(old);
@@ -405,8 +437,13 @@ regs_t *thread_preempt(regs_t *frame)
     current = next;
     next->state = THREAD_RUNNING;
     if (!next->started || !next->irq_frame_valid) {
+        /* Fresh thread, or resuming a cooperative yield: switch_to_scheduler()
+         * (or nothing, for a never-started thread) owns restoring FPU state
+         * for these cases - see the comment there. */
         prepare_cooperative_frame(next);
         next->irq_frame_valid = false;
+    } else {
+        fpu_restore(next->fpu);
     }
     next->started = true;
     return next->irq_frame_ptr;

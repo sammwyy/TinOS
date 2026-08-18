@@ -51,6 +51,34 @@ void cpu_brand_string(char *out, size_t size)
     strlcpy(out, p, size);
 }
 
+bool arch_fpu_init(void)
+{
+    uint32_t a, b, c, d;
+    cpuid(1, &a, &b, &c, &d);
+    bool fxsr = (d & (1u << 24)) != 0;
+    bool sse  = (d & (1u << 25)) != 0;
+    bool sse2 = (d & (1u << 26)) != 0;
+    if (!fxsr || !sse || !sse2)
+        return false;
+
+    uint32_t cr0;
+    __asm__ volatile("movl %%cr0, %0" : "=r"(cr0));
+    cr0 &= ~(1u << 2); /* EM: run x87/SSE natively, no software emulation */
+    cr0 |=  (1u << 1); /* MP: WAIT/FWAIT observe a pending task switch */
+    __asm__ volatile("movl %0, %%cr0" : : "r"(cr0));
+
+    uint32_t cr4;
+    __asm__ volatile("movl %%cr4, %0" : "=r"(cr4));
+    cr4 |= (1u << 9);  /* OSFXSR: OS supports FXSAVE/FXRSTOR, enables SSE */
+    cr4 |= (1u << 10); /* OSXMMEXCPT: OS handles unmasked SIMD FP faults */
+    __asm__ volatile("movl %0, %%cr4" : : "r"(cr4));
+
+    __asm__ volatile("fninit");
+    uint32_t mxcsr = 0x1F80; /* power-on default: all FP exceptions masked */
+    __asm__ volatile("ldmxcsr %0" : : "m"(mxcsr));
+    return true;
+}
+
 NORETURN void arch_halt(void)
 {
     for (;;)

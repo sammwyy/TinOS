@@ -461,8 +461,8 @@ to the nearest surviving ancestor.
 | Filesystem | `kernel/fs/` | node tree, path resolution, textual path helpers |
 | Shell | `kernel/sh/` | byte streams, tokeniser/parser, execution engine, 32 built-ins |
 | Networking | `kernel/net/` | Ethernet, ARP, IPv4, ICMP, UDP, DHCP, DNS, TCP/HTTP and async jobs |
-| Libraries | `libraries/image/` | PNG, JPEG and WebP decoding on top of stb_image/simplewebp |
-| Libraries | `libraries/audio/` | WAV and Ogg Vorbis decoding, codec dispatch |
+| Libraries | `libraries/image/` | PNG, JPEG and WebP decoding on top of stb_image/simplewebp; own kernel thread, real SSE2 |
+| Libraries | `libraries/audio/` | WAV and Ogg Vorbis decoding, codec dispatch; own kernel thread, real SSE2 |
 | Desktop | `desktop/` | window manager, widgets and icons, taskbar/start menu/event loop |
 | Applications | `apps/` | terminal, file explorer, text editor, system information, about |
 
@@ -535,6 +535,18 @@ remain available for predictable hand-off points.
 instead of spinning; an unlock or signal wakes it. Interrupt handlers should
 only publish data and wake a worker, never acquire a mutex or execute a
 blocking operation.
+
+**FPU/SSE is opt-in per translation unit.** Interrupt handlers and most of
+the kernel are compiled `-mgeneral-regs-only -mno-sse -mno-sse2`, and their
+FPU/SSE register contents are never saved - a wild use would silently
+corrupt whatever another thread left there. `libraries/image/` and
+`libraries/audio/` are the one exception: they run only on their own kernel
+thread (never inside an interrupt handler), get real `-msse2` codegen and
+auto-vectorization, and `kernel/core/thread.c` FXSAVEs/FXRSTORs a 512-byte
+area per thread on every context switch (cooperative or PIT-preempted) so
+two such threads - say a WAV decode and a JPEG decode - can freely
+interleave. `arch_fpu_init()` (`kernel/arch/x86/cpu.c`) enables CR0/CR4 and
+resets the FPU once at boot, before any thread runs.
 
 **Devices and drivers.** PCI enumeration publishes immutable bus records into
 the small driver model (`kernel/core/driver.c`). Drivers register a match and

@@ -113,7 +113,40 @@ def main():
         c.check(clock_a.size == clock_b.size == (1024, 768),
                 "desktop kept rendering full frames throughout (no freeze/crash)")
 
-        print("\nserial tail:\n", vm.serial()[-1500:])
+        # Now also open the WAV in Media Player so an audio decode/playback
+        # worker thread runs concurrently with (repeated) image decodes -
+        # this is the actual scenario that exercises per-thread FXSAVE/
+        # FXRSTOR: two different kernel threads both touching SSE state,
+        # interleaved by PIT preemption.
+        taskbar = shot("taskbar-before-refocus", settle=0.1)
+        files_tab = taskbar.find("Files")
+        if files_tab:
+            tx, ty = files_tab[0]
+            vm.mouse_click(tx, ty)
+        expl2 = shot("explorer-still-open", settle=0.2)
+        hits_wav = expl2.find("TEST.WAV")
+        if hits_wav:
+            wx, wy = hits_wav[0]
+            vm.mouse_click(wx, wy)
+            vm.mouse_click(wx, wy)
+            shot("player-opening", settle=0.5)
+            # Re-open the image a few times while audio plays to keep the
+            # SSE-using image decode thread interleaving with the SSE-using
+            # audio path.
+            for _ in range(4):
+                vm.mouse_click(x, y)
+                vm.mouse_click(x, y)
+                time.sleep(0.3)
+            concurrent = shot("concurrent-audio-image", settle=1.0)
+            c.check(concurrent.size == (1024, 768),
+                    "desktop still renders with audio+image decode threads interleaved")
+        else:
+            print("TEST.WAV not found in explorer; skipping concurrency stress step")
+
+        c.check("panic" not in vm.serial().lower(),
+                "no kernel panic in the serial log")
+
+        print("\nserial tail:\n", vm.serial()[-2000:])
     finally:
         vm.stop()
         vm.cleanup()

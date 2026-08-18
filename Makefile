@@ -100,10 +100,27 @@ $(BUILD)/%.c.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
-# stb_vorbis uses the x87 FPU for its portable transform math. It runs only
-# in the desktop loop, outside interrupt handlers, so this one translation
-# unit does not use the general-register-only interrupt-path restriction.
-$(BUILD)/libraries/audio/vorbis.c.o: CFLAGS := $(filter-out -mgeneral-regs-only,$(CFLAGS))
+# Image/audio decode never runs inside an interrupt handler - it runs on its
+# own kernel thread, and kernel/core/thread.c saves and restores each
+# thread's FXSAVE state (x87 + SSE) on every context switch. So unlike the
+# rest of the kernel, these translation units get real SSE2 codegen and
+# auto-vectorization instead of the interrupt-safe scalar baseline.
+# -mstackrealign is required because the hand-written thread bootstrap/
+# resume paths in arch/x86 do not themselves guarantee the 16-byte stack
+# alignment SSE's aligned loads/stores assume.
+CODEC_CFLAGS := $(filter-out -mgeneral-regs-only -mno-sse -mno-sse2,$(CFLAGS)) \
+                -msse2 -mstackrealign -ftree-vectorize
+$(BUILD)/libraries/audio/%.c.o: CFLAGS := $(CODEC_CFLAGS)
+# jpeg/png/webp decode has no reason to keep x87's excess precision and
+# stack-juggling; audio keeps the default (387) so vorbis.c's x87 transform
+# math, noted below, is unaffected.
+$(BUILD)/libraries/image/%.c.o: CFLAGS := $(CODEC_CFLAGS) -mfpmath=sse
+
+# stb_vorbis additionally wants the x87 stack specifically (not SSE scalar
+# math) for its portable transform math; CODEC_CFLAGS above already dropped
+# -mgeneral-regs-only for the whole libraries/audio/ directory, so nothing
+# further is needed here beyond documenting why the file is exempt from
+# -mfpmath=sse.
 
 $(BUILD)/%.S.o: %.S
 	@mkdir -p $(dir $@)

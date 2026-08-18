@@ -12,6 +12,11 @@
 #define STBI_NO_PIC
 #define STBI_NO_PNM
 #define STBI_TINOS
+/* stb_image's own hand-written SSE2 path pulls in GCC's <emmintrin.h>,
+ * which (via <mm_malloc.h>) assumes a hosted libc we don't have. The
+ * surrounding scalar C still gets vectorized by -ftree-vectorize, so
+ * nothing is lost by keeping stb_image's manual intrinsics off. */
+#define STBI_NO_SIMD
 #define STBI_MALLOC(size) kmalloc(size)
 #define STBI_REALLOC(pointer, size) krealloc(pointer, size)
 #define STBI_FREE(pointer) kfree(pointer)

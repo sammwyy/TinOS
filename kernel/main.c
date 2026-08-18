@@ -180,6 +180,10 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     idt_init();
     boot_step("Interrupt descriptor table and 8259A PIC ready");
 
+    if (!arch_fpu_init())
+        panic("CPU lacks FXSAVE/SSE2 - TinOS requires them");
+    boot_step("FPU/SSE2 enabled (FXSAVE state saved per kernel thread)");
+
     timer_init(TIMER_HZ);
     rtc_init();
     sti();

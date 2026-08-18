@@ -54,6 +54,12 @@ void rtc_read(rtc_time_t *out);
 void cpu_brand_string(char *out, size_t size);
 void cpu_vendor_string(char *out, size_t size);
 
+/* FPU / SSE ------------------------------------------------------------ */
+/* Enables native x87 + SSE/SSE2 (CR0.EM/MP, CR4.OSFXSR/OSXMMEXCPT) and
+ * resets the FPU to a safe default state. Returns false if the CPU lacks
+ * FXSR/SSE2, in which case no SSE-compiled code may ever run. */
+bool arch_fpu_init(void);
+
 /* Reboot / power off --------------------------------------------------- */
 NORETURN void arch_reboot(void);
 NORETURN void arch_shutdown(void);
