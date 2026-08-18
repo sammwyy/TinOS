@@ -23,6 +23,11 @@ typedef struct image_codec {
     struct image_codec *next;
 } image_codec_t;
 
+/* Registers the built-in PNG/JPEG/WebP codecs. Must run once, from a
+ * single-threaded context (kernel/main.c calls it at boot) - image_decode()
+ * itself may run on any SMP core, including several at once, and the codec
+ * registry has no lock of its own. */
+void image_codecs_init(void);
 void image_codec_register(image_codec_t *codec);
 image_result_t image_decode(const uint8_t *data, size_t size,
                             const char *extension, image_t *out);

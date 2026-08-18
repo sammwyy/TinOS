@@ -10,6 +10,7 @@
 
 #include <tinos/kernel.h>
 #include <tinos/mm.h>
+#include <tinos/spinlock.h>
 #include <tinos/string.h>
 
 #define MAX_FRAMES  (1u << 20) /* 4 GiB / 4 KiB */
@@ -24,6 +25,7 @@ static uint64_t used_frames;
 static uint64_t managed_frames;
 static size_t   regions;
 static size_t   search_hint;
+static spinlock_t pmm_lock = SPINLOCK_INIT;
 
 static inline bool frame_used(size_t idx)
 {
@@ -46,7 +48,7 @@ static inline void frame_mark_free(size_t idx)
     }
 }
 
-void pmm_reserve_range(uintptr_t base, size_t length)
+static void reserve_range_locked(uintptr_t base, size_t length)
 {
     if (length == 0)
         return;
@@ -54,6 +56,13 @@ void pmm_reserve_range(uintptr_t base, size_t length)
     size_t last  = (base + length - 1) / PAGE_SIZE;
     for (size_t i = first; i <= last && i < MAX_FRAMES; i++)
         frame_mark_used(i);
+}
+
+void pmm_reserve_range(uintptr_t base, size_t length)
+{
+    bool saved = spin_lock_irqsave(&pmm_lock);
+    reserve_range_locked(base, length);
+    spin_unlock_irqrestore(&pmm_lock, saved);
 }
 
 static void release_range(uint64_t base, uint64_t length)
@@ -127,10 +136,13 @@ void *pmm_alloc_contig(size_t frames)
     if (frames == 0)
         return NULL;
 
+    bool saved = spin_lock_irqsave(&pmm_lock);
+
     size_t run   = 0;
     size_t start = 0;
+    void  *result = NULL;
 
-    for (size_t pass = 0; pass < 2; pass++) {
+    for (size_t pass = 0; pass < 2 && !result; pass++) {
         size_t begin = pass == 0 ? search_hint : 0;
         size_t end   = pass == 0 ? MAX_FRAMES : search_hint;
         run          = 0;
@@ -151,11 +163,14 @@ void *pmm_alloc_contig(size_t frames)
                 for (size_t j = start; j < start + frames; j++)
                     frame_mark_used(j);
                 search_hint = start + frames;
-                return (void *)(uintptr_t)(start * PAGE_SIZE);
+                result = (void *)(uintptr_t)(start * PAGE_SIZE);
+                break;
             }
         }
     }
-    return NULL; /* out of physical memory */
+
+    spin_unlock_irqrestore(&pmm_lock, saved);
+    return result; /* NULL: out of physical memory */
 }
 
 void pmm_free_frame(void *frame)
@@ -168,11 +183,14 @@ void pmm_free_contig(void *base, size_t frames)
     uintptr_t addr = (uintptr_t)base;
     if (addr == 0 || (addr % PAGE_SIZE) != 0)
         return;
+
+    bool saved = spin_lock_irqsave(&pmm_lock);
     size_t first = addr / PAGE_SIZE;
     for (size_t i = 0; i < frames && first + i < MAX_FRAMES; i++)
         frame_mark_free(first + i);
     if (first < search_hint)
         search_hint = first;
+    spin_unlock_irqrestore(&pmm_lock, saved);
 }
 
 uint64_t pmm_total_bytes(void)

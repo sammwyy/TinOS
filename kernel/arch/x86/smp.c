@@ -10,6 +10,7 @@
 #include <tinos/mm.h>
 #include <tinos/smp.h>
 #include <tinos/string.h>
+#include <tinos/thread.h>
 #include <tinos/timer.h>
 
 #define AP_STACK_SIZE (16u * 1024u)
@@ -25,6 +26,12 @@ uint32_t ap_stack_top;
 
 static volatile uint32_t cpus_online = 1; /* the boot processor counts itself */
 static uint32_t lapic_phys_base;
+static uint32_t bsp_apic_id;
+
+uint32_t smp_bsp_apic_id(void)
+{
+    return bsp_apic_id;
+}
 
 /* Entered by trampoline.S once an AP has reached 32-bit protected mode
  * with paging still off and only the shared GDT loaded. Never returns. */
@@ -38,33 +45,44 @@ void ap_entry(void)
 
     uint32_t id = lapic_id();
     __atomic_fetch_add(&cpus_online, 1, __ATOMIC_SEQ_CST);
-    klog("[smp ] core apic_id=%u online (%u total)\n", id, cpus_online);
+    klog("[smp ] cpu apic=%u up (%u online)\n", id, cpus_online);
 
-    /* Parked: see tinos/smp.h for why nothing further happens here yet. */
-    for (;;)
-        __asm__ volatile("cli; hlt");
+    /* No local timer is set up for this core, so there is nothing to wake
+     * a halted core back up - spin cooperatively instead of hlt. Threads
+     * pinned to the boot processor (filesystem/network/gfx work) are
+     * simply never handed to this loop; see thread_spawn_pinned(). */
+    for (;;) {
+        if (thread_run(4) == 0)
+            __asm__ volatile("pause");
+    }
 }
 
 size_t smp_init(const mb_info_t *mbi)
 {
     acpi_madt_info_t madt;
-    if (!acpi_find_madt(mbi, &madt)) {
-        klog("[smp ] no ACPI MADT found, staying single-core\n");
+    bool has_madt = acpi_find_madt(mbi, &madt);
+
+    /* Bring up this core's own local APIC either way: even single-core,
+     * thread.c needs lapic_id() to answer "which CPU am I". 0xFEE00000 is
+     * the architectural default on every machine that has one at all. */
+    lapic_phys_base = has_madt ? madt.lapic_address : 0xFEE00000u;
+    lapic_init(lapic_phys_base);
+    bsp_apic_id = lapic_id();
+
+    if (!has_madt) {
+        klog("[smp ] no MADT, single-core (apic=%u)\n", bsp_apic_id);
         return cpus_online;
     }
     if (madt.cpu_count <= 1) {
-        klog("[smp ] MADT reports a single CPU\n");
+        klog("[smp ] MADT: 1 CPU (apic=%u)\n", bsp_apic_id);
         return cpus_online;
     }
 
-    lapic_phys_base = madt.lapic_address;
-    lapic_init(lapic_phys_base);
-    uint32_t bsp_id = lapic_id();
-
+    uint32_t bsp_id = bsp_apic_id;
     memcpy(ap_gdt_ptr_copy, gdt_pointer(), sizeof(ap_gdt_ptr_copy));
     uint8_t vector = (uint8_t)((uintptr_t)ap_trampoline_start >> 12);
 
-    klog("[smp ] MADT reports %u CPUs (boot processor apic_id=%u)\n",
+    klog("[smp ] MADT: %u CPUs (bsp apic=%u)\n",
         (uint32_t)madt.cpu_count, bsp_id);
 
     for (size_t i = 0; i < madt.cpu_count; i++) {
@@ -74,7 +92,7 @@ size_t smp_init(const mb_info_t *mbi)
 
         uint8_t *stack = (uint8_t *)kmalloc(AP_STACK_SIZE);
         if (!stack) {
-            klog("[smp ] out of memory bringing up apic_id=%u\n", id);
+            klog("[smp ] OOM bringing up apic=%u\n", id);
             break;
         }
         ap_stack_top =
@@ -97,7 +115,7 @@ size_t smp_init(const mb_info_t *mbi)
             __asm__ volatile("pause");
 
         if (cpus_online == before)
-            klog("[smp ] WARNING: apic_id=%u did not respond\n", id);
+            klog("[smp ] apic=%u did not respond\n", id);
     }
 
     return cpus_online;

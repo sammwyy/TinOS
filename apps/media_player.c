@@ -225,7 +225,7 @@ static bool player_load(media_player_t *p, size_t index)
     p->eof = false;
     p->message[0] = '\0';
     p->state = PLAYER_LOADING;
-    p->loader = thread_spawn("audio-load", player_load_worker, p);
+    p->loader = thread_spawn_pinned("audio-load", player_load_worker, p);
     if (!p->loader) {
         strlcpy(p->message, "Unable to start audio loader", sizeof(p->message));
         p->state = PLAYER_ERROR;
@@ -582,10 +582,10 @@ static bool player_on_tick(window_t *win)
                             sizeof(p->message));
                     p->state = PLAYER_ERROR;
                 } else {
-                    p->decode_worker = thread_spawn("audio-decode",
+                    p->decode_worker = thread_spawn_pinned("audio-decode",
                                                     player_decode_worker, p);
                     p->playback = p->decode_worker
-                        ? thread_spawn("audio-play", player_playback_worker, p)
+                        ? thread_spawn_pinned("audio-play", player_playback_worker, p)
                         : NULL;
                     if (!p->decode_worker || !p->playback) {
                         if (p->decode_worker) thread_cancel(p->decode_worker);
@@ -656,7 +656,7 @@ static bool player_on_tick(window_t *win)
             p->state = PLAYER_ERROR;
             return true;
         }
-        p->decode_worker = thread_spawn("audio-decode",
+        p->decode_worker = thread_spawn_pinned("audio-decode",
                                         player_decode_worker, p);
         if (!p->decode_worker) {
             strlcpy(p->message, "Unable to start audio decoder",
@@ -666,7 +666,7 @@ static bool player_on_tick(window_t *win)
             return true;
         }
         p->workers++;
-        p->playback = thread_spawn("audio-play", player_playback_worker, p);
+        p->playback = thread_spawn_pinned("audio-play", player_playback_worker, p);
         if (!p->playback) {
             strlcpy(p->message, "Unable to start audio playback",
                     sizeof(p->message));

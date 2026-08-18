@@ -11,6 +11,7 @@
 #include <tinos/heap.h>
 #include <tinos/kernel.h>
 #include <tinos/mm.h>
+#include <tinos/spinlock.h>
 #include <tinos/string.h>
 
 #define HEAP_MAGIC      0x4E4F5641u /* "TINOS" */
@@ -36,6 +37,10 @@ static size_t   stat_total;
 static size_t   stat_used;
 static size_t   stat_allocs;
 static size_t   stat_frees;
+/* One coarse lock over the whole allocator: arenas are typically a handful
+ * of 4 MiB regions and allocations are brief, so per-arena locking would
+ * only add complexity without a measurable win here. */
+static spinlock_t heap_lock = SPINLOCK_INIT;
 
 static const size_t block_overhead = ALIGN_UP(sizeof(block_t), HEAP_ALIGN);
 
@@ -107,7 +112,10 @@ static void *carve(block_t *b, size_t size)
     return (void *)((uintptr_t)b + block_overhead);
 }
 
-void *kmalloc(size_t size)
+/* Internal, lock-free bodies. Callers below must hold heap_lock. Keeping
+ * these separate lets krealloc() call both without recursively locking. */
+
+static void *kmalloc_locked(size_t size)
 {
     if (size == 0)
         size = 1;
@@ -125,18 +133,7 @@ void *kmalloc(size_t size)
     return carve(a->first, size);
 }
 
-void *kcalloc(size_t count, size_t size)
-{
-    size_t total = count * size;
-    if (count && total / count != size)
-        return NULL; /* overflow */
-    void *p = kmalloc(total);
-    if (p)
-        memset(p, 0, total);
-    return p;
-}
-
-void kfree(void *ptr)
+static void kfree_locked(void *ptr)
 {
     if (!ptr)
         return;
@@ -171,6 +168,32 @@ void kfree(void *ptr)
     }
 }
 
+void *kmalloc(size_t size)
+{
+    bool saved = spin_lock_irqsave(&heap_lock);
+    void *p = kmalloc_locked(size);
+    spin_unlock_irqrestore(&heap_lock, saved);
+    return p;
+}
+
+void *kcalloc(size_t count, size_t size)
+{
+    size_t total = count * size;
+    if (count && total / count != size)
+        return NULL; /* overflow */
+    void *p = kmalloc(total);
+    if (p)
+        memset(p, 0, total);
+    return p;
+}
+
+void kfree(void *ptr)
+{
+    bool saved = spin_lock_irqsave(&heap_lock);
+    kfree_locked(ptr);
+    spin_unlock_irqrestore(&heap_lock, saved);
+}
+
 void *krealloc(void *ptr, size_t size)
 {
     if (!ptr)
@@ -180,13 +203,17 @@ void *krealloc(void *ptr, size_t size)
         return NULL;
     }
 
+    bool saved = spin_lock_irqsave(&heap_lock);
+
     block_t *b = (block_t *)((uintptr_t)ptr - block_overhead);
     if (b->magic != HEAP_MAGIC)
         panic("heap: krealloc(%p) on a corrupted or foreign block", ptr);
 
     size_t want = ALIGN_UP(size, HEAP_ALIGN);
-    if (b->size >= want)
+    if (b->size >= want) {
+        spin_unlock_irqrestore(&heap_lock, saved);
         return ptr;
+    }
 
     /* Absorb the following block when it is free and large enough. */
     if (b->next && b->next->free &&
@@ -200,22 +227,28 @@ void *krealloc(void *ptr, size_t size)
         n->magic = 0;
         stat_total += block_overhead;
         stat_used += b->size;
+        spin_unlock_irqrestore(&heap_lock, saved);
         return ptr;
     }
 
-    void *fresh = kmalloc(size);
-    if (!fresh)
+    void *fresh = kmalloc_locked(size);
+    if (!fresh) {
+        spin_unlock_irqrestore(&heap_lock, saved);
         return NULL;
+    }
     memcpy(fresh, ptr, b->size < size ? b->size : size);
-    kfree(ptr);
+    kfree_locked(ptr);
+    spin_unlock_irqrestore(&heap_lock, saved);
     return fresh;
 }
 
 void heap_get_stats(heap_stats_t *out)
 {
+    bool saved = spin_lock_irqsave(&heap_lock);
     out->heap_total  = stat_total;
     out->heap_used   = stat_used;
     out->heap_free   = stat_total - stat_used;
     out->alloc_count = stat_allocs;
     out->free_count  = stat_frees;
+    spin_unlock_irqrestore(&heap_lock, saved);
 }

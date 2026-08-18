@@ -111,7 +111,7 @@ bool net_async_init(void)
     if (worker) return true;
     job_head = job_tail = result_head = result_tail = 0;
     next_id = 1;
-    worker = thread_spawn("net-worker", net_worker, NULL);
+    worker = thread_spawn_pinned("net-worker", net_worker, NULL);
     if (worker) thread_detach(worker);
     return worker != NULL;
 }

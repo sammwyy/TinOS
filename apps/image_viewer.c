@@ -3,6 +3,7 @@
 #include <tinos/image.h>
 #include <tinos/io.h>
 #include <tinos/printf.h>
+#include <tinos/spinlock.h>
 #include <tinos/string.h>
 #include <tinos/thread.h>
 #include <tinos/ui.h>
@@ -14,7 +15,12 @@ typedef struct {
     bool decode_done;
     bool closing;
     /* Non-NULL while a read or a decode is in flight; NULL once one of
-     * them has finished (successfully, on error, or cancelled). */
+     * them has finished (successfully, on error, or cancelled). Decoding
+     * runs on its own kernel thread, which any SMP core may run, so these
+     * fields (touched by both that thread and the desktop's main loop)
+     * need a real cross-core lock - irq_save()/irq_restore() only ever
+     * stopped the calling core's own interrupts. */
+    spinlock_t lock;
     fs_io_request_t *request;
     kernel_thread_t *decode_worker;
     char extension[16];
@@ -45,6 +51,7 @@ static void image_viewer_on_open(window_t *win, const char *arg)
     }
     win->priv = viewer;
     viewer->window = win;
+    spin_init(&viewer->lock);
 
     fs_node_t *node = NULL;
     if (!arg) {
@@ -81,11 +88,11 @@ static void image_viewer_decode_worker(void *arg)
     }
     fs_io_release(request);
 
-    bool saved = irq_save();
+    bool saved = spin_lock_irqsave(&viewer->lock);
     viewer->request = NULL;
     viewer->decode_done = true;
     bool destroy = viewer->closing;
-    irq_restore(saved);
+    spin_unlock_irqrestore(&viewer->lock, saved);
     if (destroy) {
         image_destroy(&viewer->image);
         kfree(viewer);
@@ -119,10 +126,10 @@ static bool image_viewer_on_tick(window_t *win)
     image_viewer_t *viewer = win->priv;
     if (!viewer)
         return false;
-    bool saved = irq_save();
+    bool saved = spin_lock_irqsave(&viewer->lock);
     bool done = viewer->decode_done;
     viewer->decode_done = false;
-    irq_restore(saved);
+    spin_unlock_irqrestore(&viewer->lock, saved);
     return done;
 }
 
@@ -138,10 +145,10 @@ static void image_viewer_on_close(window_t *win)
          * `closing` will be set) frees `viewer` itself once it finishes. */
         thread_cancel(viewer->decode_worker);
         thread_detach(viewer->decode_worker);
-        bool saved = irq_save();
+        bool saved = spin_lock_irqsave(&viewer->lock);
         viewer->closing = true;
         bool destroy_now = viewer->request == NULL;
-        irq_restore(saved);
+        spin_unlock_irqrestore(&viewer->lock, saved);
         if (destroy_now) {
             image_destroy(&viewer->image);
             kfree(viewer);

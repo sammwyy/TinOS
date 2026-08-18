@@ -23,6 +23,7 @@
 #include <tinos/fs.h>
 #include <tinos/gfx.h>
 #include <tinos/heap.h>
+#include <tinos/image.h>
 #include <tinos/input.h>
 #include <tinos/io.h>
 #include <tinos/kernel.h>
@@ -183,10 +184,10 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
 
     if (!arch_fpu_init())
         panic("CPU lacks FXSAVE/SSE2 - TinOS requires them");
-    boot_step("FPU/SSE2 enabled (FXSAVE state saved per kernel thread)");
+    boot_step("SSE2 enabled");
 
     paging_init();
-    boot_step("Paging enabled (identity-mapped, 4 MiB pages)");
+    boot_step("Paging enabled");
 
     timer_init(TIMER_HZ);
     rtc_init();
@@ -210,6 +211,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     virtio_blk_driver_register();
     audio_driver_register();
     audio_codecs_init();
+    image_codecs_init();
     boot_step("Memory manager online");
     boot_note("Asynchronous worker runtime online");
     boot_note("Kernel thread scheduler online (private stacks, PIT preemption)");
@@ -222,10 +224,9 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     /* --- SMP -------------------------------------------------------- */
     size_t cpus = smp_init(mbi);
     if (cpus > 1)
-        boot_step("%u CPU cores online (idle - see tinos/smp.h)",
-                  (uint32_t)cpus);
+        boot_step("SMP: %u CPUs online", (uint32_t)cpus);
     else
-        boot_note("Running single-core (no usable ACPI MADT, or one CPU)");
+        boot_note("SMP: single-core");
 
     /* --- input ---------------------------------------------------- */
     keyboard_init();
@@ -271,7 +272,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     if (usb_disks) {
         usb_mount.device = uhci_usb_device(0);
         usb_mount.mount_index = mounted;
-        kernel_thread_t *worker = thread_spawn("usb-mount", storage_mount_worker,
+        kernel_thread_t *worker = thread_spawn_pinned("usb-mount", storage_mount_worker,
                                                &usb_mount);
         if (worker)
             thread_detach(worker);

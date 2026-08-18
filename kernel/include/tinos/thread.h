@@ -34,6 +34,14 @@ struct thread_wait_queue {
 void thread_init(void);
 kernel_thread_t *thread_spawn(const char *name, thread_entry_fn entry,
                               void *arg);
+/* Like thread_spawn(), but the thread only ever runs on the boot processor.
+ * Use this for anything that touches the filesystem tree, storage/network
+ * drivers, or the desktop/gfx state - none of that is safe against a
+ * second core touching it concurrently yet. Plain thread_spawn() is for
+ * self-contained, in-memory compute (the audio/image decoders) that any
+ * SMP application processor can run in parallel. */
+kernel_thread_t *thread_spawn_pinned(const char *name, thread_entry_fn entry,
+                                     void *arg);
 int thread_join(kernel_thread_t *thread);
 void thread_detach(kernel_thread_t *thread);
 void thread_cancel(kernel_thread_t *thread);

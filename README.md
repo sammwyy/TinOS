@@ -554,23 +554,41 @@ two such threads - say a WAV decode and a JPEG decode - can freely
 interleave. `arch_fpu_init()` (`kernel/arch/x86/cpu.c`) enables CR0/CR4 and
 resets the FPU once at boot, before any thread runs.
 
-**SMP cores start up, then park.** `kernel/arch/x86/acpi.c` reads the RSDP
-GRUB hands off via the multiboot2 ACPI tag and walks RSDT/XSDT to the MADT
-to find every CPU's APIC ID and the local APIC's address; `lapic.c` then
-sends each one the INIT-SIPI-SIPI sequence. Every application processor
-boots through `trampoline.S` - 16-bit real mode code linked *and loaded*
-(`boot/linker.ld`'s `AT()` placement) at a fixed low physical address so
-its SIPI vector is known at build time - which loads the boot processor's
-own flat GDT, enters 32-bit protected mode, and calls into
-`smp.c:ap_entry()`, which activates the shared identity-mapped page
-directory, enables its own FPU/SSE, loads the shared IDT, and brings up
-its own local APIC. From there it parks in `cli; hlt`: distributing actual
-thread or app work across cores needs every shared kernel structure (the
-heap, the thread table, the filesystem tree, the compositor) to move from
-`irq_save()`/`irq_restore()` - which only stops the *calling* core's own
-interrupts - to real cross-core spinlocks, which does not exist yet. APs
-coming up is therefore proven (`tools/qemu_test.py` boots fine under
-`-smp N`; each core logs its APIC ID) but not yet useful.
+**SMP: real cores, sharing the thread pool.** `kernel/arch/x86/acpi.c` reads
+the RSDP GRUB hands off via the multiboot2 ACPI tag and walks RSDT/XSDT to
+the MADT to find every CPU's APIC ID and the local APIC's address;
+`lapic.c` then sends each one the INIT-SIPI-SIPI sequence. Every
+application processor boots through `trampoline.S` - 16-bit real mode code
+linked *and loaded* (`boot/linker.ld`'s `AT()` placement) at a fixed low
+physical address so its SIPI vector is known at build time - which loads
+the boot processor's own flat GDT, enters 32-bit protected mode, and calls
+into `smp.c:ap_entry()`, which activates the shared identity-mapped page
+directory, enables its own FPU/SSE, loads the shared IDT, brings up its
+own local APIC, and then runs `thread_run()` in a loop forever, pulling
+work from the same `threads[]` pool the boot processor's desktop tick
+does. `kernel/core/spinlock.c` gives the scheduler (and the heap and the
+physical frame allocator, both former `irq_save()`-only critical sections
+that a second core running concurrently would have raced) real cross-core
+locks - `irq_save()`/`irq_restore()` alone only ever stopped the *calling*
+core's own interrupts.
+
+Not everything is safe to hand to another core yet, since the filesystem
+tree, network stack, and audio device driver still have no locking beyond
+`irq_save()`. `thread_spawn_pinned()` keeps threads that touch any of that
+(file reads, storage/network workers, audio decode and playback) on the
+boot processor; plain `thread_spawn()` is for self-contained, in-memory
+compute - today, image decode - that any core can run. Verified with
+`tools/qemu_test.py` and a stress scenario that opens several images and
+an audio track at once under `-smp 4`.
+
+Getting here surfaced a real, pre-existing bug: `thread_run()` published
+`current` before setting `scheduler_switching`, leaving a window where a
+timer tick could preempt a thread before its stack switch had actually
+happened, capturing an interrupt frame that pointed at the *scheduler's*
+stack instead of the thread's own. It was latent on a single core (nothing
+ran long enough between yields to hit the window) and became reachable
+once a genuinely long-running, non-yielding thread - image decode - gave
+the timer something to land on mid-instruction.
 
 **Devices and drivers.** PCI enumeration publishes immutable bus records into
 the small driver model (`kernel/core/driver.c`). Drivers register a match and

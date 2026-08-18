@@ -69,7 +69,7 @@ fs_io_request_t *fs_read_all_async(const fs_node_t *file,
                                                request->size);
     request->completed = true;
 #else
-    request->worker = thread_spawn("fs-read", io_worker, request);
+    request->worker = thread_spawn_pinned("fs-read", io_worker, request);
     if (!request->worker) {
         kfree(request->data);
         kfree(request);
