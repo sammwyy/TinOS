@@ -65,6 +65,13 @@ possibly `libgcc.i686` and `grub2-tools-extra`.
 | `make test` | build and run the host-side unit tests |
 | `make resources` | compile `resources/icons/*.bmp` into the generated icon atlas |
 
+Every target above builds for `ARCH=x86` (`make ARCH=x86 ...`), the only
+target implemented today. The build picks its sources from
+`kernel/arch/$(ARCH)/` and `kernel/dev/$(ARCH)/`, so a future port (e.g.
+`ARCH=arm`) is a sibling directory tree, not a rewrite of this one; passing
+an `ARCH` with no matching directory fails the build immediately with a
+clear error instead of a wall of missing-symbol linker errors.
+
 The desktop icons live in `resources/icons/` and are always compiled into the
 shell atlas.  The legacy `icon_t` values remain as compatibility handles, but
 `widget_icon()` resolves them exclusively to those named bitmap resources;
@@ -453,11 +460,11 @@ to the nearest surviving ancestor.
 
 | Area | Files | What it does |
 |------|-------|--------------|
-| Boot | `boot/boot.S`, `boot/linker.ld`, `boot/grub.cfg` | Multiboot2 header, stack, entry; kernel linked at 1 MiB |
-| Arch | `kernel/arch/x86/` | GDT, IDT + 48 interrupt stubs, 8259A PIC, PIT, CMOS RTC, CPUID, reboot/power-off |
+| Boot | `kernel/arch/x86/boot.S`, `boot/linker.ld`, `boot/grub.cfg` | Multiboot2 header, stack, entry; kernel linked at 1 MiB |
+| Arch | `kernel/arch/x86/` | GDT, IDT + 48 interrupt stubs, 8259A PIC, PIT, CMOS RTC, CPUID, reboot/power-off, page tables, the Multiboot2 boot stub - everything specific to the target picked by `make ARCH=...` (only `x86` exists today; `kernel/dev/x86/` holds that target's drivers the same way) |
 | SMP | `kernel/arch/x86/{acpi,lapic,smp,trampoline.S}` | ACPI MADT parsing, local APIC, AP bring-up (see below) |
-| Memory | `kernel/mm/` | bitmap page frame allocator over the Multiboot2 memory map; first-fit heap with coalescing that grows by taking new arenas from the frame allocator |
-| Devices | `kernel/dev/` | COM1 serial log, VGA text console, PCI enumeration, Bochs DISPI mode setting, PS/2 keyboard, PS/2 mouse with IntelliMouse wheel support |
+| Memory | `kernel/mm/`, `kernel/arch/x86/{pmm,paging}.c` | bitmap page frame allocator over the Multiboot2 memory map and the x86 page tables (arch-specific, under `kernel/arch/x86/`); first-fit heap with coalescing that grows by taking new arenas from the frame allocator (portable, under `kernel/mm/`) |
+| Devices | `kernel/dev/`, `kernel/dev/x86/` | `kernel/dev/` holds transport-agnostic device logic (USB mass storage); `kernel/dev/x86/` holds this target's drivers: COM1 serial log, VGA text console, PCI enumeration, Bochs DISPI mode setting, PS/2 keyboard, PS/2 mouse with IntelliMouse wheel support |
 | Graphics | `kernel/gfx/` | double-buffered framebuffer with multi-region dirty upload, rectangles, lines, gradients, alpha blending, clipping stack, 8x16 bitmap font |
 | Filesystem | `kernel/fs/` | node tree, path resolution, textual path helpers |
 | Shell | `kernel/sh/` | byte streams, tokeniser/parser, execution engine, 32 built-ins |
@@ -479,7 +486,7 @@ out.
 ### Decisions worth knowing
 
 **i386, protected mode, identity-mapped paging.** The kernel runs in ring 0
-with a flat GDT and `kernel/mm/paging.c` maps every virtual address to the
+with a flat GDT and `kernel/arch/x86/paging.c` maps every virtual address to the
 identical physical address (one page directory of 4 MiB pages, `CR4.PSE`,
 covering the full 4 GiB space - no page tables to allocate, no address that
 could end up unmapped by mistake). Physical and virtual addresses are
@@ -579,7 +586,7 @@ reads, storage/network workers, and audio *loading*/*decoding*, which
 streams from the filesystem a chunk at a time) on the boot processor;
 plain `thread_spawn()` is for self-contained, in-memory compute that any
 core can run - today, image decode and audio *playback*. The AC'97 driver
-(`kernel/dev/audio.c`) and each media player's decode->playback ring
+(`kernel/dev/x86/audio.c`) and each media player's decode->playback ring
 buffer got their own spinlocks specifically so playback, which only reads
 already-decoded samples and pushes them at the device, could move off the
 boot processor safely. Verified with `tools/qemu_test.py` and a stress
@@ -698,11 +705,15 @@ are derived. No operating system code was copied from another project.
 ## Repository layout
 
 ```
-boot/            multiboot2 entry, linker script, GRUB config
+boot/            linker script, GRUB config (multiboot2 entry lives in arch/x86/)
 kernel/
-  arch/x86/      GDT, IDT, interrupt stubs, PIC, PIT, RTC, CPU, reset
+  arch/x86/      GDT, IDT, interrupt stubs, PIC, PIT, RTC, CPU, reset,
+                 page tables, physical memory allocator, boot.S - every
+                 target's own arch/<ARCH> tree looks like this one
   core/          logging, panic, clock glue, system info, self-tests
-  dev/           serial, VGA text, PCI, VBE/DISPI, keyboard, mouse
+  dev/           transport-agnostic device logic (USB mass storage);
+                 dev/x86/ holds this target's drivers: serial, VGA text,
+                 PCI, VBE/DISPI, keyboard, mouse
   gfx/           framebuffer engine and the generated font
   fs/            in-memory filesystem and path helpers
   net/           Ethernet and layered IPv4 networking protocols
@@ -710,7 +721,8 @@ kernel/
   ui/            window manager, widgets, desktop/taskbar/start menu
   apps/          terminal, explorer, editor, system information, about
   lib/           freestanding string and printf routines
-  mm/            page frame allocator and kernel heap
+  mm/            portable kernel heap (arch-specific page allocation and
+                 paging live under arch/<ARCH>/)
   include/tinos/  public headers for all of the above
 tests/host/      native unit tests and the kernel-service shims
 tools/           run script, USB image helper, QEMU test driver, screen OCR

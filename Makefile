@@ -18,6 +18,16 @@ KERNEL    := $(BUILD)/$(NAME).elf
 ISO       := $(BUILD)/$(NAME).iso
 MAP       := $(BUILD)/$(NAME).map
 
+# Selects which kernel/arch/<ARCH> and kernel/dev/<ARCH> subtree gets built,
+# e.g. `make ARCH=arm`. Only x86 exists today; everything platform-specific
+# (CPU bring-up, page tables, the boot stub, and every driver that speaks
+# port I/O or PCI) lives under an <ARCH> directory so a future port adds a
+# sibling tree instead of touching this one.
+ARCH      := x86
+ifeq ($(wildcard kernel/arch/$(ARCH)),)
+$(error unknown ARCH '$(ARCH)' - no kernel/arch/$(ARCH) directory)
+endif
+
 # --- toolchain --------------------------------------------------------
 CC        := gcc
 LD        := ld
@@ -45,8 +55,20 @@ LDFLAGS := -m elf_i386 -T boot/linker.ld -nostdlib -z noexecstack \
 LIBGCC  := $(shell $(CC) -m32 -print-libgcc-file-name)
 
 # --- sources ----------------------------------------------------------
-SRCS_C := $(sort $(shell find kernel apps desktop libraries -name '*.c'))
-SRCS_S := $(sort $(shell find kernel boot -name '*.S'))
+# kernel/core, fs, gfx, lib, mm, net and sh hold no arch-specific code -
+# they build for every target. kernel/dev/*.c (flat, not in an <ARCH>
+# subdir) is likewise transport-agnostic (e.g. usb_msc.c). Everything
+# under kernel/arch/$(ARCH) and kernel/dev/$(ARCH) is that target's own:
+# CPU/platform bring-up, page tables, the boot stub, and drivers tied to
+# that platform's bus/IO model.
+SRCS_C := $(sort kernel/main.c \
+                  $(shell find kernel/core kernel/fs kernel/gfx kernel/lib \
+                          kernel/mm kernel/net kernel/sh apps desktop \
+                          libraries -name '*.c') \
+                  $(wildcard kernel/dev/*.c) \
+                  $(shell find kernel/dev/$(ARCH) kernel/arch/$(ARCH) \
+                          -name '*.c'))
+SRCS_S := $(sort $(shell find kernel/arch/$(ARCH) -name '*.S'))
 OBJS   := $(patsubst %.c,$(BUILD)/%.c.o,$(SRCS_C)) \
           $(patsubst %.S,$(BUILD)/%.S.o,$(SRCS_S))
 DEPS   := $(OBJS:.o=.d)
