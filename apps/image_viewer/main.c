@@ -5,14 +5,16 @@
 
 window_t *app_image_viewer_open(const char *arg);
 
-void app_main(const tinos_abi_t *abi)
+void app_main(const tinos_abi_t *abi, const char *name, const char *summary,
+             const char *category, icon_t icon, image_t custom_icon)
 {
     tinos_abi_install(abi);
     apps_register(&(app_entry_t){
-        .name     = "Image Viewer",
-        .summary  = "view JPG, PNG and WebP images",
-        .category = "Multimedia",
-        .icon     = ICON_FILE,
-        .launch   = app_image_viewer_open,
+        .name        = name,
+        .summary     = summary,
+        .category    = category,
+        .icon        = icon,
+        .custom_icon = custom_icon,
+        .launch      = app_image_viewer_open,
     });
 }

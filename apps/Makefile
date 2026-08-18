@@ -38,7 +38,7 @@ SHARED_SRCS := $(ROOT)/apps/lib/shim.c \
 
 APP_DIRS := $(patsubst %/,%,$(wildcard $(ROOT)/apps/*/))
 APPS     := $(filter-out lib,$(notdir $(APP_DIRS)))
-ELFS     := $(patsubst %,$(BUILD)/%.elf,$(APPS))
+ELFS     := $(foreach a,$(APPS),$(BUILD)/$(a)/$(a).elf)
 
 # One fixed, non-overlapping 1 MiB slot per app inside the arena
 # kernel/include/tinos/native_app.h reserves (NATIVE_APP_BASE upward);
@@ -49,9 +49,10 @@ NATIVE_APP_SLOT_control_panel := 0x01100000
 NATIVE_APP_SLOT_editor        := 0x01200000
 NATIVE_APP_SLOT_explorer      := 0x01300000
 NATIVE_APP_SLOT_image_viewer  := 0x01400000
-NATIVE_APP_SLOT_info          := 0x01500000
-NATIVE_APP_SLOT_media_player  := 0x01600000
-NATIVE_APP_SLOT_terminal      := 0x01700000
+NATIVE_APP_SLOT_media_player  := 0x01500000
+NATIVE_APP_SLOT_terminal      := 0x01600000
+NATIVE_APP_SLOT_about         := 0x01700000
+NATIVE_APP_SLOT_sysinfo       := 0x01800000
 
 .PHONY: all clean
 all: $(ELFS)
@@ -60,6 +61,12 @@ $(BUILD)/obj/%.o: $(ROOT)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# Each app's package directory carries its ELF alongside the two files
+# kernel/main.c reads once it is unpacked from the ramfs: app.conf (name,
+# summary, category - see kernel/main.c's parse_manifest()) and an
+# optional icon.png (see load_icon()). Bundling them here, next to the
+# binary they describe, means a new app is exactly one new apps/<name>/
+# directory - nothing to register in the top-level Makefile.
 define APP_template
 APP_SRCS_$(1) := $$(wildcard $(ROOT)/apps/$(1)/*.c) $$(SHARED_SRCS)
 APP_OBJS_$(1) := $$(patsubst $(ROOT)/%.c,$(BUILD)/obj/%.o,$$(APP_SRCS_$(1)))
@@ -68,10 +75,15 @@ ifeq ($$(NATIVE_APP_SLOT_$(1)),)
 $$(error no NATIVE_APP_SLOT_$(1) address - add one next to the others in apps/Makefile)
 endif
 
-$(BUILD)/$(1).elf: $$(APP_OBJS_$(1)) $(ROOT)/apps/link.ld
-	@mkdir -p $(BUILD)
+$(BUILD)/$(1)/$(1).elf: $$(APP_OBJS_$(1)) $(ROOT)/apps/link.ld \
+                        $(ROOT)/apps/$(1)/app.conf
+	@mkdir -p $(BUILD)/$(1)
 	$(LD) $(LDFLAGS) --defsym=NATIVE_APP_LOAD_ADDR=$$(NATIVE_APP_SLOT_$(1)) \
 		-o $$@ $$(APP_OBJS_$(1)) $(LIBGCC)
+	@cp $(ROOT)/apps/$(1)/app.conf $(BUILD)/$(1)/app.conf
+	@if [ -f $(ROOT)/apps/$(1)/icon.png ]; then \
+		cp $(ROOT)/apps/$(1)/icon.png $(BUILD)/$(1)/icon.png; \
+	fi
 	@echo "  native app: $(1) ($$$$(stat -c%s $$@) bytes)"
 endef
 

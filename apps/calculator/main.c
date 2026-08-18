@@ -1,6 +1,3 @@
-/* Entry point of the standalone calculator.elf. The linker script points
- * e_entry straight at app_main(), so the loader can call it with no crt0
- * stub in between. */
 #include <tinos/abi.h>
 #include <tinos/ui.h>
 
@@ -8,14 +5,16 @@
 
 window_t *app_calculator_open(const char *arg);
 
-void app_main(const tinos_abi_t *abi)
+void app_main(const tinos_abi_t *abi, const char *name, const char *summary,
+             const char *category, icon_t icon, image_t custom_icon)
 {
     tinos_abi_install(abi);
     apps_register(&(app_entry_t){
-        .name     = "Calculator",
-        .summary  = "integer arithmetic",
-        .category = "Accessories",
-        .icon     = ICON_CHIP,
-        .launch   = app_calculator_open,
+        .name        = name,
+        .summary     = summary,
+        .category    = category,
+        .icon        = icon,
+        .custom_icon = custom_icon,
+        .launch      = app_calculator_open,
     });
 }

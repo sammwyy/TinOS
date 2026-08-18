@@ -159,9 +159,11 @@ $(KERNEL): $(OBJS) $(ICON_GEN_OBJ) $(ICON_GEN_STAMP) boot/linker.ld
 kernel: $(KERNEL)
 
 # --- native apps and the ramfs --------------------------------------
-# apps/*/ each build to their own freestanding ELF (own Makefile, own
-# linker script - see apps/Makefile); ramfs.tar bundles them for GRUB to
-# hand to the kernel as a module2 payload (boot/grub.cfg), which
+# apps/<name>/ each build to their own package directory - an ELF plus the
+# app.conf manifest and optional icon.png next to it (own Makefile, own
+# linker script - see apps/Makefile); ramfs.tar bundles those directories
+# (everything under $(NATIVE_BUILD) except its obj/ intermediates) for
+# GRUB to hand to the kernel as a module2 payload (boot/grub.cfg), which
 # kernel/fs/tar.c unpacks into /apps and kernel/core/elf.c loads and runs
 # (see kernel/main.c's load_native_apps()).
 NATIVE_BUILD := $(BUILD)/native
@@ -177,7 +179,8 @@ native-apps:
 $(RAMFS): native-apps
 	@mkdir -p $(dir $@)
 	@cd $(NATIVE_BUILD) && tar --format=ustar --sort=name --mtime=@0 \
-		--owner=0 --group=0 --numeric-owner -cf $(abspath $@) *.elf
+		--owner=0 --group=0 --numeric-owner -cf $(abspath $@) \
+		$$(ls | grep -v '^obj$$')
 
 # --- bootable ISO -----------------------------------------------------
 # -d .../i386-pc keeps the image BIOS-only (no EFI payload), which is what

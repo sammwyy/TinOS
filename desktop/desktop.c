@@ -538,18 +538,7 @@ static void draw_menu_row(size_t i, rect_t item, bool selected)
     }
 
     const char *label;
-    icon_t      icon;
     bool        indented = row->kind == ROW_APP;
-    if (row->kind == ROW_APP) {
-        label = row->app->name;
-        icon  = row->app->icon;
-    } else if (row->kind == ROW_RESTART) {
-        label = "Restart";
-        icon  = ICON_RESTART;
-    } else {
-        label = "Shut Down";
-        icon  = ICON_POWER;
-    }
 
     if (selected) {
         gfx_fill_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT_DARK);
@@ -557,7 +546,14 @@ static void draw_menu_row(size_t i, rect_t item, bool selected)
     }
     int ix = item.x + (indented ? 24 : 6);
     int tx = item.x + (indented ? 50 : 32);
-    widget_icon(ix, item.y + (item.h - 18) / 2, 18, icon);
+    if (row->kind == ROW_APP) {
+        label = row->app->name;
+        app_icon_draw(ix, item.y + (item.h - 18) / 2, 18, row->app);
+    } else {
+        label = row->kind == ROW_RESTART ? "Restart" : "Shut Down";
+        widget_icon(ix, item.y + (item.h - 18) / 2, 18,
+                    row->kind == ROW_RESTART ? ICON_RESTART : ICON_POWER);
+    }
     gfx_text(tx, item.y + (item.h - FONT_H) / 2, label,
              selected ? RGB(0xff, 0xff, 0xff) : COLOR_TEXT);
 }
@@ -583,7 +579,7 @@ static void draw_menu_submenu(void)
             gfx_fill_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT_DARK);
             gfx_rect(item.x, item.y, item.w, item.h, COLOR_ACCENT);
         }
-        widget_icon(item.x + 8, item.y + (item.h - 18) / 2, 18, app->icon);
+        app_icon_draw(item.x + 8, item.y + (item.h - 18) / 2, 18, app);
         gfx_text(item.x + 34, item.y + (item.h - FONT_H) / 2, app->name,
                  selected ? RGB(0xff, 0xff, 0xff) : COLOR_TEXT);
         n++;

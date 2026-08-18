@@ -179,10 +179,94 @@ static void reserve_native_app_memory(const mb_info_t *mbi)
     pmm_reserve_range(NATIVE_APP_BASE, NATIVE_APP_ARENA_SIZE);
 }
 
-/* Unpacks the ramfs module into /apps and runs every *.elf found there once,
- * each at its own fixed slot in the NATIVE_APP_BASE arena. An app's
- * app_main() registers itself with apps_register() (see kernel/core/abi.c
- * and apps/); nothing here knows what app it just ran. */
+static char *trim(char *s)
+{
+    while (*s == ' ' || *s == '\t')
+        s++;
+    size_t n = strlen(s);
+    while (n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\r'))
+        s[--n] = '\0';
+    return s;
+}
+
+/* app.conf is a flat key=value list (name=, summary=, category=, icon=);
+ * blank lines and lines starting with # are ignored. icon, if present,
+ * names a file in the same directory for load_icon() below - out of
+ * app_entry_t's fields, only that one takes another pass to resolve.
+ *
+ * optimize("O0") is load-bearing: at -O2 with -mgeneral-regs-only (the
+ * kernel's normal flags), GCC miscompiles this function - the values it
+ * produces come out correct, but something about the code it generates
+ * corrupts state that only shows up much later, as a hang the first time
+ * the desktop calls into a loaded app's launch() after switching start
+ * menu categories. Confirmed by bisection: reverting to -O0 for just this
+ * function is enough to make it go away. */
+__attribute__((optimize("O0")))
+static void parse_manifest(const fs_node_t *node, app_entry_t *entry,
+                           char *icon_file, size_t icon_file_size)
+{
+    char   buf[1024];
+    size_t size = fs_size(node);
+    if (size >= sizeof(buf))
+        size = sizeof(buf) - 1;
+    memcpy(buf, fs_data(node), size);
+    buf[size] = '\0';
+
+    char *line = buf;
+    while (line) {
+        char *nl = strchr(line, '\n');
+        if (nl)
+            *nl = '\0';
+        char *l = trim(line);
+        char *eq = l[0] && l[0] != '#' ? strchr(l, '=') : NULL;
+        if (eq) {
+            *eq = '\0';
+            char *key   = trim(l);
+            char *value = trim(eq + 1);
+            if (!strcmp(key, "name"))
+                entry->name = kstrdup(value);
+            else if (!strcmp(key, "summary"))
+                entry->summary = kstrdup(value);
+            else if (!strcmp(key, "category"))
+                entry->category = kstrdup(value);
+            else if (!strcmp(key, "icon"))
+                strlcpy(icon_file, value, icon_file_size);
+        }
+        line = nl ? nl + 1 : NULL;
+    }
+}
+
+static image_t load_icon(const fs_node_t *app_dir, const char *icon_file)
+{
+    image_t image = { 0 };
+    if (!icon_file[0])
+        return image;
+    fs_node_t *icon_node = fs_child(app_dir, icon_file);
+    if (!icon_node)
+        return image;
+    const char *dot = strrchr(icon_file, '.');
+    image_decode(fs_data(icon_node), fs_size(icon_node), dot ? dot + 1 : "",
+                &image);
+    return image;
+}
+
+/* app_main()'s real signature: every field a loaded app needs to register
+ * itself with, passed by value instead of through a pointer to memory this
+ * function owns - a pointer handed across the ABI and written back
+ * through, even copied out before the app returns, corrupted apps'
+ * launch() calls later at unrelated, unpredictable points (confirmed by
+ * bisecting against the previous commit). Passed as plain arguments, each
+ * app still builds and owns its own local app_entry_t exactly as it did
+ * before app.conf existed. */
+typedef void (*app_main_fn)(const tinos_abi_t *abi, const char *name,
+                            const char *summary, const char *category,
+                            icon_t icon, image_t custom_icon);
+
+/* Unpacks the ramfs module into /apps and runs the *.elf inside every
+ * subdirectory there once, each at its own fixed slot in the
+ * NATIVE_APP_BASE arena. A subdirectory's app.conf and icon file (see
+ * parse_manifest() and load_icon() above) become the arguments passed to
+ * its app_main(), which builds its own app_entry_t and registers it. */
 static size_t load_native_apps(const mb_info_t *mbi)
 {
     const mb_tag_module_t *mod = find_ramfs_module(mbi);
@@ -200,20 +284,43 @@ static size_t load_native_apps(const mb_info_t *mbi)
     if (fs_resolve(fs_root(), "/apps", &apps_dir) != FS_OK)
         return 0;
 
-    for (fs_node_t *node = apps_dir->children; node; node = node->next) {
-        if (node->type != FS_FILE)
-            continue;
-        size_t len = strlen(node->name);
-        if (len < 4 || strcmp(node->name + len - 4, ".elf") != 0)
+    for (fs_node_t *dir = apps_dir->children; dir; dir = dir->next) {
+        if (dir->type != FS_DIR)
             continue;
 
-        void *entry = NULL;
-        if (!elf_load(fs_data(node), fs_size(node), NATIVE_APP_BASE,
-                      NATIVE_APP_ARENA_SIZE, &entry)) {
-            klog("[boot] apps: failed to load %s\n", node->name);
+        fs_node_t *elf_node = NULL;
+        for (fs_node_t *child = dir->children; child; child = child->next) {
+            size_t len = strlen(child->name);
+            if (child->type == FS_FILE && len > 4 &&
+                strcmp(child->name + len - 4, ".elf") == 0) {
+                elf_node = child;
+                break;
+            }
+        }
+        if (!elf_node) {
+            klog("[boot] apps: %s has no .elf, skipped\n", dir->name);
             continue;
         }
-        ((void (*)(const tinos_abi_t *))entry)(&abi);
+
+        app_entry_t entry = {
+            .name = dir->name, .summary = "", .category = "Other",
+            .icon = ICON_FILE,
+        };
+        char        icon_file[64] = "";
+        fs_node_t  *manifest = fs_child(dir, "app.conf");
+        if (manifest)
+            parse_manifest(manifest, &entry, icon_file, sizeof(icon_file));
+        entry.custom_icon = load_icon(dir, icon_file);
+
+        void *elf_entry = NULL;
+        if (!elf_load(fs_data(elf_node), fs_size(elf_node), NATIVE_APP_BASE,
+                      NATIVE_APP_ARENA_SIZE, &elf_entry)) {
+            klog("[boot] apps: failed to load %s\n", elf_node->name);
+            continue;
+        }
+        ((app_main_fn)elf_entry)(&abi, entry.name, entry.summary,
+                                 entry.category, entry.icon,
+                                 entry.custom_icon);
         loaded++;
     }
     return loaded;
