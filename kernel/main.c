@@ -7,6 +7,7 @@
  * never returns.
  */
 
+#include <tinos/abi.h>
 #include <tinos/arch.h>
 #include <tinos/async.h>
 #include <tinos/audio.h>
@@ -20,6 +21,7 @@
 #include <tinos/desktop.h>
 #include <tinos/driver.h>
 #include <tinos/e1000.h>
+#include <tinos/elf.h>
 #include <tinos/fs.h>
 #include <tinos/gfx.h>
 #include <tinos/heap.h>
@@ -28,6 +30,7 @@
 #include <tinos/io.h>
 #include <tinos/kernel.h>
 #include <tinos/mm.h>
+#include <tinos/native_app.h>
 #include <tinos/net.h>
 #include <tinos/multiboot2.h>
 #include <tinos/pci.h>
@@ -35,6 +38,7 @@
 #include <tinos/selftest.h>
 #include <tinos/smp.h>
 #include <tinos/string.h>
+#include <tinos/tar.h>
 #include <tinos/thread.h>
 #include <tinos/timer.h>
 
@@ -153,6 +157,68 @@ static void read_multiboot_strings(const mb_info_t *mbi, const char **loader)
     }
 }
 
+static const mb_tag_module_t *find_ramfs_module(const mb_info_t *mbi)
+{
+    MB_FOR_EACH_TAG(mbi, tag)
+    {
+        if (tag->type == MB_TAG_MODULE)
+            return (const mb_tag_module_t *)tag;
+    }
+    return NULL;
+}
+
+/* GRUB loads module2 payloads into RAM before the kernel runs, at addresses
+ * the pmm bitmap does not know about yet. Called right after pmm_init(),
+ * before heap_init() takes its first frame, so nothing can land on top of
+ * the ramfs or the arena native apps get loaded into. */
+static void reserve_native_app_memory(const mb_info_t *mbi)
+{
+    const mb_tag_module_t *mod = find_ramfs_module(mbi);
+    if (mod)
+        pmm_reserve_range(mod->mod_start, mod->mod_end - mod->mod_start);
+    pmm_reserve_range(NATIVE_APP_BASE, NATIVE_APP_ARENA_SIZE);
+}
+
+/* Unpacks the ramfs module into /apps and runs every *.elf found there once,
+ * each at its own fixed slot in the NATIVE_APP_BASE arena. An app's
+ * app_main() registers itself with apps_register() (see kernel/core/abi.c
+ * and apps/native/); nothing here knows what app it just ran. */
+static size_t load_native_apps(const mb_info_t *mbi)
+{
+    const mb_tag_module_t *mod = find_ramfs_module(mbi);
+    if (!mod)
+        return 0;
+
+    const void *image = (const void *)(uintptr_t)mod->mod_start;
+    size_t      size   = mod->mod_end - mod->mod_start;
+    if (tar_extract(image, size, "/apps") == 0)
+        return 0;
+
+    tinos_abi_t abi = tinos_abi_build();
+    size_t      loaded = 0;
+    fs_node_t  *apps_dir;
+    if (fs_resolve(fs_root(), "/apps", &apps_dir) != FS_OK)
+        return 0;
+
+    for (fs_node_t *node = apps_dir->children; node; node = node->next) {
+        if (node->type != FS_FILE)
+            continue;
+        size_t len = strlen(node->name);
+        if (len < 4 || strcmp(node->name + len - 4, ".elf") != 0)
+            continue;
+
+        void *entry = NULL;
+        if (!elf_load(fs_data(node), fs_size(node), NATIVE_APP_BASE,
+                      NATIVE_APP_ARENA_SIZE, &entry)) {
+            klog("[boot] apps: failed to load %s\n", node->name);
+            continue;
+        }
+        ((void (*)(const tinos_abi_t *))entry)(&abi);
+        loaded++;
+    }
+    return loaded;
+}
+
 void kmain(uint32_t magic, uint32_t mbi_addr)
 {
     const mb_info_t *mbi = (const mb_info_t *)(uintptr_t)mbi_addr;
@@ -201,6 +267,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
 
     /* Memory */
     pmm_init(mbi);
+    reserve_native_app_memory(mbi);
     heap_init();
     async_init();
     bus_init();
@@ -249,6 +316,15 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     for (size_t i = 0; i < ata_pio_count(); i++)
         storage_mount_device(ata_pio_device(i), &mounted);
     boot_note("vfs: %u nodes in tree", (uint32_t)fs_node_count());
+    pause_ms(BOOT_STEP_DELAY_MS);
+
+    /* Native applications */
+    size_t native_apps = load_native_apps(mbi);
+    if (native_apps)
+        boot_step("apps: loaded %u native app(s) from the ramfs",
+                  (uint32_t)native_apps);
+    else
+        boot_note("apps: no ramfs module, no native apps loaded");
     pause_ms(BOOT_STEP_DELAY_MS);
 
     /* Optional self test */

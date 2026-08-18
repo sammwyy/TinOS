@@ -11,6 +11,7 @@ enum {
     MB_TAG_END          = 0,
     MB_TAG_CMDLINE      = 1,
     MB_TAG_BOOT_LOADER  = 2,
+    MB_TAG_MODULE       = 3,
     MB_TAG_BASIC_MEMINFO = 4,
     MB_TAG_BOOTDEV      = 5,
     MB_TAG_MMAP         = 6,
@@ -41,6 +42,17 @@ typedef struct PACKED {
     uint32_t mem_lower; /* KiB below 1 MiB */
     uint32_t mem_upper; /* KiB above 1 MiB */
 } mb_tag_meminfo_t;
+
+/* A GRUB "module2" load: an arbitrary blob placed in RAM alongside the
+ * kernel before boot. Used to hand the ramfs.tar archive over without a
+ * filesystem driver for the boot media itself. */
+typedef struct PACKED {
+    uint32_t type;
+    uint32_t size;
+    uint32_t mod_start;
+    uint32_t mod_end;
+    char     cmdline[0];
+} mb_tag_module_t;
 
 #define MB_MEMORY_AVAILABLE 1
 #define MB_MEMORY_ACPI_RECLAIMABLE 3

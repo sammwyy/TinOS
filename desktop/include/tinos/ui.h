@@ -185,13 +185,18 @@ typedef struct {
 } app_entry_t;
 
 const app_entry_t *apps_registry(size_t *count);
+/* Adds an entry to the registry at runtime, e.g. for a native app that just
+ * loaded from the ramfs. False when the registry is already full. */
+bool apps_register(const app_entry_t *entry);
 
 window_t *app_terminal_open(const char *cwd);
 window_t *app_explorer_open(const char *path);
 window_t *app_editor_open(const char *path);
 window_t *app_image_viewer_open(const char *path);
 window_t *app_media_player_open(const char *path);
-window_t *app_calculator_open(const char *arg);
+/* app_calculator_open() is not declared here: it ships as a native ELF
+ * (apps/native/calculator/) and reaches the registry through
+ * apps_register(), not a link-time symbol. */
 window_t *app_control_panel_open(const char *arg);
 window_t *app_about_open(const char *arg);
 window_t *app_sysinfo_open(const char *arg);

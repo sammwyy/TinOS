@@ -473,6 +473,7 @@ to the nearest surviving ancestor.
 | Libraries | `libraries/audio/` | WAV and Ogg Vorbis decoding, codec dispatch; own kernel thread, real SSE2 |
 | Desktop | `desktop/` | window manager, widgets and icons, taskbar/start menu/event loop |
 | Applications | `apps/` | terminal, file explorer, text editor, system information, about |
+| Native applications | `apps/native/`, `kernel/core/{elf,abi}.c`, `kernel/fs/tar.c` | apps built as their own freestanding ELF binaries (own Makefile, own linker script), bundled into `build/ramfs.tar`, handed to the kernel as a Multiboot2 module and loaded at boot (see below) |
 
 Each self-contained unit owns its own public headers under its own
 `include/tinos/` tree - `kernel/include/tinos/` for the kernel core (shared
@@ -611,6 +612,37 @@ an API that can later absorb virtual-to-physical mappings. The e1000 driver
 backs the current Ethernet stack; networking is intentionally a small
 polling-oriented kernel service rather than a userspace socket subsystem.
 
+**Native apps: fixed-address ELF, no processes.** Everything in `apps/`
+still links straight into the kernel image and calls kernel functions
+directly, in ring 0, sharing the kernel's own address space - TinOS has no
+user mode, no per-process page tables, and no syscalls. `apps/native/`
+apps (currently just the calculator) are a step short of that: each is its
+own freestanding ELF32 binary, built by `apps/native/Makefile` against
+`apps/native/link.ld`, which links it at a fixed address inside the arena
+`kernel/include/tinos/native_app.h` reserves (`kernel/arch/x86/pmm.c`
+never hands those frames to anything else). `make` bundles every native
+app's `.elf` into `build/ramfs.tar` and GRUB loads it as a Multiboot2
+module (`boot/grub.cfg`'s `module2` line); at boot, `kernel/fs/tar.c`
+unpacks it into `/apps` and `kernel/core/elf.c` copies each `.elf`'s
+`PT_LOAD` segments to their literal (fixed, pre-reserved) `p_vaddr` -
+correct only because paging identity-maps the whole address space, so
+there is no relocation processing to do.
+
+Because the app is a separate link, it cannot call kernel functions by
+symbol - the kernel and app binaries never see each other's symbol tables.
+Instead `kernel/core/abi.c` builds a small table of function pointers
+(`kernel/include/tinos/abi.h`) and hands it to the app's entry point;
+`apps/native/lib/shim.c` wraps each one in a function of the same name
+as the real kernel call, so app source code (`apps/native/calculator/
+calculator.c` is an unmodified copy of the old `apps/calculator.c`) does
+not change, only its build does. The app registers itself into the start
+menu at runtime with `apps_register()` instead of appearing in
+`apps/info.c`'s static table. This still runs in ring 0 with no memory
+protection - a crashing native app can corrupt the kernel exactly like a
+crashing builtin one - so it buys build-time and load-time separation, not
+isolation; that would need real user-mode processes, a much larger project
+than converting the rest of `apps/` to this model would be.
+
 Preemption is deliberately still a separate step: the PIT must save and
 restore a thread context instead of only marking events pending, and the
 kernel needs a run queue, locks and a decision about what "task" even means
@@ -724,6 +756,10 @@ kernel/
   mm/            portable kernel heap (arch-specific page allocation and
                  paging live under arch/<ARCH>/)
   include/tinos/  public headers for all of the above
+apps/native/     apps built as standalone ELF binaries with their own
+                 Makefile and linker script, loaded from the ramfs at
+                 boot instead of linked into the kernel (see "Native
+                 apps" above)
 tests/host/      native unit tests and the kernel-service shims
 tools/           run script, USB image helper, QEMU test driver, screen OCR
                  and font generator

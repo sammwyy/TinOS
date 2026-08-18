@@ -210,17 +210,18 @@ static window_t *launch_media_player(const char *arg)
     return app_media_player_open(arg);
 }
 
-static window_t *launch_calculator(const char *arg)
-{
-    return app_calculator_open(arg);
-}
-
 static window_t *launch_control_panel(const char *arg)
 {
     return app_control_panel_open(arg);
 }
 
-static const app_entry_t registry[] = {
+/* Calculator is not in this table: it ships as a native ELF (see
+ * apps/native/calculator/) and registers itself with apps_register() once
+ * the kernel loads it from the ramfs. Everything else here is still a
+ * builtin compiled straight into the kernel image. */
+#define REGISTRY_CAPACITY 16
+
+static app_entry_t registry[REGISTRY_CAPACITY] = {
     { "File Explorer", "browse files", "Accessories", ICON_FOLDER,
       launch_explorer },
     { "Text Editor", "write text", "Accessories", ICON_EDITOR,
@@ -229,8 +230,6 @@ static const app_entry_t registry[] = {
       launch_image_viewer },
     { "Media Player", "play WAV and Ogg Vorbis audio", "Multimedia", ICON_FILE,
       launch_media_player },
-    { "Calculator", "integer arithmetic", "Accessories", ICON_CHIP,
-      launch_calculator },
     { "Terminal", "command line", "System", ICON_TERMINAL,
       launch_terminal },
     { "System Information", "system details", "System", ICON_CHIP,
@@ -240,9 +239,18 @@ static const app_entry_t registry[] = {
     { "About TinOS", "version and info", "System", ICON_INFO,
       app_about_open },
 };
+static size_t registry_count = 8;
 
 const app_entry_t *apps_registry(size_t *count)
 {
-    *count = ARRAY_SIZE(registry);
+    *count = registry_count;
     return registry;
+}
+
+bool apps_register(const app_entry_t *entry)
+{
+    if (registry_count >= REGISTRY_CAPACITY)
+        return false;
+    registry[registry_count++] = *entry;
+    return true;
 }

@@ -60,11 +60,13 @@ LIBGCC  := $(shell $(CC) -m32 -print-libgcc-file-name)
 # subdir) is likewise transport-agnostic (e.g. usb_msc.c). Everything
 # under kernel/arch/$(ARCH) and kernel/dev/$(ARCH) is that target's own:
 # CPU/platform bring-up, page tables, the boot stub, and drivers tied to
-# that platform's bus/IO model.
+# that platform's bus/IO model. apps/native/ is excluded: those apps are
+# their own freestanding ELF binaries, built by apps/native/Makefile and
+# loaded from the ramfs at boot instead of linked into the kernel image.
 SRCS_C := $(sort kernel/main.c \
                   $(shell find kernel/core kernel/fs kernel/gfx kernel/lib \
                           kernel/mm kernel/net kernel/sh apps desktop \
-                          libraries -name '*.c') \
+                          libraries -name '*.c' -not -path 'apps/native/*') \
                   $(wildcard kernel/dev/*.c) \
                   $(shell find kernel/dev/$(ARCH) kernel/arch/$(ARCH) \
                           -name '*.c'))
@@ -155,6 +157,27 @@ $(KERNEL): $(OBJS) $(ICON_GEN_OBJ) $(ICON_GEN_STAMP) boot/linker.ld
 
 kernel: $(KERNEL)
 
+# --- native apps and the ramfs --------------------------------------
+# apps/native/*/ each build to their own freestanding ELF (own Makefile,
+# own linker script - see apps/native/Makefile); ramfs.tar bundles them for
+# GRUB to hand to the kernel as a module2 payload (boot/grub.cfg), which
+# kernel/fs/tar.c unpacks into /apps and kernel/core/elf.c loads and runs
+# (see kernel/main.c's load_native_apps()).
+NATIVE_BUILD := $(BUILD)/native
+RAMFS        := $(BUILD)/ramfs.tar
+
+.PHONY: native-apps
+native-apps:
+	$(MAKE) -C apps/native BUILD=$(abspath $(NATIVE_BUILD))
+
+# --mtime/--owner/--group/--sort keep the archive's bytes independent of
+# build-machine clock and user IDs, matching the ISO's own reproducibility
+# guarantees below.
+$(RAMFS): native-apps
+	@mkdir -p $(dir $@)
+	@cd $(NATIVE_BUILD) && tar --format=ustar --sort=name --mtime=@0 \
+		--owner=0 --group=0 --numeric-owner -cf $(abspath $@) *.elf
+
 # --- bootable ISO -----------------------------------------------------
 # -d .../i386-pc keeps the image BIOS-only (no EFI payload), which is what
 # QEMU's default machine boots and keeps the ISO under 5 MiB.
@@ -176,13 +199,14 @@ GRUB_BIOS_DIR := $(firstword $(wildcard /usr/lib/grub/i386-pc \
                                         /usr/share/grub/i386-pc))
 GRUB_ISO_ARGS := $(if $(GRUB_BIOS_DIR),-d $(GRUB_BIOS_DIR),)
 
-$(ISO): $(KERNEL) boot/grub.cfg tools/pin_iso_dates.py
+$(ISO): $(KERNEL) $(RAMFS) boot/grub.cfg tools/pin_iso_dates.py
 ifeq ($(GRUB_ISO),)
 	$(error grub2-mkrescue/grub-mkrescue not found - install grub2-tools-extra and xorriso)
 endif
 	@rm -rf $(ISODIR)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL) $(ISODIR)/boot/$(NAME).elf
+	@cp $(RAMFS) $(ISODIR)/boot/ramfs.tar
 	@cp boot/grub.cfg $(ISODIR)/boot/grub/grub.cfg
 	@find $(ISODIR) -exec touch -t 200001010000.00 {} +
 	$(GRUB_ISO) $(GRUB_ISO_ARGS) --compress=xz -o $@ $(ISODIR) \
