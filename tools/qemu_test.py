@@ -308,7 +308,7 @@ def run_scenario(iso, shots_dir):
 
         # ---------------------------------------------------------------
         print("\n== text mode boot ==")
-        c.check(vm.wait_for_serial("Multiboot2 handover", timeout=30),
+        c.check(vm.wait_for_serial("multiboot2: bootloader=", timeout=30),
                 "kernel starts and reports the Multiboot2 handover")
         time.sleep(1.2)
         boot = shot("boot-text", settle=0)
@@ -316,13 +316,13 @@ def run_scenario(iso, shots_dir):
                 "boot stage runs in 80x25 VGA text mode (%dx%d)" % boot.size)
 
         for needle, what in [
-            ("Global descriptor table installed", "GDT installed"),
-            ("Interrupt descriptor table", "IDT and PIC ready"),
-            ("System timer running", "timer and RTC start"),
-            ("Memory manager online", "memory manager comes up"),
-            ("PS/2 keyboard driver", "keyboard driver attaches"),
-            ("PS/2 mouse driver", "mouse driver attaches"),
-            ("In-memory filesystem mounted", "filesystem mounts"),
+            ("gdt: flat 32-bit segments loaded", "GDT installed"),
+            ("idt: vectors installed", "IDT and PIC ready"),
+            ("timer: PIT", "timer and RTC start"),
+            ("mm: heap and physical allocator online", "memory manager comes up"),
+            ("i8042: keyboard on irq1", "keyboard driver attaches"),
+            ("i8042: mouse on irq12", "mouse driver attaches"),
+            ("vfs: tmpfs mounted on /", "filesystem mounts"),
         ]:
             c.check(needle in vm.serial(), "boot log reports: " + what)
 
@@ -344,28 +344,30 @@ def run_scenario(iso, shots_dir):
         print("\n== start menu ==")
         vm.key("ctrl", "esc")
         menu = shot("start-menu")
-        for entry in ["Accessories", "System", "File Explorer", "Text Editor",
+        for entry in ["System", "Accessories", "Multimedia",
                       "Restart", "Shut Down"]:
             c.check(menu.has(entry), "start menu lists '%s'" % entry)
-        c.check(menu.missing("Terminal"),
-                "apps inside a collapsed category stay hidden")
 
-        # Move to the System header and expand it. Categories are the
-        # keyboard rows; applications are selected in the right submenu.
+        # System is selected by default, so its apps are already in the
+        # right-hand submenu; the submenu only ever shows one category's
+        # apps at a time.
+        for entry in ["About TinOS", "Control Panel", "System Information",
+                      "Terminal"]:
+            c.check(menu.has(entry),
+                    "start menu shows System's apps by default: '%s'" % entry)
+        c.check(menu.missing("File Explorer"),
+                "apps outside the selected category stay out of the submenu")
+
+        # Down selects the next category; the submenu swaps live, no
+        # expand/collapse step involved.
         vm.key("down")
-        vm.key("ret")
-        expanded = shot("start-menu-system")
-        for entry in ["Terminal", "System Information", "About TinOS"]:
-            c.check(expanded.has(entry),
-                    "expanding the System category reveals '%s'" % entry)
+        accessories = shot("start-menu-accessories")
+        for entry in ["Calculator", "Text Editor", "File Explorer"]:
+            c.check(accessories.has(entry),
+                    "selecting Accessories reveals '%s'" % entry)
+        c.check(accessories.missing("Terminal"),
+                "selecting a category swaps the previous one's apps out")
 
-        # Up to the Accessories header and Enter folds it back up.
-        for _ in range(4):
-            vm.key("up")
-        vm.key("ret")
-        collapsed = shot("start-menu-collapsed")
-        c.check(collapsed.missing("File Explorer"),
-                "collapsing the Accessories category hides its apps")
         vm.key("esc")
         vm.key("ctrl", "alt", "t")
 
@@ -436,8 +438,14 @@ def run_scenario(iso, shots_dir):
         print("\n== file explorer (opened with the mouse) ==")
         vm.mouse_click(48, 750)                       # the Start button
         menu2 = shot("start-menu-mouse")
-        hits = menu2.find("File Explorer")
-        c.check(bool(hits), "start menu opens from a mouse click")
+        cat_hits = menu2.find("Accessories")
+        c.check(bool(cat_hits), "start menu opens from a mouse click")
+        hits = []
+        if cat_hits:
+            cx, cy = cat_hits[0]
+            vm.mouse_click(cx + 10, cy + 6)          # select the category
+            menu2 = shot("start-menu-mouse-accessories")
+            hits = menu2.find("File Explorer")
         if hits:
             x, y = hits[0]
             vm.mouse_click(x + 30, y + 6)
@@ -534,6 +542,11 @@ def run_scenario(iso, shots_dir):
         print("\n== text editor ==")
         vm.key("ctrl", "esc")
         editor_menu = shot("start-menu-editor")
+        cat_hits = editor_menu.find("Accessories")
+        if cat_hits:
+            cx, cy = cat_hits[0]
+            vm.mouse_click(cx + 10, cy + 6)          # select the category
+            editor_menu = shot("start-menu-editor-accessories")
         editor_hits = editor_menu.find("Text Editor")
         c.check(bool(editor_hits), "start menu exposes Text Editor")
         if editor_hits:

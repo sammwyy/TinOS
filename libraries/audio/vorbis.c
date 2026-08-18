@@ -4,6 +4,9 @@
 
 #include "../../third_party/stb_vorbis/stb_vorbis.c"
 
+#define VORBIS_INPUT_INITIAL 8192
+#define VORBIS_INPUT_MAX     65536
+
 typedef struct {
     audio_decoder_t base;
     stb_vorbis *vorbis;
@@ -13,7 +16,6 @@ typedef struct {
     size_t input_size;
     size_t input_at;
     size_t file_at;
-    uint8_t *owned_data;
     int16_t pending[4096 * 2];
     size_t pending_frames;
     size_t pending_at;
@@ -47,6 +49,43 @@ static audio_decoder_t *vorbis_open(const uint8_t *data, size_t size,
     return (audio_decoder_t *)decoder;
 }
 
+/* Ogg pages carry an absolute granule position (PCM sample count) in their
+ * header; the last page in the stream gives the track length without
+ * decoding anything. Scanning a small tail window avoids pulling the whole
+ * file over a slow transport just to show a duration. */
+static uint64_t vorbis_tail_length(const fs_node_t *file)
+{
+    size_t want = file->size < 65536 ? file->size : 65536;
+    if (want < 27)
+        return 0;
+    uint8_t *tail = kmalloc(want);
+    if (!tail)
+        return 0;
+    if (!fs_read_at(file, file->size - want, tail, want)) {
+        kfree(tail);
+        return 0;
+    }
+    uint64_t best = 0;
+    for (size_t i = 0; i + 27 <= want; i++) {
+        if (memcmp(tail + i, "OggS", 4) != 0)
+            continue;
+        size_t header_size = 27u + tail[i + 26];
+        if (i + header_size > want)
+            continue;
+        uint32_t lo = (uint32_t)tail[i + 6] | ((uint32_t)tail[i + 7] << 8) |
+                      ((uint32_t)tail[i + 8] << 16) |
+                      ((uint32_t)tail[i + 9] << 24);
+        uint32_t hi = (uint32_t)tail[i + 10] | ((uint32_t)tail[i + 11] << 8) |
+                      ((uint32_t)tail[i + 12] << 16) |
+                      ((uint32_t)tail[i + 13] << 24);
+        if (lo == 0xffffffffu && hi == 0xffffffffu)
+            continue;
+        best = hi ? 0xfffffffeu : lo;
+    }
+    kfree(tail);
+    return best;
+}
+
 static audio_decoder_t *vorbis_open_file(const char *path,
                                          const fs_node_t *file,
                                          const uint8_t *probe,
@@ -55,27 +94,71 @@ static audio_decoder_t *vorbis_open_file(const char *path,
                                          uint64_t *total_frames)
 {
     (void)path;
-    if (!file->size || file->size > 32u * 1024u * 1024u)
+    if (!file->size)
         return NULL;
-    const uint8_t *data = fs_data(file);
-    uint8_t *owned = NULL;
-    if (!data) {
-        owned = kmalloc(file->size);
-        if (!owned || !fs_read_at(file, 0, owned, file->size)) {
-            kfree(owned);
+
+    size_t capacity = probe_size > VORBIS_INPUT_INITIAL ? probe_size
+                                                         : VORBIS_INPUT_INITIAL;
+    uint8_t *input = NULL;
+    stb_vorbis *vorbis = NULL;
+    int consumed = 0;
+    size_t read_amount = 0;
+    for (;;) {
+        size_t want = capacity < file->size ? capacity : file->size;
+        uint8_t *block = kmalloc(want);
+        if (!block)
+            return NULL;
+        size_t from_probe = want < probe_size ? want : probe_size;
+        memcpy(block, probe, from_probe);
+        if (want > from_probe &&
+            !fs_read_at(file, from_probe, block + from_probe,
+                       want - from_probe)) {
+            kfree(block);
             return NULL;
         }
-        data = owned;
+        int error = 0;
+        vorbis = stb_vorbis_open_pushdata(block, (int)want, &consumed, &error,
+                                          NULL);
+        if (vorbis) {
+            input = block;
+            read_amount = want;
+            break;
+        }
+        kfree(block);
+        if (error != VORBIS_need_more_data || want >= file->size ||
+            capacity >= VORBIS_INPUT_MAX)
+            return NULL;
+        capacity = capacity * 2 < VORBIS_INPUT_MAX ? capacity * 2
+                                                    : VORBIS_INPUT_MAX;
     }
-    audio_decoder_t *base = vorbis_open(data, file->size, format, total_frames);
-    if (!base) {
-        kfree(owned);
+
+    stb_vorbis_info info = stb_vorbis_get_info(vorbis);
+    if (!info.sample_rate || info.channels < 1) {
+        stb_vorbis_close(vorbis);
+        kfree(input);
         return NULL;
     }
-    ((vorbis_decoder_t *)base)->owned_data = owned;
-    (void)probe;
-    (void)probe_size;
-    return base;
+    vorbis_decoder_t *decoder = kcalloc(1, sizeof(*decoder));
+    if (!decoder) {
+        stb_vorbis_close(vorbis);
+        kfree(input);
+        return NULL;
+    }
+    decoder->vorbis = vorbis;
+    decoder->file = file;
+    decoder->input = input;
+    decoder->input_capacity = read_amount;
+    size_t leftover = read_amount - (size_t)consumed;
+    if (leftover)
+        memmove(input, input + consumed, leftover);
+    decoder->input_size = leftover;
+    decoder->file_at = read_amount;
+
+    format->sample_rate = info.sample_rate;
+    format->channels = 2;
+    format->bits_per_sample = 16;
+    *total_frames = vorbis_tail_length(file);
+    return (audio_decoder_t *)decoder;
 }
 
 static bool vorbis_more(vorbis_decoder_t *decoder)
@@ -156,7 +239,6 @@ static void vorbis_close(audio_decoder_t *decoder)
     vorbis_decoder_t *v = (vorbis_decoder_t *)decoder;
     stb_vorbis_close(v->vorbis);
     kfree(v->input);
-    kfree(v->owned_data);
     kfree(v);
 }
 
