@@ -182,7 +182,7 @@ static void reserve_native_app_memory(const mb_info_t *mbi)
 /* Unpacks the ramfs module into /apps and runs every *.elf found there once,
  * each at its own fixed slot in the NATIVE_APP_BASE arena. An app's
  * app_main() registers itself with apps_register() (see kernel/core/abi.c
- * and apps/native/); nothing here knows what app it just ran. */
+ * and apps/); nothing here knows what app it just ran. */
 static size_t load_native_apps(const mb_info_t *mbi)
 {
     const mb_tag_module_t *mod = find_ramfs_module(mbi);

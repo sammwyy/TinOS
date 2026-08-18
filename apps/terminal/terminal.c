@@ -125,6 +125,20 @@ static void term_update_title(window_t *win, terminal_t *t)
     wm_set_title(win, title);
 }
 
+/* Each application is its own ELF, so this can only reach another app by
+ * looking it up in the shared registry, by the name shown in the start
+ * menu. */
+static window_t *launch_named(const char *name, const char *arg)
+{
+    size_t              count;
+    const app_entry_t *apps = apps_registry(&count);
+    for (size_t i = 0; i < count; i++) {
+        if (!strcmp(apps[i].name, name))
+            return apps[i].launch(arg);
+    }
+    return NULL;
+}
+
 static void term_run(window_t *win, terminal_t *t)
 {
     char prompt[FS_PATH_MAX + 16];
@@ -160,16 +174,16 @@ static void term_run(window_t *win, terminal_t *t)
         wm_close(win); /* the window (and t) are gone after this */
         return;
     case SH_REQ_EXPLORER:
-        app_explorer_open(arg);
+        launch_named("File Explorer", arg);
         break;
     case SH_REQ_EDITOR:
-        app_editor_open(arg);
+        launch_named("Text Editor", arg);
         break;
     case SH_REQ_ABOUT:
-        app_about_open(NULL);
+        launch_named("About TinOS", NULL);
         break;
     case SH_REQ_SYSINFO:
-        app_sysinfo_open(NULL);
+        launch_named("System Information", NULL);
         break;
     case SH_REQ_REBOOT:
         desktop_shutdown(true);

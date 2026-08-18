@@ -222,6 +222,20 @@ static void begin_prompt(explorer_t *ex, explorer_mode_t mode,
     text_input_reset(&ex->input, initial);
 }
 
+/* Each application is its own ELF, so this can only reach another app by
+ * looking it up in the shared registry, by the name shown in the start
+ * menu. */
+static window_t *launch_named(const char *name, const char *arg)
+{
+    size_t              count;
+    const app_entry_t *apps = apps_registry(&count);
+    for (size_t i = 0; i < count; i++) {
+        if (!strcmp(apps[i].name, name))
+            return apps[i].launch(arg);
+    }
+    return NULL;
+}
+
 static void action_open(window_t *win, explorer_t *ex)
 {
     fs_node_t *node = selected_node(ex);
@@ -239,12 +253,12 @@ static void action_open(window_t *win, explorer_t *ex)
                          kstrcasecmp(dot + 1, "jpeg") == 0 ||
                          kstrcasecmp(dot + 1, "webp") == 0);
     if (image)
-        app_image_viewer_open(path);
+        launch_named("Image Viewer", path);
     else if (dot && (kstrcasecmp(dot + 1, "wav") == 0 ||
                      kstrcasecmp(dot + 1, "ogg") == 0))
-        app_media_player_open(path);
+        launch_named("Media Player", path);
     else
-        app_editor_open(path);
+        launch_named("Text Editor", path);
 }
 
 static void action_copy(explorer_t *ex, bool cut)

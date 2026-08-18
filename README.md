@@ -471,9 +471,8 @@ to the nearest surviving ancestor.
 | Networking | `kernel/net/` | Ethernet, ARP, IPv4, ICMP, UDP, DHCP, DNS, TCP/HTTP and async jobs |
 | Libraries | `libraries/image/` | PNG, JPEG and WebP decoding on top of stb_image/simplewebp; own kernel thread, real SSE2 |
 | Libraries | `libraries/audio/` | WAV and Ogg Vorbis decoding, codec dispatch; own kernel thread, real SSE2 |
-| Desktop | `desktop/` | window manager, widgets and icons, taskbar/start menu/event loop |
-| Applications | `apps/` | terminal, file explorer, text editor, system information, about |
-| Native applications | `apps/native/`, `kernel/core/{elf,abi}.c`, `kernel/fs/tar.c` | apps built as their own freestanding ELF binaries (own Makefile, own linker script), bundled into `build/ramfs.tar`, handed to the kernel as a Multiboot2 module and loaded at boot (see below) |
+| Desktop | `desktop/` | window manager, widgets, icons, application registry, taskbar/start menu/event loop |
+| Applications | `apps/`, `kernel/core/{elf,abi}.c`, `kernel/fs/tar.c` | terminal, file explorer, text editor, image viewer, media player, calculator, control panel, system information, about - each its own freestanding ELF binary (own Makefile, own linker script), bundled into `build/ramfs.tar`, handed to the kernel as a Multiboot2 module and loaded at boot (see below) |
 
 Each self-contained unit owns its own public headers under its own
 `include/tinos/` tree - `kernel/include/tinos/` for the kernel core (shared
@@ -612,15 +611,11 @@ an API that can later absorb virtual-to-physical mappings. The e1000 driver
 backs the current Ethernet stack; networking is intentionally a small
 polling-oriented kernel service rather than a userspace socket subsystem.
 
-**Native apps: fixed-address ELF, no processes.** Everything in `apps/`
-still links straight into the kernel image and calls kernel functions
-directly, in ring 0, sharing the kernel's own address space - TinOS has no
-user mode, no per-process page tables, and no syscalls. `apps/native/`
-apps (currently just the calculator) are a step short of that: each is its
-own freestanding ELF32 binary, built by `apps/native/Makefile` against
-`apps/native/link.ld`, which links it at a fixed address inside the arena
-`kernel/include/tinos/native_app.h` reserves (`kernel/arch/x86/pmm.c`
-never hands those frames to anything else). `make` bundles every native
+**Native apps: fixed-address ELF, no processes.** Every application under
+`apps/` is its own freestanding ELF32 binary, built by `apps/Makefile`
+against `apps/link.ld`, which links it at a fixed address inside the
+arena `kernel/include/tinos/native_app.h` reserves (`kernel/arch/x86/
+pmm.c` never hands those frames to anything else). `make` bundles every
 app's `.elf` into `build/ramfs.tar` and GRUB loads it as a Multiboot2
 module (`boot/grub.cfg`'s `module2` line); at boot, `kernel/fs/tar.c`
 unpacks it into `/apps` and `kernel/core/elf.c` copies each `.elf`'s
@@ -628,20 +623,21 @@ unpacks it into `/apps` and `kernel/core/elf.c` copies each `.elf`'s
 correct only because paging identity-maps the whole address space, so
 there is no relocation processing to do.
 
-Because the app is a separate link, it cannot call kernel functions by
+Each app is a separate link, so it cannot call a kernel function by
 symbol - the kernel and app binaries never see each other's symbol tables.
 Instead `kernel/core/abi.c` builds a small table of function pointers
 (`kernel/include/tinos/abi.h`) and hands it to the app's entry point;
-`apps/native/lib/shim.c` wraps each one in a function of the same name
-as the real kernel call, so app source code (`apps/native/calculator/
-calculator.c` is an unmodified copy of the old `apps/calculator.c`) does
-not change, only its build does. The app registers itself into the start
-menu at runtime with `apps_register()` instead of appearing in
-`apps/info.c`'s static table. This still runs in ring 0 with no memory
-protection - a crashing native app can corrupt the kernel exactly like a
-crashing builtin one - so it buys build-time and load-time separation, not
-isolation; that would need real user-mode processes, a much larger project
-than converting the rest of `apps/` to this model would be.
+`apps/lib/shim.c` wraps each one in a function of the same name as the
+real kernel call, so an app's own source calls e.g. `wm_open()` or
+`gfx_text()` completely normally and only its build differs. An app whose
+window needs to open a different app (the explorer opening a file in the
+editor, a shell command opening the file explorer) looks that app up in
+the shared registry by name instead, since it cannot call that other
+app's ELF by symbol either. This still runs in ring 0 with no memory
+protection - a crashing app can corrupt the kernel exactly like anything
+else in it - so it buys build-time and load-time separation, not
+isolation; that would need real user-mode processes, a much larger
+project than this.
 
 Preemption is deliberately still a separate step: the PIT must save and
 restore a thread context instead of only marking events pending, and the
@@ -742,24 +738,25 @@ kernel/
   arch/x86/      GDT, IDT, interrupt stubs, PIC, PIT, RTC, CPU, reset,
                  page tables, physical memory allocator, boot.S - every
                  target's own arch/<ARCH> tree looks like this one
-  core/          logging, panic, clock glue, system info, self-tests
+  core/          logging, panic, clock glue, system info, self-tests,
+                 the ELF loader and the native app ABI table
   dev/           transport-agnostic device logic (USB mass storage);
                  dev/x86/ holds this target's drivers: serial, VGA text,
                  PCI, VBE/DISPI, keyboard, mouse
   gfx/           framebuffer engine and the generated font
-  fs/            in-memory filesystem and path helpers
+  fs/            in-memory filesystem, path helpers, the ustar reader
   net/           Ethernet and layered IPv4 networking protocols
   sh/            streams, parser, execution engine, built-in commands
-  ui/            window manager, widgets, desktop/taskbar/start menu
-  apps/          terminal, explorer, editor, system information, about
   lib/           freestanding string and printf routines
   mm/            portable kernel heap (arch-specific page allocation and
                  paging live under arch/<ARCH>/)
   include/tinos/  public headers for all of the above
-apps/native/     apps built as standalone ELF binaries with their own
-                 Makefile and linker script, loaded from the ramfs at
-                 boot instead of linked into the kernel (see "Native
-                 apps" above)
+desktop/         window manager, widgets, icons, application registry,
+                 taskbar/start menu/event loop
+apps/            every application, each its own standalone ELF binary
+                 with its own Makefile and linker script, loaded from the
+                 ramfs at boot (see "Native apps" above)
+libraries/       image (PNG/JPEG/WebP) and audio (WAV/Vorbis) codecs
 tests/host/      native unit tests and the kernel-service shims
 tools/           run script, USB image helper, QEMU test driver, screen OCR
                  and font generator

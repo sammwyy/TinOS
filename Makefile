@@ -60,13 +60,14 @@ LIBGCC  := $(shell $(CC) -m32 -print-libgcc-file-name)
 # subdir) is likewise transport-agnostic (e.g. usb_msc.c). Everything
 # under kernel/arch/$(ARCH) and kernel/dev/$(ARCH) is that target's own:
 # CPU/platform bring-up, page tables, the boot stub, and drivers tied to
-# that platform's bus/IO model. apps/native/ is excluded: those apps are
-# their own freestanding ELF binaries, built by apps/native/Makefile and
-# loaded from the ramfs at boot instead of linked into the kernel image.
+# that platform's bus/IO model. apps/ is excluded entirely: every
+# application is its own freestanding ELF binary, built by apps/Makefile
+# and loaded from the ramfs at boot instead of linked into the kernel
+# image (see the "native apps" target below).
 SRCS_C := $(sort kernel/main.c \
                   $(shell find kernel/core kernel/fs kernel/gfx kernel/lib \
-                          kernel/mm kernel/net kernel/sh apps desktop \
-                          libraries -name '*.c' -not -path 'apps/native/*') \
+                          kernel/mm kernel/net kernel/sh desktop \
+                          libraries -name '*.c') \
                   $(wildcard kernel/dev/*.c) \
                   $(shell find kernel/dev/$(ARCH) kernel/arch/$(ARCH) \
                           -name '*.c'))
@@ -158,9 +159,9 @@ $(KERNEL): $(OBJS) $(ICON_GEN_OBJ) $(ICON_GEN_STAMP) boot/linker.ld
 kernel: $(KERNEL)
 
 # --- native apps and the ramfs --------------------------------------
-# apps/native/*/ each build to their own freestanding ELF (own Makefile,
-# own linker script - see apps/native/Makefile); ramfs.tar bundles them for
-# GRUB to hand to the kernel as a module2 payload (boot/grub.cfg), which
+# apps/*/ each build to their own freestanding ELF (own Makefile, own
+# linker script - see apps/Makefile); ramfs.tar bundles them for GRUB to
+# hand to the kernel as a module2 payload (boot/grub.cfg), which
 # kernel/fs/tar.c unpacks into /apps and kernel/core/elf.c loads and runs
 # (see kernel/main.c's load_native_apps()).
 NATIVE_BUILD := $(BUILD)/native
@@ -168,7 +169,7 @@ RAMFS        := $(BUILD)/ramfs.tar
 
 .PHONY: native-apps
 native-apps:
-	$(MAKE) -C apps/native BUILD=$(abspath $(NATIVE_BUILD))
+	$(MAKE) -C apps BUILD=$(abspath $(NATIVE_BUILD))
 
 # --mtime/--owner/--group/--sort keep the archive's bytes independent of
 # build-machine clock and user IDs, matching the ISO's own reproducibility

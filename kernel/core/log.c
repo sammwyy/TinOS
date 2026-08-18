@@ -8,6 +8,14 @@
 #include <tinos/kernel.h>
 #include <tinos/printf.h>
 
+/* klog() itself is variadic and so cannot be forwarded through a plain
+ * function pointer; native apps format locally (they link printf.c
+ * directly) and reach the serial port through this instead. */
+void klog_str(const char *text)
+{
+    serial_write(text);
+}
+
 void klog(const char *fmt, ...)
 {
     char    buf[512];
@@ -17,5 +25,5 @@ void klog(const char *fmt, ...)
     kvsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
 
-    serial_write(buf);
+    klog_str(buf);
 }

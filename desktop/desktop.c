@@ -710,16 +710,26 @@ static void menu_activate(size_t index)
 
 /* Notifications */
 
-void desktop_notify(const char *fmt, ...)
+/* desktop_notify() itself is variadic and so cannot be forwarded through a
+ * plain function pointer; native apps format locally (they link printf.c
+ * directly) and reach the notification banner through this instead. */
+void desktop_notify_str(const char *text)
 {
-    va_list ap;
-    va_start(ap, fmt);
-    kvsnprintf(notification, sizeof(notification), fmt, ap);
-    va_end(ap);
-
+    strlcpy(notification, text, sizeof(notification));
     notification_until = timer_ticks() + NOTIFY_MS;
     wm_invalidate_all();
     klog("[note] %s\n", notification);
+}
+
+void desktop_notify(const char *fmt, ...)
+{
+    char    buf[sizeof(notification)];
+    va_list ap;
+    va_start(ap, fmt);
+    kvsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    desktop_notify_str(buf);
 }
 
 static void draw_notification(void)
@@ -762,6 +772,20 @@ NORETURN void desktop_shutdown(bool reboot)
 }
 
 /* Input handling */
+
+/* Each application is its own ELF, so this can only reach one by looking
+ * it up in the registry, by the name shown in the start menu - same as
+ * menu_activate() above. */
+static window_t *launch_named(const char *name, const char *arg)
+{
+    size_t              count;
+    const app_entry_t *apps = apps_registry(&count);
+    for (size_t i = 0; i < count; i++) {
+        if (!strcmp(apps[i].name, name))
+            return apps[i].launch(arg);
+    }
+    return NULL;
+}
 
 static bool handle_global_key(const key_event_t *ev)
 {
@@ -840,11 +864,11 @@ static bool handle_global_key(const key_event_t *ev)
     }
     if ((ev->mods & KMOD_CTRL) && (ev->mods & KMOD_ALT)) {
         if (ev->ch == 't' || ev->ch == 'T') {
-            app_terminal_open(NULL);
+            launch_named("Terminal", NULL);
             return true;
         }
         if (ev->ch == 'e' || ev->ch == 'E') {
-            app_explorer_open(NULL);
+            launch_named("File Explorer", NULL);
             return true;
         }
     }

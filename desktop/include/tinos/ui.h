@@ -189,18 +189,6 @@ const app_entry_t *apps_registry(size_t *count);
  * loaded from the ramfs. False when the registry is already full. */
 bool apps_register(const app_entry_t *entry);
 
-window_t *app_terminal_open(const char *cwd);
-window_t *app_explorer_open(const char *path);
-window_t *app_editor_open(const char *path);
-window_t *app_image_viewer_open(const char *path);
-window_t *app_media_player_open(const char *path);
-/* app_calculator_open() is not declared here: it ships as a native ELF
- * (apps/native/calculator/) and reaches the registry through
- * apps_register(), not a link-time symbol. */
-window_t *app_control_panel_open(const char *arg);
-window_t *app_about_open(const char *arg);
-window_t *app_sysinfo_open(const char *arg);
-
 typedef enum {
     DESKTOP_WALLPAPER_DEFAULT,
     DESKTOP_WALLPAPER_SOLID,
@@ -213,5 +201,9 @@ desktop_wallpaper_mode_t desktop_wallpaper_mode(void);
 
 /* Used by applications to raise a transient message on the desktop. */
 void desktop_notify(const char *fmt, ...) PRINTFLIKE(1, 2);
+/* Pre-formatted variant desktop_notify() itself uses, exposed for callers
+ * (the native app ABI) that cannot forward a variadic function through a
+ * pointer. */
+void desktop_notify_str(const char *text);
 
 #endif /* TINOS_UI_H */

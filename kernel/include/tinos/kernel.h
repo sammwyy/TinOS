@@ -22,6 +22,9 @@
 /* Kernel log: always written to the COM1 serial port, and mirrored to the
  * text-mode console while the machine is still in text mode. */
 void klog(const char *fmt, ...) PRINTFLIKE(1, 2);
+/* Pre-formatted variant klog() itself uses, exposed for callers (the native
+ * app ABI) that cannot forward a variadic function through a pointer. */
+void klog_str(const char *text);
 
 /* Unrecoverable error: paints a diagnostic screen and halts the CPU. */
 NORETURN void panic(const char *fmt, ...) PRINTFLIKE(1, 2);
