@@ -184,6 +184,9 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
         panic("CPU lacks FXSAVE/SSE2 - TinOS requires them");
     boot_step("FPU/SSE2 enabled (FXSAVE state saved per kernel thread)");
 
+    paging_init();
+    boot_step("Paging enabled (identity-mapped, 4 MiB pages)");
+
     timer_init(TIMER_HZ);
     rtc_init();
     sti();

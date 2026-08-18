@@ -22,4 +22,11 @@ size_t   pmm_region_count(void);
 /* Kernel heap bootstrap (implemented in mm/heap.c). */
 void heap_init(void);
 
+/* Identity-mapped paging (implemented in mm/paging.c). Physical and virtual
+ * addresses stay equal, so nothing else needs to change: it exists so an
+ * SMP application processor can be handed a valid CR3 during its own
+ * bring-up, and so the kernel is no longer permanently committed to the
+ * "no paging" design. */
+void paging_init(void);
+
 #endif /* TINOS_MM_H */
