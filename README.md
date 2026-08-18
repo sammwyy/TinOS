@@ -573,13 +573,18 @@ locks - `irq_save()`/`irq_restore()` alone only ever stopped the *calling*
 core's own interrupts.
 
 Not everything is safe to hand to another core yet, since the filesystem
-tree, network stack, and audio device driver still have no locking beyond
-`irq_save()`. `thread_spawn_pinned()` keeps threads that touch any of that
-(file reads, storage/network workers, audio decode and playback) on the
-boot processor; plain `thread_spawn()` is for self-contained, in-memory
-compute - today, image decode - that any core can run. Verified with
-`tools/qemu_test.py` and a stress scenario that opens several images and
-an audio track at once under `-smp 4`.
+tree and the network stack still have no locking beyond `irq_save()`.
+`thread_spawn_pinned()` keeps threads that touch either of those (file
+reads, storage/network workers, and audio *loading*/*decoding*, which
+streams from the filesystem a chunk at a time) on the boot processor;
+plain `thread_spawn()` is for self-contained, in-memory compute that any
+core can run - today, image decode and audio *playback*. The AC'97 driver
+(`kernel/dev/audio.c`) and each media player's decode->playback ring
+buffer got their own spinlocks specifically so playback, which only reads
+already-decoded samples and pushes them at the device, could move off the
+boot processor safely. Verified with `tools/qemu_test.py` and a stress
+scenario that opens several images and an audio track at once under
+`-smp 4`.
 
 Getting here surfaced a real, pre-existing bug: `thread_run()` published
 `current` before setting `scheduler_switching`, leaving a window where a

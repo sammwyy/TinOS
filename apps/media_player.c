@@ -7,6 +7,7 @@
 #include <tinos/io.h>
 #include <tinos/kernel.h>
 #include <tinos/printf.h>
+#include <tinos/spinlock.h>
 #include <tinos/string.h>
 #include <tinos/thread.h>
 #include <tinos/ui.h>
@@ -38,11 +39,17 @@ typedef struct {
     kernel_thread_t *loader;
     kernel_thread_t *decode_worker;
     kernel_thread_t *playback;
+    /* Guards pcm_read/pcm_write/pcm_queued (the decode->playback ring
+     * buffer) and workers/closing: decode_worker stays pinned to the boot
+     * processor (it streams from the filesystem), but playback is not,
+     * so irq_save() - which only ever stopped the calling core's own
+     * interrupts - is no longer enough to keep the two from racing. */
+    spinlock_t lock;
     int16_t *pcm;
     uint32_t pcm_read;
     uint32_t pcm_write;
-    volatile uint32_t pcm_queued;
-    volatile uint32_t workers;
+    uint32_t pcm_queued;
+    uint32_t workers;
     audio_decoder_t *loaded_decoder;
     const audio_codec_t *loaded_codec;
     audio_format_t loaded_format;
@@ -110,11 +117,11 @@ static void player_destroy(media_player_t *p)
 
 static void player_worker_done(media_player_t *p)
 {
-    bool saved = irq_save();
+    bool saved = spin_lock_irqsave(&p->lock);
     if (p->workers)
         p->workers--;
     bool destroy = p->closing && p->workers == 0;
-    irq_restore(saved);
+    spin_unlock_irqrestore(&p->lock, saved);
     if (destroy)
         player_destroy(p);
 }
@@ -149,10 +156,10 @@ static void player_decode_worker(void *arg)
                                       p->pcm + p->pcm_write * 2, count);
         if (!n)
             break;
-        bool saved = irq_save();
+        bool saved = spin_lock_irqsave(&p->lock);
         p->pcm_write = (p->pcm_write + (uint32_t)n) % PLAYER_PCM_FRAMES;
         p->pcm_queued += (uint32_t)n;
-        irq_restore(saved);
+        spin_unlock_irqrestore(&p->lock, saved);
     }
     p->decode_done = true;
     player_worker_done(p);
@@ -189,10 +196,10 @@ static void player_playback_worker(void *arg)
         size_t written = audio_stream_write(p->pcm + p->pcm_read * 2, count);
         if (!written)
             continue;
-        bool saved = irq_save();
+        bool saved = spin_lock_irqsave(&p->lock);
         p->pcm_read = (p->pcm_read + (uint32_t)written) % PLAYER_PCM_FRAMES;
         p->pcm_queued -= (uint32_t)written;
-        irq_restore(saved);
+        spin_unlock_irqrestore(&p->lock, saved);
         p->decoded += written;
     }
     if (!thread_cancelled() && !p->closing && p->decode_done) {
@@ -231,7 +238,9 @@ static bool player_load(media_player_t *p, size_t index)
         p->state = PLAYER_ERROR;
         return false;
     }
+    bool w_saved = spin_lock_irqsave(&p->lock);
     p->workers++;
+    spin_unlock_irqrestore(&p->lock, w_saved);
     return true;
 }
 
@@ -268,10 +277,10 @@ static void player_on_close(window_t *win)
     if (!p)
         return;
 
-    bool saved = irq_save();
+    bool saved = spin_lock_irqsave(&p->lock);
     p->workers++;
     p->closing = true;
-    irq_restore(saved);
+    spin_unlock_irqrestore(&p->lock, saved);
     audio_stream_stop();
     kernel_thread_t **threads[] = {
         &p->loader, &p->decode_worker, &p->playback,
@@ -585,7 +594,7 @@ static bool player_on_tick(window_t *win)
                     p->decode_worker = thread_spawn_pinned("audio-decode",
                                                     player_decode_worker, p);
                     p->playback = p->decode_worker
-                        ? thread_spawn_pinned("audio-play", player_playback_worker, p)
+                        ? thread_spawn("audio-play", player_playback_worker, p)
                         : NULL;
                     if (!p->decode_worker || !p->playback) {
                         if (p->decode_worker) thread_cancel(p->decode_worker);
@@ -593,7 +602,9 @@ static bool player_on_tick(window_t *win)
                         audio_stream_stop();
                         p->state = PLAYER_ERROR;
                     } else {
+                        bool w_saved = spin_lock_irqsave(&p->lock);
                         p->workers += 2;
+                        spin_unlock_irqrestore(&p->lock, w_saved);
                         p->state = p->seek_resume ? PLAYER_PLAYING : PLAYER_PAUSED;
                         if (!p->seek_resume)
                             audio_stream_pause(true);
@@ -665,8 +676,10 @@ static bool player_on_tick(window_t *win)
             p->state = PLAYER_ERROR;
             return true;
         }
+        bool w_saved = spin_lock_irqsave(&p->lock);
         p->workers++;
-        p->playback = thread_spawn_pinned("audio-play", player_playback_worker, p);
+        spin_unlock_irqrestore(&p->lock, w_saved);
+        p->playback = thread_spawn("audio-play", player_playback_worker, p);
         if (!p->playback) {
             strlcpy(p->message, "Unable to start audio playback",
                     sizeof(p->message));
@@ -675,7 +688,9 @@ static bool player_on_tick(window_t *win)
             p->state = PLAYER_ERROR;
             return true;
         }
+        w_saved = spin_lock_irqsave(&p->lock);
         p->workers++;
+        spin_unlock_irqrestore(&p->lock, w_saved);
         p->state = PLAYER_PLAYING;
         return true;
     }

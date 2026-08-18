@@ -6,6 +6,7 @@
 #include <tinos/io.h>
 #include <tinos/kernel.h>
 #include <tinos/pci.h>
+#include <tinos/spinlock.h>
 #include <tinos/string.h>
 #include <tinos/timer.h>
 
@@ -63,6 +64,12 @@ static bool stream_draining;
 static bool dma_running;
 static uint8_t volume = 80;
 static bool muted;
+/* Guards every field above from queued_frames down through dma_running:
+ * the desktop's own tick and a (formerly boot-processor-only) playback
+ * worker both call audio_poll()/audio_stream_write(), and now that
+ * worker is free to run on any SMP core, irq_save() alone (which only
+ * ever stopped the calling core's own interrupts) is not enough. */
+static spinlock_t audio_lock = SPINLOCK_INIT;
 
 static uint16_t ac97_mixer_read(uint8_t offset)
 {
@@ -171,13 +178,31 @@ void audio_set_muted(bool value)
 
 bool audio_is_muted(void) { return muted; }
 
+static void ac97_reset_dma(void);
+
+/* Callers below must hold audio_lock. */
+static void audio_stream_stop_locked(void)
+{
+    if (available)
+        ac97_reset_dma();
+    stream_active = false;
+    stream_paused = false;
+    stream_draining = false;
+    dma_running = false;
+    queued_frames = 0;
+    submitted_frames = 0;
+    in_flight = 0;
+}
+
 bool audio_stream_start(const audio_format_t *format)
 {
     if (!available || !format || format->channels != 2 ||
         format->bits_per_sample != 16 || format->sample_rate < 8000 ||
         format->sample_rate > 48000)
         return false;
-    audio_stream_stop();
+
+    bool saved = spin_lock_irqsave(&audio_lock);
+    audio_stream_stop_locked();
     ac97_mixer_write(AC97_PCM_RATE, (uint16_t)format->sample_rate);
     queued_frames = 0;
     played_frames = 0;
@@ -189,13 +214,20 @@ bool audio_stream_start(const audio_format_t *format)
     stream_paused = false;
     stream_draining = false;
     dma_running = false;
+    spin_unlock_irqrestore(&audio_lock, saved);
     return true;
 }
 
 size_t audio_stream_write(const int16_t *input, size_t frames)
 {
-    if (!stream_active || !input || frames == 0)
+    if (!input || frames == 0)
         return 0;
+
+    bool saved = spin_lock_irqsave(&audio_lock);
+    if (!stream_active) {
+        spin_unlock_irqrestore(&audio_lock, saved);
+        return 0;
+    }
     size_t capacity = AC97_BUFFER_FRAMES * AC97_BUFFER_COUNT - queued_frames;
     if (frames > capacity)
         frames = capacity;
@@ -207,6 +239,7 @@ size_t audio_stream_write(const int16_t *input, size_t frames)
         output[(write_at + i) * 2 + 1] = input[i * 2 + 1];
     }
     queued_frames += (uint32_t)frames;
+    spin_unlock_irqrestore(&audio_lock, saved);
     return frames;
 }
 
@@ -303,7 +336,8 @@ static void ac97_extend_dma(void)
     }
 }
 
-void audio_poll(void)
+/* Caller must hold audio_lock. */
+static void audio_poll_locked(void)
 {
     if (!stream_active || stream_paused)
         return;
@@ -343,25 +377,27 @@ void audio_poll(void)
         ac97_start_dma();
 }
 
+void audio_poll(void)
+{
+    bool saved = spin_lock_irqsave(&audio_lock);
+    audio_poll_locked();
+    spin_unlock_irqrestore(&audio_lock, saved);
+}
+
 void audio_stream_pause(bool paused)
 {
+    bool saved = spin_lock_irqsave(&audio_lock);
     stream_paused = paused;
     if (available && stream_active)
         outb((uint16_t)(bus_master_base + AC97_PO_CR), paused ? 0 : 1);
+    spin_unlock_irqrestore(&audio_lock, saved);
 }
 
 void audio_stream_stop(void)
 {
-    if (available) {
-        ac97_reset_dma();
-    }
-    stream_active = false;
-    stream_paused = false;
-    stream_draining = false;
-    dma_running = false;
-    queued_frames = 0;
-    submitted_frames = 0;
-    in_flight = 0;
+    bool saved = spin_lock_irqsave(&audio_lock);
+    audio_stream_stop_locked();
+    spin_unlock_irqrestore(&audio_lock, saved);
 }
 
 size_t audio_stream_queued_frames(void) { return queued_frames; }
@@ -373,10 +409,12 @@ uint64_t audio_stream_position(void) { return played_frames; }
 
 void audio_stream_drain(void)
 {
-    if (!stream_active)
-        return;
-    stream_draining = true;
-    audio_poll();
+    bool saved = spin_lock_irqsave(&audio_lock);
+    if (stream_active) {
+        stream_draining = true;
+        audio_poll_locked();
+    }
+    spin_unlock_irqrestore(&audio_lock, saved);
 }
 
 bool audio_play_doremi(void)
