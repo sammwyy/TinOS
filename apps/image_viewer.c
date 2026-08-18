@@ -1,15 +1,22 @@
 #include <tinos/fs.h>
 #include <tinos/heap.h>
 #include <tinos/image.h>
+#include <tinos/io.h>
 #include <tinos/printf.h>
 #include <tinos/string.h>
+#include <tinos/thread.h>
 #include <tinos/ui.h>
 
 typedef struct {
     image_t image;
     char error[64];
     bool loaded;
+    bool decode_done;
+    bool closing;
+    /* Non-NULL while a read or a decode is in flight; NULL once one of
+     * them has finished (successfully, on error, or cancelled). */
     fs_io_request_t *request;
+    kernel_thread_t *decode_worker;
     char extension[16];
     window_t *window;
 } image_viewer_t;
@@ -56,12 +63,13 @@ static void image_viewer_on_open(window_t *win, const char *arg)
     wm_set_title(win, node->name);
 }
 
-static void image_viewer_loaded(fs_io_request_t *request, void *arg)
+/* Decoding runs on its own kernel thread so a slow JPEG/PNG/WebP does not
+ * stall the desktop loop - the PIT preempts it like any other thread. */
+static void image_viewer_decode_worker(void *arg)
 {
     image_viewer_t *viewer = arg;
-    if (!fs_io_ok(request)) {
-        strlcpy(viewer->error, "Unable to read file", sizeof(viewer->error));
-    } else {
+    fs_io_request_t *request = viewer->request;
+    if (!thread_cancelled()) {
         image_result_t result = image_decode(fs_io_data(request),
                                              fs_io_size(request),
                                              viewer->extension, &viewer->image);
@@ -72,22 +80,81 @@ static void image_viewer_loaded(fs_io_request_t *request, void *arg)
             viewer->loaded = true;
     }
     fs_io_release(request);
+
+    bool saved = irq_save();
     viewer->request = NULL;
-    wm_invalidate(viewer->window);
+    viewer->decode_done = true;
+    bool destroy = viewer->closing;
+    irq_restore(saved);
+    if (destroy) {
+        image_destroy(&viewer->image);
+        kfree(viewer);
+    }
+    thread_exit();
+}
+
+static void image_viewer_loaded(fs_io_request_t *request, void *arg)
+{
+    image_viewer_t *viewer = arg;
+    if (!fs_io_ok(request)) {
+        strlcpy(viewer->error, "Unable to read file", sizeof(viewer->error));
+        fs_io_release(request);
+        viewer->request = NULL;
+        wm_invalidate(viewer->window);
+        return;
+    }
+    viewer->decode_worker = thread_spawn("image-decode",
+                                         image_viewer_decode_worker, viewer);
+    if (!viewer->decode_worker) {
+        strlcpy(viewer->error, "Out of memory", sizeof(viewer->error));
+        fs_io_release(request);
+        viewer->request = NULL;
+        wm_invalidate(viewer->window);
+    }
+    /* On success the worker now owns `request` and releases it when done. */
+}
+
+static bool image_viewer_on_tick(window_t *win)
+{
+    image_viewer_t *viewer = win->priv;
+    if (!viewer)
+        return false;
+    bool saved = irq_save();
+    bool done = viewer->decode_done;
+    viewer->decode_done = false;
+    irq_restore(saved);
+    return done;
 }
 
 static void image_viewer_on_close(window_t *win)
 {
     image_viewer_t *viewer = win->priv;
-    if (viewer) {
-        if (viewer->request) {
-            fs_io_cancel(viewer->request);
-            fs_io_release(viewer->request);
-        }
-        image_destroy(&viewer->image);
-        kfree(viewer);
-    }
     win->priv = NULL;
+    if (!viewer)
+        return;
+
+    if (viewer->decode_worker) {
+        /* The worker owns `request` now; it releases it and (since
+         * `closing` will be set) frees `viewer` itself once it finishes. */
+        thread_cancel(viewer->decode_worker);
+        thread_detach(viewer->decode_worker);
+        bool saved = irq_save();
+        viewer->closing = true;
+        bool destroy_now = viewer->request == NULL;
+        irq_restore(saved);
+        if (destroy_now) {
+            image_destroy(&viewer->image);
+            kfree(viewer);
+        }
+        return;
+    }
+
+    if (viewer->request) {
+        fs_io_cancel(viewer->request);
+        fs_io_release(viewer->request);
+    }
+    image_destroy(&viewer->image);
+    kfree(viewer);
 }
 
 static void image_viewer_on_draw(window_t *win, rect_t client)
@@ -157,6 +224,7 @@ static const app_class_t image_viewer_class = {
     .on_close = image_viewer_on_close,
     .on_draw = image_viewer_on_draw,
     .on_key = image_viewer_on_key,
+    .on_tick = image_viewer_on_tick,
 };
 
 window_t *app_image_viewer_open(const char *path)
