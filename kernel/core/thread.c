@@ -1,20 +1,19 @@
-/* Kernel threads: private stacks, voluntary scheduling, PIT-driven
- * preemption on the boot processor, and cooperative scheduling on any SMP
- * application processor (see smp.c:ap_entry()).
+/* Kernel threads: private stacks. The boot processor's PIT drives real,
+ * timer-interrupt preemption (thread_preempt() below); SMP application
+ * processors have no local timer armed and instead run threads
+ * cooperatively, back to back, via thread_run() - see smp.c:ap_entry().
  *
  * The thread pool (threads[]) and every field two cores could touch at
  * once are protected by pool_lock, a real spinlock - irq_save()/
  * irq_restore() alone only ever stopped *this* core's own interrupts, so
  * once a second core can be running thread_run()/thread_preempt() at the
  * same time it is not enough. "current" and "the context to return to
- * when a thread yields" are inherently per-core, so they are now arrays
- * indexed by local APIC ID rather than single globals.
- *
- * thread_irq_resume_context stays a single global: it is only ever
- * touched by the timer-preemption path (thread_preempt()), and PIT
- * interrupts are only ever delivered to the boot processor (the legacy
- * 8259 PIC has no notion of a second core), so that path never runs on an
- * AP in the first place.
+ * when a thread yields" are inherently per-core, so they are arrays
+ * indexed by local APIC ID rather than single globals; the one exception,
+ * the cooperative-resume context prepare_cooperative_frame() hands to
+ * arch_resume_context() (context.S), travels in the synthetic frame's own
+ * %eax slot instead, precisely so two cores resuming at once never share
+ * a global to race on.
  */
 
 #include <tinos/arch.h>
@@ -44,6 +43,12 @@ struct kernel_thread {
     bool irq_frame_valid;
     uint32_t id;
     thread_state_t state;
+    /* The state (and, for THREAD_BLOCKED, the queue) a yield/sleep/block/
+     * exit wants once it is actually safe to publish - see the big
+     * comment on switch_to_scheduler() for why this can't just be
+     * `state` itself. */
+    thread_state_t pending_state;
+    thread_wait_queue_t *pending_queue;
     bool used;
     bool started;
     bool detached;
@@ -82,9 +87,11 @@ static inline void fpu_restore(const void *buf)
 static kernel_thread_t threads[THREAD_MAX];
 static spinlock_t      pool_lock;
 static uint32_t        next_id;
-static bool            preemption_enabled; /* boot-processor only */
+/* Set once the boot processor starts running threads; every core's
+ * thread_preempt() then reads it as a simple "is the scheduler live yet"
+ * gate, so it is intentionally a single shared flag, not per-core. */
+static bool            preemption_enabled;
 static size_t          scheduler_cursor;
-thread_context_t *thread_irq_resume_context; /* boot-processor only, see above */
 
 /* Per-CPU scheduling state, indexed by local APIC ID. QEMU (and every
  * machine this targets) hands out small, dense, 0-based APIC IDs, so no
@@ -134,7 +141,6 @@ void thread_init(void)
     next_id = 1;
     preemption_enabled = false;
     scheduler_cursor = 0;
-    thread_irq_resume_context = NULL;
 }
 
 static void thread_bootstrap(void)
@@ -176,7 +182,20 @@ static void wait_remove_locked(kernel_thread_t *thread)
 }
 
 /* Never call with pool_lock held: a thread giving up its own core must not
- * carry a lock across the switch, or nothing could ever release it. */
+ * carry a lock across the switch, or nothing could ever release it.
+ *
+ * Also never publish a state here that makes this thread claimable by
+ * another core (READY/BLOCKED/SLEEPING/DEAD) before this call returns:
+ * arch_context_switch() only finishes overwriting %esp partway through
+ * its own body, so for a few instructions this thread is still genuinely
+ * executing on its own stack even though `thread->context` already looks
+ * complete. A second core that claimed it in that window - because
+ * thread_yield()/sleep()/block()/thread_exit_code() had already set
+ * `state` to something claimable - would resume the very same stack this
+ * core is still standing on. Every caller below instead records the
+ * *intended* state in `pending_state` and lets thread_run() commit it to
+ * `state`, under pool_lock, only once this call has actually returned -
+ * which is the one moment both cores agree the handoff is done. */
 static void switch_to_scheduler(void)
 {
     kernel_thread_t *thread = current;
@@ -256,7 +275,7 @@ void thread_yield(void)
     if (!current)
         return;
     current->irq_frame_valid = false;
-    current->state = THREAD_READY;
+    current->pending_state = THREAD_READY;
     switch_to_scheduler();
 }
 
@@ -266,7 +285,7 @@ void thread_sleep(uint32_t milliseconds)
         return;
     current->irq_frame_valid = false;
     current->wake_at = timer_ticks() + milliseconds;
-    current->state = THREAD_SLEEPING;
+    current->pending_state = THREAD_SLEEPING;
     switch_to_scheduler();
 }
 
@@ -275,7 +294,7 @@ void thread_block(void)
     if (!current)
         return;
     current->irq_frame_valid = false;
-    current->state = THREAD_BLOCKED;
+    current->pending_state = THREAD_BLOCKED;
     switch_to_scheduler();
 }
 
@@ -283,19 +302,15 @@ void thread_block_on(thread_wait_queue_t *queue)
 {
     if (!current)
         return;
-
-    bool saved = spin_lock_irqsave(&pool_lock);
+    /* Linking into `queue` is deferred to thread_run(), alongside
+     * `pending_state`, for the same reason - see switch_to_scheduler().
+     * Linking it here instead would let a waker on another core find it
+     * in the queue and unlink it again (thread_wake_one() does that
+     * unconditionally) before `state` ever actually became BLOCKED, so
+     * the wakeup would be silently lost. */
     current->irq_frame_valid = false;
-    current->wait_next = NULL;
-    current->waiting_on = queue;
-    if (queue->tail)
-        queue->tail->wait_next = current;
-    else
-        queue->head = current;
-    queue->tail = current;
-    current->state = THREAD_BLOCKED;
-    spin_unlock_irqrestore(&pool_lock, saved);
-
+    current->pending_state = THREAD_BLOCKED;
+    current->pending_queue = queue;
     switch_to_scheduler();
 }
 
@@ -358,12 +373,13 @@ void thread_exit_code(int status)
     KASSERT(current != NULL);
     kernel_thread_t *thread = current;
 
-    bool saved = spin_lock_irqsave(&pool_lock);
+    /* `state` becoming DEAD, and waking any joiner, are both deferred to
+     * thread_run() alongside pending_state - see switch_to_scheduler().
+     * A joiner woken here, before the switch actually happened, would
+     * just re-block (thread_join()'s loop re-checks thread_state()), but
+     * nothing would wake it a second time once DEAD was for real. */
     thread->exit_status = status;
-    thread->state = THREAD_DEAD;
-    spin_unlock_irqrestore(&pool_lock, saved);
-
-    thread_wake_all(&thread->joiners);
+    thread->pending_state = THREAD_DEAD;
     switch_to_scheduler();
     panic("thread %u resumed after exit", thread->id);
 }
@@ -503,12 +519,35 @@ size_t thread_run(size_t budget)
         current = NULL;
         ran++;
 
+        /* The switch is now provably finished (arch_context_switch()
+         * returned), so this is the one safe place to publish whatever
+         * state thread_yield()/sleep()/block()/thread_exit_code() left in
+         * pending_state - see switch_to_scheduler(). */
         bool saved = spin_lock_irqsave(&pool_lock);
-        bool cleanup = thread->state == THREAD_DEAD && thread->detached;
+        thread_state_t new_state = thread->pending_state;
+        thread->state = new_state;
+        if (new_state == THREAD_BLOCKED && thread->pending_queue) {
+            thread_wait_queue_t *queue = thread->pending_queue;
+            thread->pending_queue = NULL;
+            thread->wait_next = NULL;
+            thread->waiting_on = queue;
+            if (queue->tail)
+                queue->tail->wait_next = thread;
+            else
+                queue->head = thread;
+            queue->tail = thread;
+        }
+        bool cleanup = new_state == THREAD_DEAD && thread->detached;
         uint8_t *stack = cleanup ? thread->stack : NULL;
         if (cleanup)
             memset(thread, 0, sizeof(*thread));
         spin_unlock_irqrestore(&pool_lock, saved);
+
+        /* A detached thread can never have a joiner (thread_join() and
+         * thread_detach() both assert/check the other did not happen
+         * first), so skipping this after cleanup loses nothing. */
+        if (new_state == THREAD_DEAD && !cleanup)
+            thread_wake_all(&thread->joiners);
         if (stack)
             kfree(stack);
     }
@@ -533,12 +572,19 @@ static void prepare_cooperative_frame(kernel_thread_t *thread)
     thread->irq_frame.cs = GDT_KERNEL_CODE;
     thread->irq_frame.eflags = 0x002;
     thread->irq_frame.ss = GDT_KERNEL_DATA;
+    /* arch_resume_context reads this straight out of %eax, which isr_common's
+     * popa restores from this same frame right before the iret that lands
+     * there - no shared global, so two cores resuming a cooperative-yield
+     * thread at the same time (the boot processor's PIT and an AP's own
+     * local APIC timer) can never race on it. */
+    thread->irq_frame.eax = (uint32_t)(uintptr_t)&thread->context;
     thread->irq_frame_ptr = &thread->irq_frame;
-    thread_irq_resume_context = &thread->context;
 }
 
-/* Timer IRQ entry point - boot processor only (see the file comment).
- * The caller restores the returned frame with iret. */
+/* Timer IRQ entry point - the boot processor's PIT (see kernel/arch/x86/
+ * idt.c). SMP application processors run thread_run() cooperatively, in a
+ * loop, instead - see smp.c:ap_entry() for why. The caller restores the
+ * returned frame with iret. */
 regs_t *thread_preempt(regs_t *frame)
 {
     if (!preemption_enabled || scheduler_switching || !current ||
@@ -558,23 +604,27 @@ regs_t *thread_preempt(regs_t *frame)
             break;
         }
     }
-    if (next)
-        old->state = THREAD_READY;
-    spin_unlock_irqrestore(&pool_lock, saved);
-
-    if (!next)
+    if (!next) {
+        spin_unlock_irqrestore(&pool_lock, saved);
         return frame;
+    }
 
     /* `old` is mid-instruction (interrupted by the timer), so its FPU/SSE
      * state is live in the hardware registers right now and must be
-     * captured before anything else can touch them. Both threads are now
-     * exclusively owned by this core (READY->RUNNING was claimed under
-     * the lock above), so the rest needs no further locking. */
+     * captured before anything else can touch it. This - and old->state
+     * only turning READY once it is done - stays inside pool_lock: another
+     * core's claim_ready_thread() only ever checks state == THREAD_READY,
+     * so publishing READY before old->irq_frame_ptr/irq_frame_valid/fpu
+     * were actually consistent let a second core resume old from a stale
+     * or torn frame the moment two cores had genuine work at once (the
+     * `else` branch below, fpu_restore() from a not-yet-fully-saved
+     * buffer, or arch_resume_irq() following a stale irq_frame_ptr). */
     fpu_save(old->fpu);
-
     old->irq_frame_ptr = frame;
     old->irq_frame_valid = true;
     prepare_irq_resume(old);
+    old->state = THREAD_READY;
+    spin_unlock_irqrestore(&pool_lock, saved);
 
     current = next;
     if (!next->started || !next->irq_frame_valid) {

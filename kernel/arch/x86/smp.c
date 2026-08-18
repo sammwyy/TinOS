@@ -47,10 +47,18 @@ void ap_entry(void)
     __atomic_fetch_add(&cpus_online, 1, __ATOMIC_SEQ_CST);
     klog("[smp ] cpu apic=%u up (%u online)\n", id, cpus_online);
 
-    /* No local timer is set up for this core, so there is nothing to wake
-     * a halted core back up - spin cooperatively instead of hlt. Threads
-     * pinned to the boot processor (filesystem/network/gfx work) are
-     * simply never handed to this loop; see thread_spawn_pinned(). */
+    /* No local timer is armed for this core, so there is nothing to wake
+     * a halted core back up - spin cooperatively instead of hlt. A real
+     * per-core preemption timer (the local APIC has one) was tried and
+     * pulled back out: it exposed a genuine cross-core race in how
+     * thread_preempt()/thread_run() hand a thread off between cores that
+     * was not fully run to ground in the time available, and shipping an
+     * intermittent scheduler crash is worse than not having AP-side
+     * preemption at all. claim_ready_thread() and thread_preempt() are
+     * still both correctly pool_lock-protected for the cooperative case
+     * this loop actually exercises. Threads pinned to the boot processor
+     * (filesystem/network/gfx work) are simply never handed to this loop;
+     * see thread_spawn_pinned(). */
     for (;;) {
         if (thread_run(4) == 0)
             __asm__ volatile("pause");
