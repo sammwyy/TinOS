@@ -7,13 +7,9 @@
 #include <tinos/ui.h>
 #include "icons_generated.h"
 
-/* ------------------------------------------------------------------ */
-/* Shapes                                                              */
-/* ------------------------------------------------------------------ */
+/* Shapes */
 
-/* ------------------------------------------------------------------ */
-/* Icons                                                               */
-/* ------------------------------------------------------------------ */
+/* Icons */
 
 #if 0 /* Legacy hardcoded icon table; resources/icons is authoritative. */
 typedef struct {
@@ -321,9 +317,7 @@ void widget_icon(int x, int y, int size, icon_t icon)
         (void)widget_icon_name(x, y, size, name);
 }
 
-/* ------------------------------------------------------------------ */
-/* Panels, buttons, scrollbars                                         */
-/* ------------------------------------------------------------------ */
+/* Panels, buttons, scrollbars */
 
 void widget_panel(rect_t r, color_t fill, color_t border)
 {
@@ -410,9 +404,7 @@ void widget_scrollbar(rect_t track, size_t first_visible, size_t visible,
               COLOR_PANEL_LIGHT, COLOR_BORDER);
 }
 
-/* ------------------------------------------------------------------ */
-/* Text input                                                          */
-/* ------------------------------------------------------------------ */
+/* Text input */
 
 void text_input_reset(text_input_t *input, const char *initial)
 {

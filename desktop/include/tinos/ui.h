@@ -7,9 +7,7 @@
 #include <tinos/kernel.h>
 #include <tinos/types.h>
 
-/* ------------------------------------------------------------------ */
-/* Theme                                                               */
-/* ------------------------------------------------------------------ */
+/* Theme */
 
 #define COLOR_DESKTOP_TOP     RGB(0x3a, 0x49, 0x61)
 #define COLOR_DESKTOP_BOTTOM  RGB(0x18, 0x20, 0x2d)
@@ -43,9 +41,7 @@
 #define WINDOW_MIN_W 180
 #define WINDOW_MIN_H 120
 
-/* ------------------------------------------------------------------ */
-/* Windows                                                             */
-/* ------------------------------------------------------------------ */
+/* Windows */
 
 typedef struct window window_t;
 
@@ -118,9 +114,7 @@ bool wm_handle_mouse(const mouse_event_t *ev);
 /* The area windows may occupy (the screen minus the taskbar). */
 rect_t wm_workspace(void);
 
-/* ------------------------------------------------------------------ */
-/* Widgets                                                             */
-/* ------------------------------------------------------------------ */
+/* Widgets */
 
 typedef enum {
     ICON_TERMINAL = 0,
@@ -180,9 +174,7 @@ bool text_input_key(text_input_t *input, const key_event_t *ev);
 void text_input_draw(const text_input_t *input, rect_t r, const char *label,
                      bool blink_on);
 
-/* ------------------------------------------------------------------ */
-/* Applications                                                        */
-/* ------------------------------------------------------------------ */
+/* Applications */
 
 typedef struct {
     const char *name;

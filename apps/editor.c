@@ -43,9 +43,7 @@ typedef struct {
 static char  *editor_clipboard;
 static size_t editor_clipboard_len;
 
-/* ------------------------------------------------------------------ */
-/* Buffer helpers                                                      */
-/* ------------------------------------------------------------------ */
+/* Buffer helpers */
 
 static bool ensure_capacity(editor_t *ed, size_t needed)
 {
@@ -132,9 +130,7 @@ static void delete_range(editor_t *ed, size_t start, size_t count)
     ed->modified           = true;
 }
 
-/* ------------------------------------------------------------------ */
-/* Selection and clipboard                                             */
-/* ------------------------------------------------------------------ */
+/* Selection and clipboard */
 
 static void selection_range(const editor_t *ed, size_t *start, size_t *end)
 {
@@ -179,9 +175,7 @@ static void selection_copy(editor_t *ed)
     editor_clipboard_len  = len;
 }
 
-/* ------------------------------------------------------------------ */
-/* Load and save                                                       */
-/* ------------------------------------------------------------------ */
+/* Load and save */
 
 static void editor_update_title(window_t *win, editor_t *ed)
 {
@@ -237,9 +231,7 @@ static void editor_save(window_t *win, editor_t *ed)
     desktop_notify("Saved %s (%u bytes)", ed->path, (uint32_t)ed->length);
 }
 
-/* ------------------------------------------------------------------ */
-/* Application class                                                   */
-/* ------------------------------------------------------------------ */
+/* Application class */
 
 static void editor_on_open(window_t *win, const char *arg)
 {

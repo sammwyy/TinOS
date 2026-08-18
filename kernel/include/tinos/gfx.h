@@ -36,7 +36,7 @@ typedef struct {
 
 extern const uint8_t font8x16[256][16];
 
-/* Mode setting ------------------------------------------------------- */
+/* Mode setting */
 bool             gfx_init(int width, int height);
 bool             gfx_resize(int width, int height);
 const fb_info_t *gfx_info(void);
@@ -44,18 +44,18 @@ bool             gfx_active(void);
 int              gfx_width(void);
 int              gfx_height(void);
 
-/* Presentation -------------------------------------------------------- */
+/* Presentation */
 void gfx_present(void);
 void gfx_mark_dirty(int x, int y, int w, int h);
 void gfx_mark_all_dirty(void);
 
-/* Clipping ------------------------------------------------------------ */
+/* Clipping */
 void   gfx_clip_push(rect_t r); /* intersected with the current clip */
 void   gfx_clip_pop(void);
 void   gfx_clip_reset(void);
 rect_t gfx_clip_current(void);
 
-/* Primitives ---------------------------------------------------------- */
+/* Primitives */
 void gfx_clear(color_t color);
 void gfx_pixel(int x, int y, color_t color);
 void gfx_fill_rect(int x, int y, int w, int h, color_t color);
@@ -67,7 +67,7 @@ void gfx_bevel(int x, int y, int w, int h, color_t light, color_t dark);
 void gfx_blend_rect(int x, int y, int w, int h, color_t color, uint8_t alpha);
 void gfx_blit_image(rect_t dst, const uint32_t *pixels, int width, int height);
 
-/* Text ---------------------------------------------------------------- */
+/* Text */
 void gfx_char(int x, int y, char c, color_t fg);
 void gfx_char_bg(int x, int y, char c, color_t fg, color_t bg);
 void gfx_text(int x, int y, const char *s, color_t fg);
@@ -75,7 +75,7 @@ void gfx_text_bg(int x, int y, const char *s, color_t fg, color_t bg);
 void gfx_text_n(int x, int y, const char *s, size_t n, color_t fg);
 int  gfx_text_width(const char *s);
 
-/* Rectangle helpers ---------------------------------------------------- */
+/* Rectangle helpers */
 static inline rect_t rect_make(int x, int y, int w, int h)
 {
     rect_t r = { x, y, w, h };

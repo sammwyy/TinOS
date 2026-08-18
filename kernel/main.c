@@ -166,40 +166,40 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
          magic, mbi_addr);
 
     if (magic != MULTIBOOT2_BOOTLOADER_MAGIC) {
-        boot_fail("not loaded by a Multiboot2 bootloader (magic 0x%08x)",
-                  magic);
+        boot_fail("multiboot2: bad magic 0x%08x (expected 0x%08x)",
+                  magic, MULTIBOOT2_BOOTLOADER_MAGIC);
         panic("bad multiboot2 magic 0x%08x - expected 0x%08x", magic,
               MULTIBOOT2_BOOTLOADER_MAGIC);
     }
 
     const char *loader = NULL;
     read_multiboot_strings(mbi, &loader);
-    boot_step("Multiboot2 handover from %s", loader);
+    boot_step("multiboot2: bootloader=%s", loader);
 
-    /* --- platform ------------------------------------------------- */
+    /* Platform */
     gdt_init();
-    boot_step("Global descriptor table installed (flat 32-bit model)");
+    boot_step("gdt: flat 32-bit segments loaded");
     idt_init();
-    boot_step("Interrupt descriptor table and 8259A PIC ready");
+    boot_step("idt: vectors installed, i8259 PIC remapped");
 
     if (!arch_fpu_init())
         panic("CPU lacks FXSAVE/SSE2 - TinOS requires them");
-    boot_step("SSE2 enabled");
+    boot_step("fpu: SSE2 (FXSAVE/FXRSTOR) enabled");
 
     paging_init();
-    boot_step("Paging enabled");
+    boot_step("mm: paging enabled, identity-mapped");
 
     timer_init(TIMER_HZ);
     rtc_init();
     sti();
-    boot_step("System timer running at %u Hz, RTC online", TIMER_HZ);
+    boot_step("timer: PIT %u Hz, rtc online", TIMER_HZ);
     pause_ms(BOOT_STEP_DELAY_MS);
 
     char cpu[64];
     cpu_brand_string(cpu, sizeof(cpu));
-    boot_note("CPU: %s", cpu);
+    boot_note("cpu: %s", cpu);
 
-    /* --- memory --------------------------------------------------- */
+    /* Memory */
     pmm_init(mbi);
     heap_init();
     async_init();
@@ -212,57 +212,57 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     audio_driver_register();
     audio_codecs_init();
     image_codecs_init();
-    boot_step("Memory manager online");
-    boot_note("Asynchronous worker runtime online");
-    boot_note("Kernel thread scheduler online (private stacks, PIT preemption)");
-    boot_note("%u MiB usable in %u regions, %u MiB free",
+    boot_step("mm: heap and physical allocator online");
+    boot_note("async: worker pool online");
+    boot_note("sched: kernel threads online (private stacks, PIT preemption)");
+    boot_note("mm: %u MiB usable, %u regions, %u MiB free",
               (uint32_t)(pmm_total_bytes() / (1024 * 1024)),
               (uint32_t)pmm_region_count(),
               (uint32_t)(pmm_free_bytes() / (1024 * 1024)));
     pause_ms(BOOT_STEP_DELAY_MS);
 
-    /* --- SMP -------------------------------------------------------- */
+    /* SMP */
     size_t cpus = smp_init(mbi);
     if (cpus > 1)
-        boot_step("SMP: %u CPUs online", (uint32_t)cpus);
+        boot_step("smp: %u cpus online", (uint32_t)cpus);
     else
-        boot_note("SMP: single-core");
+        boot_note("smp: single-core");
 
-    /* --- input ---------------------------------------------------- */
+    /* Input */
     keyboard_init();
-    boot_step("PS/2 keyboard driver attached to IRQ1");
+    boot_step("i8042: keyboard on irq1");
     bool mouse = mouse_init();
     if (mouse)
-        boot_step("PS/2 mouse driver attached to IRQ12");
+        boot_step("i8042: mouse on irq12");
     else
-        boot_note("No PS/2 mouse detected - keyboard control only");
+        boot_note("i8042: no mouse detected, keyboard only");
     pause_ms(BOOT_STEP_DELAY_MS);
 
-    /* --- storage -------------------------------------------------- */
+    /* Storage */
     size_t ata_disks = ata_pio_init();
-    boot_note("ATA PIO: %u disk(s) detected", (uint32_t)ata_disks);
+    boot_note("ata: %u disk(s) detected (PIO)", (uint32_t)ata_disks);
 
-    /* --- filesystem ----------------------------------------------- */
+    /* Filesystem */
     fs_init();
-    boot_step("In-memory filesystem mounted at /");
+    boot_step("vfs: tmpfs mounted on /");
     size_t mounted = 0;
     for (size_t i = 0; i < ata_pio_count(); i++)
         storage_mount_device(ata_pio_device(i), &mounted);
-    boot_note("%u nodes in the initial tree", (uint32_t)fs_node_count());
+    boot_note("vfs: %u nodes in tree", (uint32_t)fs_node_count());
     pause_ms(BOOT_STEP_DELAY_MS);
 
-    /* --- optional self test --------------------------------------- */
+    /* Optional self test */
     if (strstr(boot_cmdline, "selftest")) {
-        boot_step("Running kernel self-tests (results on COM1)");
+        boot_step("selftest: running (log on ttyS0)");
         int failures = selftest_run();
         if (failures)
-            boot_fail("%d self-test failure(s) - see the serial log", failures);
+            boot_fail("selftest: %d failure(s), see serial log", failures);
         else
-            boot_step("All kernel self-tests passed");
+            boot_step("selftest: all tests passed");
         pause_ms(BOOT_STEP_DELAY_MS);
     }
 
-    /* --- graphics ------------------------------------------------- */
+    /* Graphics */
     size_t devices = pci_scan();
     size_t bound = driver_bind_all();
     for (size_t i = 0; i < virtio_blk_count(); i++)
@@ -282,11 +282,10 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     bool network = net_init();
     if (network)
         net_async_init();
-    boot_step("PCI bus scanned, %u devices", (uint32_t)devices);
-    boot_note("Driver model online: %u devices, %u drivers bound",
+    boot_step("pci: %u device(s) found", (uint32_t)devices);
+    boot_note("driver: %u devices, %u drivers bound",
               (uint32_t)device_count(), (uint32_t)bound);
-    boot_note("Network stack %s", network ? "configured by DHCP" :
-              "unavailable");
+    boot_note("net: %s", network ? "dhcp configured" : "unavailable");
 
     vga_text_set_color(VGA_YELLOW, VGA_BLACK);
     vga_text_printf("\n  Starting the graphical desktop at %dx%d ...\n",
@@ -295,7 +294,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     pause_ms(BOOT_HOLD_MS);
 
     if (!gfx_init(SCREEN_WIDTH, SCREEN_HEIGHT)) {
-        boot_fail("VGA graphics initialisation failed");
+        boot_fail("vga: framebuffer init failed");
         panic("no usable VGA framebuffer.\n"
               "TinOS needs a Bochs/QEMU DISPI capable adapter.\n"
               "Try: qemu-system-i386 -vga std -cdrom tinos.iso");
@@ -303,7 +302,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     vga_text_disable(); /* text console memory is no longer displayed */
     klog("[boot] graphics mode active, entering desktop\n");
 
-    /* --- desktop -------------------------------------------------- */
+    /* Desktop */
     desktop_run();
 
     panic("desktop_run() returned unexpectedly");

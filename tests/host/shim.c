@@ -14,7 +14,7 @@
 #include <tinos/net.h>
 #include <tinos/sh.h>
 
-/* --- heap ---------------------------------------------------------- */
+/* Heap */
 
 static size_t live_allocations;
 
@@ -67,7 +67,7 @@ void heap_get_stats(heap_stats_t *out)
     out->heap_free  = out->heap_total - out->heap_used;
 }
 
-/* --- clock --------------------------------------------------------- */
+/* Clock */
 
 static uint32_t fake_clock = 1000;
 
@@ -76,7 +76,7 @@ uint32_t fs_clock_ms(void)
     return fake_clock += 5;
 }
 
-/* --- logging and panics -------------------------------------------- */
+/* Logging and panics */
 
 void klog(const char *fmt, ...)
 {
@@ -98,7 +98,7 @@ void panic(const char *fmt, ...)
     abort();
 }
 
-/* --- system information -------------------------------------------- */
+/* System information */
 
 void sys_info_get(sys_info_t *out)
 {

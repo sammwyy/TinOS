@@ -31,9 +31,7 @@ static void doremi_worker(void *arg)
 }
 #endif
 
-/* ------------------------------------------------------------------ */
-/* Helpers                                                             */
-/* ------------------------------------------------------------------ */
+/* Helpers */
 
 static void report(stream_t *err, const char *cmd, const char *path,
                    fs_result_t r)
@@ -135,9 +133,7 @@ static void format_size(size_t bytes, char *buf, size_t size)
                   (uint32_t)((bytes % (1024 * 1024)) * 10 / (1024 * 1024)));
 }
 
-/* ------------------------------------------------------------------ */
-/* Navigation                                                          */
-/* ------------------------------------------------------------------ */
+/* Navigation */
 
 static int cmd_pwd(shell_t *sh, int argc, char **argv, stream_t *in,
                    stream_t *out, stream_t *err)
@@ -180,9 +176,7 @@ static int cmd_cd(shell_t *sh, int argc, char **argv, stream_t *in,
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* Listing                                                             */
-/* ------------------------------------------------------------------ */
+/* Listing */
 
 static void ls_long_entry(stream_t *out, const fs_node_t *node)
 {
@@ -331,9 +325,7 @@ static int cmd_tree(shell_t *sh, int argc, char **argv, stream_t *in,
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* Creation and removal                                                */
-/* ------------------------------------------------------------------ */
+/* Creation and removal */
 
 static int cmd_mkdir(shell_t *sh, int argc, char **argv, stream_t *in,
                      stream_t *out, stream_t *err)
@@ -435,9 +427,7 @@ static int cmd_rm(shell_t *sh, int argc, char **argv, stream_t *in,
     return status;
 }
 
-/* ------------------------------------------------------------------ */
-/* Copy and move                                                       */
-/* ------------------------------------------------------------------ */
+/* Copy and move */
 
 static int copy_or_move(shell_t *sh, int argc, char **argv, stream_t *err,
                         bool move)
@@ -502,9 +492,7 @@ static int cmd_mv(shell_t *sh, int argc, char **argv, stream_t *in,
     return copy_or_move(sh, argc, argv, err, true);
 }
 
-/* ------------------------------------------------------------------ */
-/* Text                                                                */
-/* ------------------------------------------------------------------ */
+/* Text */
 
 static int cmd_echo(shell_t *sh, int argc, char **argv, stream_t *in,
                     stream_t *out, stream_t *err)
@@ -885,9 +873,7 @@ static int cmd_sort(shell_t *sh, int argc, char **argv, stream_t *in,
     return status;
 }
 
-/* ------------------------------------------------------------------ */
-/* Information                                                         */
-/* ------------------------------------------------------------------ */
+/* Information */
 
 static int cmd_stat(shell_t *sh, int argc, char **argv, stream_t *in,
                     stream_t *out, stream_t *err)
@@ -1020,9 +1006,7 @@ static int cmd_history(shell_t *sh, int argc, char **argv, stream_t *in,
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* Commands that talk to the desktop                                   */
-/* ------------------------------------------------------------------ */
+/* Commands that talk to the desktop */
 
 static int cmd_clear(shell_t *sh, int argc, char **argv, stream_t *in,
                      stream_t *out, stream_t *err)
@@ -1187,9 +1171,7 @@ static int cmd_shutdown(shell_t *sh, int argc, char **argv, stream_t *in,
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* Table                                                               */
-/* ------------------------------------------------------------------ */
+/* Table */
 
 static int cmd_ping(shell_t *sh, int argc, char **argv, stream_t *in,
                     stream_t *out, stream_t *err)

@@ -26,9 +26,7 @@ static rect_t    clip;
 static rect_t dirty_rects[MAX_DIRTY_RECTS];
 static size_t dirty_count;
 
-/* ------------------------------------------------------------------ */
-/* Rectangles                                                          */
-/* ------------------------------------------------------------------ */
+/* Rectangles */
 
 bool rect_empty(rect_t r)
 {
@@ -44,9 +42,7 @@ rect_t rect_intersect(rect_t a, rect_t b)
     return rect_make(x0, y0, MAX(0, x1 - x0), MAX(0, y1 - y0));
 }
 
-/* ------------------------------------------------------------------ */
-/* Mode setting                                                        */
-/* ------------------------------------------------------------------ */
+/* Mode setting */
 
 bool gfx_init(int width, int height)
 {
@@ -124,9 +120,7 @@ int gfx_height(void)
     return fb.height;
 }
 
-/* ------------------------------------------------------------------ */
-/* Presentation                                                        */
-/* ------------------------------------------------------------------ */
+/* Presentation */
 
 void gfx_mark_dirty(int x, int y, int w, int h)
 {
@@ -208,9 +202,7 @@ void gfx_present(void)
     dirty_count = 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* Clipping                                                            */
-/* ------------------------------------------------------------------ */
+/* Clipping */
 
 void gfx_clip_reset(void)
 {
@@ -240,9 +232,7 @@ rect_t gfx_clip_current(void)
     return clip;
 }
 
-/* ------------------------------------------------------------------ */
-/* Primitives                                                          */
-/* ------------------------------------------------------------------ */
+/* Primitives */
 
 void gfx_pixel(int x, int y, color_t color)
 {
@@ -381,9 +371,7 @@ void gfx_blit_image(rect_t dst, const uint32_t *pixels, int width, int height)
     gfx_mark_dirty(r.x, r.y, r.w, r.h);
 }
 
-/* ------------------------------------------------------------------ */
-/* Text                                                               */
-/* ------------------------------------------------------------------ */
+/* Text */
 
 static void draw_glyph(int x, int y, char c, color_t fg, color_t bg,
                        bool opaque)

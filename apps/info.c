@@ -11,9 +11,7 @@
 #include <tinos/string.h>
 #include <tinos/ui.h>
 
-/* ------------------------------------------------------------------ */
-/* About                                                               */
-/* ------------------------------------------------------------------ */
+/* About */
 
 static const char *const about_lines[] = {
     "TinOS " TINOS_VERSION,
@@ -56,9 +54,7 @@ window_t *app_about_open(const char *arg)
     return wm_open(&about_class, 512, 420, "About TinOS", arg);
 }
 
-/* ------------------------------------------------------------------ */
-/* System information                                                  */
-/* ------------------------------------------------------------------ */
+/* System information */
 
 typedef struct {
     uint32_t last_second;
@@ -187,9 +183,7 @@ window_t *app_sysinfo_open(const char *arg)
     return wm_open(&sysinfo_class, 480, 420, "System Information", arg);
 }
 
-/* ------------------------------------------------------------------ */
-/* Application registry (drives the start menu)                        */
-/* ------------------------------------------------------------------ */
+/* Application registry (drives the start menu) */
 
 static window_t *launch_terminal(const char *arg)
 {

@@ -73,8 +73,6 @@ static void check_contains(shell_t *sh, const char *line, const char *needle)
     stream_free(&out);
 }
 
-/* ------------------------------------------------------------------ */
-
 static void test_heap(void)
 {
     /* Allocate, write and free a range of sizes; the pattern check catches

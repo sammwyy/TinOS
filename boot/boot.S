@@ -10,9 +10,7 @@
 .set MB2_MAGIC,     0xE85250D6
 .set MB2_ARCH_I386, 0
 
-/* ------------------------------------------------------------------ */
-/* Multiboot2 header                                                   */
-/* ------------------------------------------------------------------ */
+/* Multiboot2 header */
 .section .multiboot, "a"
 .align 8
 mb2_header_start:
@@ -43,9 +41,7 @@ mb2_tag_console_end:
     .long   8
 mb2_header_end:
 
-/* ------------------------------------------------------------------ */
-/* Boot stack                                                          */
-/* ------------------------------------------------------------------ */
+/* Boot stack */
 .section .bss, "aw", @nobits
 .align 16
     .global boot_stack_bottom
@@ -54,9 +50,7 @@ boot_stack_bottom:
     .global boot_stack_top
 boot_stack_top:
 
-/* ------------------------------------------------------------------ */
-/* Entry point                                                         */
-/* ------------------------------------------------------------------ */
+/* Entry point */
 .section .text
 .global _start
 .type _start, @function

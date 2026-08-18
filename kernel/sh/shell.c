@@ -23,9 +23,7 @@ struct shell {
     int          last_status;
 };
 
-/* ------------------------------------------------------------------ */
-/* Lifecycle                                                           */
-/* ------------------------------------------------------------------ */
+/* Lifecycle */
 
 shell_t *shell_create(const char *initial_cwd)
 {
@@ -52,9 +50,7 @@ void shell_destroy(shell_t *sh)
     kfree(sh);
 }
 
-/* ------------------------------------------------------------------ */
-/* Working directory                                                   */
-/* ------------------------------------------------------------------ */
+/* Working directory */
 
 const char *shell_cwd(shell_t *sh)
 {
@@ -97,9 +93,7 @@ const char *shell_previous_cwd(shell_t *sh)
     return sh->previous_cwd;
 }
 
-/* ------------------------------------------------------------------ */
-/* Requests to the UI                                                  */
-/* ------------------------------------------------------------------ */
+/* Requests to the UI */
 
 void shell_request(shell_t *sh, sh_request_t request, const char *arg)
 {
@@ -117,9 +111,7 @@ sh_request_t shell_take_request(shell_t *sh, char *arg, size_t arg_size)
     return request;
 }
 
-/* ------------------------------------------------------------------ */
-/* History                                                             */
-/* ------------------------------------------------------------------ */
+/* History */
 
 static void history_add(shell_t *sh, const char *line)
 {
@@ -155,9 +147,7 @@ const char *shell_history_at(shell_t *sh, size_t index)
     return sh->history[index];
 }
 
-/* ------------------------------------------------------------------ */
-/* Execution                                                           */
-/* ------------------------------------------------------------------ */
+/* Execution */
 
 static int run_stage(shell_t *sh, sh_command_t *cmd, stream_t *in,
                      stream_t *out, stream_t *err)
@@ -261,9 +251,7 @@ int shell_execute(shell_t *sh, const char *input, stream_t *out)
     return status;
 }
 
-/* ------------------------------------------------------------------ */
-/* Completion                                                          */
-/* ------------------------------------------------------------------ */
+/* Completion */
 
 bool shell_complete(shell_t *sh, const char *word, char *out, size_t out_size)
 {

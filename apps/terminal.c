@@ -43,9 +43,7 @@ typedef struct {
     uint64_t blink_at;
 } terminal_t;
 
-/* ------------------------------------------------------------------ */
-/* Scrollback                                                          */
-/* ------------------------------------------------------------------ */
+/* Scrollback */
 
 static void term_push_line(terminal_t *t, const char *text, size_t len)
 {
@@ -113,9 +111,7 @@ static void term_clear(terminal_t *t)
     t->scroll     = 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* Prompt and command execution                                        */
-/* ------------------------------------------------------------------ */
+/* Prompt and command execution */
 
 static void term_prompt_text(terminal_t *t, char *buf, size_t size)
 {
@@ -187,9 +183,7 @@ static void term_run(window_t *win, terminal_t *t)
     wm_invalidate(win);
 }
 
-/* ------------------------------------------------------------------ */
-/* Line editing                                                        */
-/* ------------------------------------------------------------------ */
+/* Line editing */
 
 static void term_insert(terminal_t *t, char c)
 {
@@ -260,9 +254,7 @@ static void term_complete(terminal_t *t)
     t->cursor = MIN(new_cursor, t->input_len);
 }
 
-/* ------------------------------------------------------------------ */
-/* Application class                                                   */
-/* ------------------------------------------------------------------ */
+/* Application class */
 
 static void terminal_on_resize(window_t *win, rect_t client)
 {

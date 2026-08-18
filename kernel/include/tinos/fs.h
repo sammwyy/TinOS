@@ -61,7 +61,7 @@ struct fs_node {
  * (arch timer) and by the host test harness. */
 uint32_t fs_clock_ms(void);
 
-/* Lifecycle ----------------------------------------------------------- */
+/* Lifecycle */
 void       fs_init(void);
 void       fs_shutdown(void); /* frees the whole tree (host tests)      */
 fs_node_t *fs_root(void);
@@ -74,7 +74,7 @@ uint32_t fs_generation(void);
 
 const char *fs_strerror(fs_result_t err);
 
-/* Lookup --------------------------------------------------------------- */
+/* Lookup */
 fs_result_t fs_resolve(fs_node_t *cwd, const char *path, fs_node_t **out);
 fs_result_t fs_resolve_parent(fs_node_t *cwd, const char *path,
                               fs_node_t **parent, char *name, size_t name_size);
@@ -83,7 +83,7 @@ size_t      fs_child_count(const fs_node_t *dir);
 size_t      fs_path(const fs_node_t *node, char *buf, size_t size);
 bool        fs_is_ancestor(const fs_node_t *ancestor, const fs_node_t *node);
 
-/* Mutation ------------------------------------------------------------- */
+/* Mutation */
 fs_result_t fs_mkdir(fs_node_t *cwd, const char *path, fs_node_t **out);
 fs_result_t fs_mkdir_p(fs_node_t *cwd, const char *path, fs_node_t **out);
 fs_result_t fs_create(fs_node_t *cwd, const char *path, fs_node_t **out);
@@ -98,7 +98,7 @@ fs_result_t fs_copy_node(fs_node_t *src, fs_node_t *dst_dir,
                          const char *new_name, bool recursive,
                          fs_node_t **out);
 
-/* File contents -------------------------------------------------------- */
+/* File contents */
 fs_result_t fs_write(fs_node_t *file, const void *data, size_t len);
 fs_result_t fs_append(fs_node_t *file, const void *data, size_t len);
 fs_result_t fs_write_path(fs_node_t *cwd, const char *path, const void *data,

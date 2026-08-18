@@ -49,9 +49,7 @@ const char *fs_strerror(fs_result_t err)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Node bookkeeping                                                    */
-/* ------------------------------------------------------------------ */
+/* Node bookkeeping */
 
 static fs_node_t *node_alloc(const char *name, fs_type_t type)
 {
@@ -118,9 +116,7 @@ static void node_free_tree(fs_node_t *node)
     node_free(node);
 }
 
-/* ------------------------------------------------------------------ */
-/* Initial tree                                                        */
-/* ------------------------------------------------------------------ */
+/* Initial tree */
 
 static const char readme_txt[] =
     "Welcome to TinOS!\n"
@@ -250,9 +246,7 @@ size_t fs_total_bytes(void)
     return total_bytes;
 }
 
-/* ------------------------------------------------------------------ */
-/* Lookup                                                              */
-/* ------------------------------------------------------------------ */
+/* Lookup */
 
 fs_node_t *fs_child(const fs_node_t *dir, const char *name)
 {
@@ -418,9 +412,7 @@ size_t fs_path(const fs_node_t *node, char *buf, size_t size)
     return pos;
 }
 
-/* ------------------------------------------------------------------ */
-/* Creation and removal                                                */
-/* ------------------------------------------------------------------ */
+/* Creation and removal */
 
 static fs_result_t validate_name(const char *name)
 {
@@ -568,9 +560,7 @@ fs_result_t fs_rename(fs_node_t *node, const char *new_name)
     return FS_OK;
 }
 
-/* ------------------------------------------------------------------ */
-/* Move and copy                                                       */
-/* ------------------------------------------------------------------ */
+/* Move and copy */
 
 fs_result_t fs_move(fs_node_t *cwd, const char *src, const char *dst)
 {
@@ -698,9 +688,7 @@ fs_result_t fs_copy(fs_node_t *cwd, const char *src, const char *dst,
     return fs_copy_node(node, target_dir, new_name, recursive, NULL);
 }
 
-/* ------------------------------------------------------------------ */
-/* File contents                                                       */
-/* ------------------------------------------------------------------ */
+/* File contents */
 
 static fs_result_t ensure_capacity(fs_node_t *file, size_t needed)
 {

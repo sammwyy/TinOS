@@ -11,9 +11,7 @@
 #include <tinos/kernel.h>
 #include <tinos/types.h>
 
-/* ------------------------------------------------------------------ */
-/* Growable byte stream                                                */
-/* ------------------------------------------------------------------ */
+/* Growable byte stream */
 
 typedef struct {
     char  *data;
@@ -32,9 +30,7 @@ void stream_printf(stream_t *s, const char *fmt, ...) PRINTFLIKE(2, 3);
 const char *stream_text(stream_t *s);
 void        stream_take(stream_t *dst, stream_t *src); /* move ownership */
 
-/* ------------------------------------------------------------------ */
-/* Parsing                                                             */
-/* ------------------------------------------------------------------ */
+/* Parsing */
 
 typedef enum {
     SH_REDIR_NONE = 0,
@@ -77,9 +73,7 @@ typedef struct {
 bool sh_parse(const char *input, sh_line_t *line);
 void sh_line_free(sh_line_t *line);
 
-/* ------------------------------------------------------------------ */
-/* Shell instance                                                      */
-/* ------------------------------------------------------------------ */
+/* Shell instance */
 
 #define SH_HISTORY_MAX 64
 
@@ -122,9 +116,7 @@ const char *shell_history_at(shell_t *sh, size_t index);
  * single unambiguous completion exists. */
 bool shell_complete(shell_t *sh, const char *word, char *out, size_t out_size);
 
-/* ------------------------------------------------------------------ */
-/* Command table (exposed for `help` and for the tests)                */
-/* ------------------------------------------------------------------ */
+/* Command table (exposed for `help` and for the tests) */
 
 typedef struct {
     const char *name;
@@ -137,9 +129,7 @@ typedef struct {
 const sh_command_def_t *sh_commands(size_t *count);
 const sh_command_def_t *sh_find_command(const char *name);
 
-/* ------------------------------------------------------------------ */
-/* System information provider (kernel and host test shim)             */
-/* ------------------------------------------------------------------ */
+/* System information provider (kernel and host test shim) */
 
 typedef struct {
     uint32_t uptime_ms;

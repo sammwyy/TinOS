@@ -64,9 +64,7 @@ void wm_init(void)
     any_dirty                 = true;
 }
 
-/* ------------------------------------------------------------------ */
-/* Geometry                                                            */
-/* ------------------------------------------------------------------ */
+/* Geometry */
 
 rect_t wm_client_rect(const window_t *win)
 {
@@ -110,9 +108,7 @@ static rect_t titlebar_rect(const window_t *win)
                      TITLEBAR_HEIGHT);
 }
 
-/* ------------------------------------------------------------------ */
-/* List handling                                                       */
-/* ------------------------------------------------------------------ */
+/* List handling */
 
 static void unlink_window(window_t *win)
 {
@@ -344,9 +340,7 @@ void wm_close(window_t *win)
     wm_invalidate_rect(old);
 }
 
-/* ------------------------------------------------------------------ */
-/* Drawing                                                             */
-/* ------------------------------------------------------------------ */
+/* Drawing */
 
 static void draw_button_glyph(rect_t r, bool close_button, color_t color)
 {
@@ -482,9 +476,7 @@ void wm_blit_window(window_t *win)
     gfx_mark_dirty(visible.x, visible.y, visible.w, visible.h);
 }
 
-/* ------------------------------------------------------------------ */
-/* Event routing                                                       */
-/* ------------------------------------------------------------------ */
+/* Event routing */
 
 bool wm_handle_key(const key_event_t *ev)
 {

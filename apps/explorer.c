@@ -99,9 +99,7 @@ static const toolbar_button_t toolbar[BTN_COUNT] = {
     { "", 26, BTN_REFRESH },
 };
 
-/* ------------------------------------------------------------------ */
-/* Listing                                                             */
-/* ------------------------------------------------------------------ */
+/* Listing */
 
 static fs_node_t *explorer_dir(explorer_t *ex)
 {
@@ -215,9 +213,7 @@ static fs_node_t *selected_node(explorer_t *ex)
     return ex->entries[ex->selection];
 }
 
-/* ------------------------------------------------------------------ */
-/* Actions                                                             */
-/* ------------------------------------------------------------------ */
+/* Actions */
 
 static void begin_prompt(explorer_t *ex, explorer_mode_t mode,
                          const char *initial)
@@ -442,9 +438,7 @@ static void do_toolbar_action(window_t *win, explorer_t *ex, int action)
     wm_invalidate(win);
 }
 
-/* ------------------------------------------------------------------ */
-/* Drawing                                                             */
-/* ------------------------------------------------------------------ */
+/* Drawing */
 
 static rect_t toolbar_button_rect(rect_t client, int index)
 {
@@ -729,9 +723,7 @@ static void explorer_on_draw(window_t *win, rect_t client)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Events                                                              */
-/* ------------------------------------------------------------------ */
+/* Events */
 
 static void ensure_visible(explorer_t *ex, size_t rows)
 {

@@ -44,9 +44,7 @@ static const char *current_suite = "";
     current_suite = name;                                                     \
     printf("- %s\n", name)
 
-/* ------------------------------------------------------------------ */
-/* Helpers                                                             */
-/* ------------------------------------------------------------------ */
+/* Helpers */
 
 /* Run a command line in a fresh-ish shell and return its output. The caller
  * must free the returned string. */
@@ -84,9 +82,7 @@ static bool output_contains(shell_t *sh, const char *line, const char *needle)
     return hit;
 }
 
-/* ------------------------------------------------------------------ */
-/* Path normalisation                                                  */
-/* ------------------------------------------------------------------ */
+/* Path normalisation */
 
 static void test_paths(void)
 {
@@ -132,9 +128,7 @@ static void test_paths(void)
     CHECK(!path_has_suffix("readme", ".txt"));
 }
 
-/* ------------------------------------------------------------------ */
-/* Filesystem                                                          */
-/* ------------------------------------------------------------------ */
+/* Filesystem */
 
 static void test_fs_basics(void)
 {
@@ -265,9 +259,7 @@ static void test_fs_mutation(void)
     fs_shutdown();
 }
 
-/* ------------------------------------------------------------------ */
-/* Parser                                                              */
-/* ------------------------------------------------------------------ */
+/* Parser */
 
 static void test_parser(void)
 {
@@ -355,9 +347,7 @@ static void test_parser(void)
     sh_line_free(&line);
 }
 
-/* ------------------------------------------------------------------ */
-/* Commands                                                            */
-/* ------------------------------------------------------------------ */
+/* Commands */
 
 static void test_commands(void)
 {

@@ -234,9 +234,7 @@ int ksnprintf(char *buf, size_t size, const char *fmt, ...)
     return n;
 }
 
-/* ------------------------------------------------------------------ */
-/* String helpers                                                      */
-/* ------------------------------------------------------------------ */
+/* String helpers */
 
 size_t strlcpy(char *dst, const char *src, size_t size)
 {

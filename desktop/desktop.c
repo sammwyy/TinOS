@@ -77,9 +77,7 @@ static desktop_wallpaper_mode_t wallpaper_mode = DESKTOP_WALLPAPER_DEFAULT;
 static color_t wallpaper_top = COLOR_DESKTOP_TOP;
 static color_t wallpaper_bottom = COLOR_DESKTOP_BOTTOM;
 
-/* ------------------------------------------------------------------ */
-/* Mouse cursor                                                        */
-/* ------------------------------------------------------------------ */
+/* Mouse cursor */
 
 #define CURSOR_W 12
 #define CURSOR_H 19
@@ -153,9 +151,7 @@ static void cursor_restore(void)
     cursor_drawn = false;
 }
 
-/* ------------------------------------------------------------------ */
-/* Wallpaper                                                           */
-/* ------------------------------------------------------------------ */
+/* Wallpaper */
 
 /* A soft radial glow, blended in concentric bands so it fades towards the
  * edges. Drawn per scanline (one blend call each), which keeps it cheap
@@ -250,9 +246,7 @@ desktop_wallpaper_mode_t desktop_wallpaper_mode(void)
     return wallpaper_mode;
 }
 
-/* ------------------------------------------------------------------ */
-/* Taskbar                                                             */
-/* ------------------------------------------------------------------ */
+/* Taskbar */
 
 static rect_t taskbar_rect(void)
 {
@@ -391,9 +385,7 @@ static void draw_taskbar(void)
     taskbar_dirty = false;
 }
 
-/* ------------------------------------------------------------------ */
-/* Start menu                                                          */
-/* ------------------------------------------------------------------ */
+/* Start menu */
 
 static void menu_rebuild_rows(void);
 
@@ -716,9 +708,7 @@ static void menu_activate(size_t index)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Notifications                                                       */
-/* ------------------------------------------------------------------ */
+/* Notifications */
 
 void desktop_notify(const char *fmt, ...)
 {
@@ -744,9 +734,7 @@ static void draw_notification(void)
     widget_text_centered(r, notification, COLOR_TEXT);
 }
 
-/* ------------------------------------------------------------------ */
-/* Shutdown                                                            */
-/* ------------------------------------------------------------------ */
+/* Shutdown */
 
 NORETURN void desktop_shutdown(bool reboot)
 {
@@ -773,9 +761,7 @@ NORETURN void desktop_shutdown(bool reboot)
     arch_shutdown();
 }
 
-/* ------------------------------------------------------------------ */
-/* Input handling                                                      */
-/* ------------------------------------------------------------------ */
+/* Input handling */
 
 static bool handle_global_key(const key_event_t *ev)
 {
@@ -950,9 +936,7 @@ static void handle_mouse_event(const mouse_event_t *ev)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Compositing                                                         */
-/* ------------------------------------------------------------------ */
+/* Compositing */
 
 static bool rects_overlap(rect_t a, rect_t b)
 {
@@ -1024,9 +1008,7 @@ static void composite(bool full)
         draw_notification();
 }
 
-/* ------------------------------------------------------------------ */
-/* Event loop                                                          */
-/* ------------------------------------------------------------------ */
+/* Event loop */
 
 void desktop_run(void)
 {
@@ -1064,7 +1046,7 @@ void desktop_run(void)
         fs_io_poll();
         ktimer_poll(4);
 
-        /* --- keyboard --- */
+        /* Keyboard */
         key_event_t key;
         while (keyboard_poll(&key)) {
             if (handle_global_key(&key))
@@ -1073,7 +1055,7 @@ void desktop_run(void)
                 dirty = true;
         }
 
-        /* --- mouse --- */
+        /* Mouse */
         mouse_event_t mouse;
         bool          moved = false;
         while (mouse_poll(&mouse)) {
@@ -1081,14 +1063,14 @@ void desktop_run(void)
             moved = true;
         }
 
-        /* --- application ticks --- */
+        /* Application ticks */
         for (window_t *w = wm_bottom(); w; w = w->above)
             if (w->cls->on_tick && w->cls->on_tick(w)) {
                 wm_invalidate(w);
                 dirty = true;
             }
 
-        /* --- clock --- */
+        /* Clock */
         uint32_t second = (uint32_t)(timer_ticks() / 1000);
         if (second != last_clock_second) {
             last_clock_second = second;
@@ -1096,7 +1078,7 @@ void desktop_run(void)
             dirty             = true;
         }
 
-        /* --- notification expiry --- */
+        /* Notification expiry */
         if (notification[0] && timer_ticks() > notification_until) {
             notification[0] = '\0';
             wm_invalidate_all();
