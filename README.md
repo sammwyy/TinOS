@@ -455,6 +455,7 @@ to the nearest surviving ancestor.
 |------|-------|--------------|
 | Boot | `boot/boot.S`, `boot/linker.ld`, `boot/grub.cfg` | Multiboot2 header, stack, entry; kernel linked at 1 MiB |
 | Arch | `kernel/arch/x86/` | GDT, IDT + 48 interrupt stubs, 8259A PIC, PIT, CMOS RTC, CPUID, reboot/power-off |
+| SMP | `kernel/arch/x86/{acpi,lapic,smp,trampoline.S}` | ACPI MADT parsing, local APIC, AP bring-up (see below) |
 | Memory | `kernel/mm/` | bitmap page frame allocator over the Multiboot2 memory map; first-fit heap with coalescing that grows by taking new arenas from the frame allocator |
 | Devices | `kernel/dev/` | COM1 serial log, VGA text console, PCI enumeration, Bochs DISPI mode setting, PS/2 keyboard, PS/2 mouse with IntelliMouse wheel support |
 | Graphics | `kernel/gfx/` | double-buffered framebuffer with multi-region dirty upload, rectangles, lines, gradients, alpha blending, clipping stack, 8x16 bitmap font |
@@ -477,12 +478,17 @@ out.
 
 ### Decisions worth knowing
 
-**i386, protected mode, no paging.** The kernel runs in ring 0 with a flat
-GDT, so physical and virtual addresses are the same. Paging would buy
-isolation the brief explicitly does not require, and its absence keeps the
-framebuffer, the heap and the DMA-free device model simple. (One consequence:
-a wild pointer write does not fault, which is why `crash gpf` uses an invalid
-segment selector rather than a bad address.)
+**i386, protected mode, identity-mapped paging.** The kernel runs in ring 0
+with a flat GDT and `kernel/mm/paging.c` maps every virtual address to the
+identical physical address (one page directory of 4 MiB pages, `CR4.PSE`,
+covering the full 4 GiB space - no page tables to allocate, no address that
+could end up unmapped by mistake). Physical and virtual addresses are
+therefore still the same number everywhere else in the kernel: the
+framebuffer, the heap and the DMA-free device model stay exactly as simple
+as they were with paging off. Paging exists at all only because SMP needs
+it (see below) - it buys no memory isolation yet, so a wild pointer write
+still does not fault, which is why `crash gpf` uses an invalid segment
+selector rather than a bad address.
 
 **Text mode first, then our own mode switch.** The Multiboot2 header asks
 GRUB for an EGA text console and deliberately does *not* include a framebuffer
@@ -547,6 +553,24 @@ area per thread on every context switch (cooperative or PIT-preempted) so
 two such threads - say a WAV decode and a JPEG decode - can freely
 interleave. `arch_fpu_init()` (`kernel/arch/x86/cpu.c`) enables CR0/CR4 and
 resets the FPU once at boot, before any thread runs.
+
+**SMP cores start up, then park.** `kernel/arch/x86/acpi.c` reads the RSDP
+GRUB hands off via the multiboot2 ACPI tag and walks RSDT/XSDT to the MADT
+to find every CPU's APIC ID and the local APIC's address; `lapic.c` then
+sends each one the INIT-SIPI-SIPI sequence. Every application processor
+boots through `trampoline.S` - 16-bit real mode code linked *and loaded*
+(`boot/linker.ld`'s `AT()` placement) at a fixed low physical address so
+its SIPI vector is known at build time - which loads the boot processor's
+own flat GDT, enters 32-bit protected mode, and calls into
+`smp.c:ap_entry()`, which activates the shared identity-mapped page
+directory, enables its own FPU/SSE, loads the shared IDT, and brings up
+its own local APIC. From there it parks in `cli; hlt`: distributing actual
+thread or app work across cores needs every shared kernel structure (the
+heap, the thread table, the filesystem tree, the compositor) to move from
+`irq_save()`/`irq_restore()` - which only stops the *calling* core's own
+interrupts - to real cross-core spinlocks, which does not exist yet. APs
+coming up is therefore proven (`tools/qemu_test.py` boots fine under
+`-smp N`; each core logs its APIC ID) but not yet useful.
 
 **Devices and drivers.** PCI enumeration publishes immutable bus records into
 the small driver model (`kernel/core/driver.c`). Drivers register a match and

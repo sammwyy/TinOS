@@ -18,11 +18,13 @@ typedef struct {
 #define GDT_KERNEL_DATA 0x10
 
 void gdt_init(void);
+const void *gdt_pointer(void); /* the 6-byte GDTR image, for AP bring-up */
 
 /* Interrupt descriptor table ----------------------------------------- */
 typedef void (*irq_handler_t)(regs_t *regs);
 
 void idt_init(void);
+void idt_load_shared(void); /* lidt the existing table - for an AP core */
 void irq_install(int irq, irq_handler_t handler);
 void irq_uninstall(int irq);
 

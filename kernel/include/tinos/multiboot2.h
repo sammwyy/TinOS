@@ -15,6 +15,8 @@ enum {
     MB_TAG_BOOTDEV      = 5,
     MB_TAG_MMAP         = 6,
     MB_TAG_FRAMEBUFFER  = 8,
+    MB_TAG_ACPI_OLD     = 14, /* ACPI 1.0 RSDP (20-byte, RSDT only) */
+    MB_TAG_ACPI_NEW     = 15, /* ACPI >=2.0 RSDP (adds the XSDT pointer) */
 };
 
 typedef struct PACKED {
@@ -69,6 +71,15 @@ typedef struct PACKED {
     uint8_t  fb_type; /* 0 indexed, 1 RGB, 2 EGA text */
     uint8_t  reserved;
 } mb_tag_framebuffer_t;
+
+/* The tag payload is the raw ACPI RSDP structure copied verbatim by GRUB;
+ * its own fields (not this wrapper) tell us whether it is the 20-byte
+ * ACPI 1.0 shape or the extended >=2.0 shape with an XSDT pointer. */
+typedef struct PACKED {
+    uint32_t type;
+    uint32_t size;
+    uint8_t  rsdp[0];
+} mb_tag_acpi_t;
 
 /* Iterate over the tags of a multiboot2 information block. */
 static inline mb_tag_t *mb_first_tag(const mb_info_t *info)

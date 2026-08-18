@@ -32,6 +32,7 @@
 #include <tinos/pci.h>
 #include <tinos/printf.h>
 #include <tinos/selftest.h>
+#include <tinos/smp.h>
 #include <tinos/string.h>
 #include <tinos/thread.h>
 #include <tinos/timer.h>
@@ -217,6 +218,14 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
               (uint32_t)pmm_region_count(),
               (uint32_t)(pmm_free_bytes() / (1024 * 1024)));
     pause_ms(BOOT_STEP_DELAY_MS);
+
+    /* --- SMP -------------------------------------------------------- */
+    size_t cpus = smp_init(mbi);
+    if (cpus > 1)
+        boot_step("%u CPU cores online (idle - see tinos/smp.h)",
+                  (uint32_t)cpus);
+    else
+        boot_note("Running single-core (no usable ACPI MADT, or one CPU)");
 
     /* --- input ---------------------------------------------------- */
     keyboard_init();

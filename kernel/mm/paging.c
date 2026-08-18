@@ -21,12 +21,11 @@
 /* Must be page (4 KiB) aligned - this address is loaded straight into CR3. */
 static uint32_t page_directory[1024] __attribute__((aligned(4096)));
 
-void paging_init(void)
+/* CR0/CR3/CR4 are per-CPU control registers, so every core - the boot
+ * processor and every SMP application processor - must run this on itself;
+ * only the table contents (built once, by paging_init()) are shared. */
+void paging_activate(void)
 {
-    for (uint32_t i = 0; i < 1024; i++)
-        page_directory[i] = (i << 22) | PDE_PRESENT | PDE_WRITABLE |
-                            PDE_PAGE_SIZE;
-
     uint32_t cr4;
     __asm__ volatile("movl %%cr4, %0" : "=r"(cr4));
     cr4 |= (1u << 4); /* PSE: 4 MiB pages */
@@ -38,4 +37,12 @@ void paging_init(void)
     __asm__ volatile("movl %%cr0, %0" : "=r"(cr0));
     cr0 |= (1u << 31) | (1u << 16); /* PG: enable paging, WP: honour RO pages */
     __asm__ volatile("movl %0, %%cr0" : : "r"(cr0));
+}
+
+void paging_init(void)
+{
+    for (uint32_t i = 0; i < 1024; i++)
+        page_directory[i] = (i << 22) | PDE_PRESENT | PDE_WRITABLE |
+                            PDE_PAGE_SIZE;
+    paging_activate();
 }

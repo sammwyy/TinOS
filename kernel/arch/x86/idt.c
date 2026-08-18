@@ -100,6 +100,13 @@ void idt_init(void)
     __asm__ volatile("lidt %0" : : "m"(idt_ptr));
 }
 
+/* The IDT and its vector table are identical for every core; an SMP
+ * application processor just points its own IDTR at this same table. */
+void idt_load_shared(void)
+{
+    __asm__ volatile("lidt %0" : : "m"(idt_ptr));
+}
+
 void irq_install(int irq, irq_handler_t handler)
 {
     if (irq < 0 || irq >= 16)

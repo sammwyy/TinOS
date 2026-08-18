@@ -65,3 +65,10 @@ void gdt_init(void)
                      : "m"(gdt_ptr), "i"(GDT_KERNEL_DATA), "i"(GDT_KERNEL_CODE)
                      : "eax", "memory");
 }
+
+/* The flat model is identical for every core, so an SMP application
+ * processor just loads this same GDT rather than building its own. */
+const void *gdt_pointer(void)
+{
+    return &gdt_ptr;
+}

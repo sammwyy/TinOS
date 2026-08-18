@@ -28,5 +28,6 @@ void heap_init(void);
  * bring-up, and so the kernel is no longer permanently committed to the
  * "no paging" design. */
 void paging_init(void);
+void paging_activate(void); /* per-CPU: load CR3/CR4/CR0 for an SMP AP core */
 
 #endif /* TINOS_MM_H */
