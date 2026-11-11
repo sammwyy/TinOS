@@ -5,12 +5,15 @@
  * memory errors in the filesystem show up here rather than in the kernel.
  */
 
+#define _GNU_SOURCE
+#include <sys/mman.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <tinos/fs.h>
 #include <tinos/codec.h>
+#include <tinos/elf.h>
 #include <tinos/path.h>
 #include <tinos/sh.h>
 
@@ -667,6 +670,78 @@ static void test_audio_codecs(void)
     audio_decoder_close(decoder);
 }
 
+static void test_elf_loader(void)
+{
+    SUITE("ELF loader");
+
+    /* MAP_32BIT keeps the destination representable in an ELF32 p_vaddr. */
+    uint8_t *dest = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+    CHECK(dest != MAP_FAILED);
+    if (dest == MAP_FAILED)
+        return;
+
+    typedef struct __attribute__((packed)) {
+        uint8_t ident[16];
+        uint16_t type, machine;
+        uint32_t version, entry, phoff, shoff, flags;
+        uint16_t ehsize, phentsize, phnum, shentsize, shnum, shstrndx;
+    } ehdr_t;
+    typedef struct __attribute__((packed)) {
+        uint32_t type, offset, vaddr, paddr, filesz, memsz, flags, align;
+    } phdr_t;
+    uint8_t image[256] = { 0 };
+    ehdr_t *eh = (ehdr_t *)image;
+    phdr_t *ph = (phdr_t *)(image + sizeof(*eh));
+    memcpy(eh->ident, "\177ELF", 4);
+    eh->ident[4] = 1;
+    eh->ident[5] = 1;
+    eh->type = 2;
+    eh->machine = 3;
+    eh->entry = (uint32_t)(uintptr_t)dest;
+    eh->phoff = sizeof(*eh);
+    eh->phentsize = sizeof(*ph);
+    eh->phnum = 1;
+    ph->type = 1;
+    ph->offset = 192;
+    ph->vaddr = (uint32_t)(uintptr_t)dest;
+    ph->filesz = 4;
+    ph->memsz = 8;
+    memcpy(image + 192, "ELF!", 4);
+
+    void *entry = NULL;
+    uintptr_t address = 0;
+    CHECK(elf_entry_address(image, sizeof(image), &address));
+    CHECK(address == (uintptr_t)dest);
+    CHECK(elf_load(image, sizeof(image), (uintptr_t)dest, 4096, &entry));
+    CHECK(entry == dest && memcmp(dest, "ELF!", 4) == 0 && dest[4] == 0);
+
+    memset(dest, 0x7a, 4096);
+    CHECK(!elf_load(image, sizeof(image), (uintptr_t)dest + 4, 4092, &entry));
+    CHECK(dest[0] == 0x7a);
+    ph->memsz = 4097;
+    CHECK(!elf_load(image, sizeof(image), (uintptr_t)dest, 4096, &entry));
+    CHECK(dest[0] == 0x7a);
+    ph->memsz = 8;
+    ph->offset = UINT32_MAX;
+    CHECK(!elf_load(image, sizeof(image), (uintptr_t)dest, 4096, &entry));
+    CHECK(dest[0] == 0x7a);
+    ph->offset = 192;
+    eh->phoff = UINT32_MAX;
+    CHECK(!elf_load(image, sizeof(image), (uintptr_t)dest, 4096, &entry));
+    CHECK(dest[0] == 0x7a);
+    eh->phoff = sizeof(*eh);
+
+    eh->phnum = 2;
+    phdr_t *second = ph + 1;
+    *second = *ph;
+    second->offset = UINT32_MAX;
+    CHECK(!elf_load(image, sizeof(image), (uintptr_t)dest, 4096, &entry));
+    CHECK(dest[0] == 0x7a);
+
+    munmap(dest, 4096);
+}
+
 int main(void)
 {
     printf("TinOS host unit tests\n\n");
@@ -679,6 +754,7 @@ int main(void)
     test_shared_state();
     test_robustness();
     test_audio_codecs();
+    test_elf_loader();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

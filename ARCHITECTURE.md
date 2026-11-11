@@ -104,6 +104,10 @@ first.
   to their link address by `kernel/proc/elf.c`, and their `app_main()` is
   called once in kernel context. It registers an `app_entry_t` with a
   `launch` callback; from then on the desktop calls into app code directly.
+- The ELF loader validates the entire program-header table before copying
+  segments. Each app is restricted to its own slot, and duplicate slots
+  are rejected at boot. This does not isolate apps from one another at
+  runtime.
 - Apps call the kernel through `tinos_abi_t` (`kernel/include/tinos/abi.h`),
   a struct of roughly 130 function pointers. `apps/lib/shim.c` re-exports
   each one under the kernel function's own name.

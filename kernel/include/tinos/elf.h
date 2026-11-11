@@ -18,4 +18,8 @@
 bool elf_load(const void *image, size_t image_size, uintptr_t region_base,
               size_t region_size, void **entry_out);
 
+/* Read the entry address of a supported ELF32 executable. */
+bool elf_entry_address(const void *image, size_t image_size,
+                       uintptr_t *address_out);
+
 #endif /* TINOS_ELF_H */

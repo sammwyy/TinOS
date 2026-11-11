@@ -83,14 +83,10 @@ never found. Both were found by bisection, not diagnosis.
 
 ### App loader and ABI
 
-- [ ] `load_native_apps()` passes `NATIVE_APP_BASE` and the whole
-      `NATIVE_APP_ARENA_SIZE` to `elf_load()`, so an ELF is validated against
-      the arena, not against its own slot. Pass the per-app slot base and
-      `NATIVE_APP_SLOT_SIZE`.
-- [ ] `elf_load()` (`kernel/proc/elf.c`): `ph->p_offset + ph->p_filesz` and
-      `e_phoff + i * e_phentsize` can overflow on a crafted file; use checked
-      arithmetic as `region_contains()` already does.
-- [ ] Detect two apps linked at the same slot at load time.
+- [x] Validate each app's ELF against its own 1 MiB slot, not the entire arena.
+- [x] Reject overflowing ELF program-header and segment bounds before writing
+      any segments. Host tests exercise invalid headers and out-of-slot loads.
+- [x] Reject two apps linked to the same slot at load time.
 - [ ] Slot addresses are assigned by hand in `apps/Makefile`
       (`NATIVE_APP_SLOT_*`) and `NATIVE_APP_MAX_COUNT` is 12. Generate the
       assignment, or build apps as position-independent and relocate at load.

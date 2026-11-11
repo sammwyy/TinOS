@@ -42,17 +42,16 @@ static bool region_contains(uintptr_t region_base, size_t region_size,
 {
     if (start < region_base)
         return false;
-    uintptr_t region_end = region_base + region_size;
-    uintptr_t end;
-    if (__builtin_add_overflow(start, length, &end))
+    if (region_size > (uintptr_t)-1 - region_base)
         return false;
-    return end <= region_end;
+    uintptr_t remaining = region_size - (start - region_base);
+    return start - region_base < region_size && length <= remaining;
 }
 
-bool elf_load(const void *image, size_t image_size, uintptr_t region_base,
-             size_t region_size, void **entry_out)
+bool elf_entry_address(const void *image, size_t image_size,
+                       uintptr_t *address_out)
 {
-    if (image_size < sizeof(elf32_ehdr_t))
+    if (!image || !address_out || image_size < sizeof(elf32_ehdr_t))
         return false;
 
     const elf32_ehdr_t *ehdr = image;
@@ -63,34 +62,59 @@ bool elf_load(const void *image, size_t image_size, uintptr_t region_base,
         return false;
     if (ehdr->e_type != ET_EXEC || ehdr->e_machine != EM_386)
         return false;
+    *address_out = ehdr->e_entry;
+    return true;
+}
+
+bool elf_load(const void *image, size_t image_size, uintptr_t region_base,
+             size_t region_size, void **entry_out)
+{
+    uintptr_t address;
+    if (!entry_out || !elf_entry_address(image, image_size, &address))
+        return false;
+    const elf32_ehdr_t *ehdr = image;
     if (ehdr->e_phoff == 0 || ehdr->e_phnum == 0 ||
         ehdr->e_phentsize < sizeof(elf32_phdr_t))
         return false;
+    if (!region_contains(region_base, region_size, address, 1))
+        return false;
 
+    if (ehdr->e_phoff > image_size ||
+        ehdr->e_phnum > (image_size - ehdr->e_phoff) / ehdr->e_phentsize)
+        return false;
+
+    bool entry_in_segment = false;
     for (uint16_t i = 0; i < ehdr->e_phnum; i++) {
         size_t phdr_offset = ehdr->e_phoff + (size_t)i * ehdr->e_phentsize;
-        if (phdr_offset + sizeof(elf32_phdr_t) > image_size)
-            return false;
         const elf32_phdr_t *ph =
             (const elf32_phdr_t *)((const uint8_t *)image + phdr_offset);
         if (ph->p_type != PT_LOAD)
             continue;
         if (ph->p_filesz > ph->p_memsz)
             return false;
-        if (ph->p_offset + ph->p_filesz > image_size)
+        if (ph->p_offset > image_size ||
+            ph->p_filesz > image_size - ph->p_offset)
             return false;
         if (!region_contains(region_base, region_size, ph->p_vaddr,
                              ph->p_memsz))
             return false;
+        if (address >= ph->p_vaddr && address - ph->p_vaddr < ph->p_memsz)
+            entry_in_segment = true;
+    }
+    if (!entry_in_segment)
+        return false;
 
+    for (uint16_t i = 0; i < ehdr->e_phnum; i++) {
+        size_t phdr_offset = ehdr->e_phoff + (size_t)i * ehdr->e_phentsize;
+        const elf32_phdr_t *ph =
+            (const elf32_phdr_t *)((const uint8_t *)image + phdr_offset);
+        if (ph->p_type != PT_LOAD)
+            continue;
         void *dst = (void *)(uintptr_t)ph->p_vaddr;
         memcpy(dst, (const uint8_t *)image + ph->p_offset, ph->p_filesz);
         memset((uint8_t *)dst + ph->p_filesz, 0, ph->p_memsz - ph->p_filesz);
     }
 
-    if (!region_contains(region_base, region_size, ehdr->e_entry, 0))
-        return false;
-
-    *entry_out = (void *)(uintptr_t)ehdr->e_entry;
+    *entry_out = (void *)address;
     return true;
 }

@@ -281,6 +281,7 @@ static size_t load_native_apps(const mb_info_t *mbi)
 
     tinos_abi_t abi = tinos_abi_build();
     size_t      loaded = 0;
+    uint32_t    used_slots = 0;
     fs_node_t  *apps_dir;
     if (fs_resolve(fs_root(), "/apps", &apps_dir) != FS_OK)
         return 0;
@@ -314,11 +315,26 @@ static size_t load_native_apps(const mb_info_t *mbi)
         entry.custom_icon = load_icon(dir, icon_file);
 
         void *elf_entry = NULL;
-        if (!elf_load(fs_data(elf_node), fs_size(elf_node), NATIVE_APP_BASE,
-                      NATIVE_APP_ARENA_SIZE, &elf_entry)) {
+        uintptr_t entry_address;
+        if (!elf_entry_address(fs_data(elf_node), fs_size(elf_node),
+                               &entry_address) ||
+            entry_address < NATIVE_APP_BASE ||
+            entry_address - NATIVE_APP_BASE >= NATIVE_APP_ARENA_SIZE) {
+            klog("[boot] apps: invalid address in %s\n", elf_node->name);
+            continue;
+        }
+        size_t slot = (entry_address - NATIVE_APP_BASE) / NATIVE_APP_SLOT_SIZE;
+        if (used_slots & (1u << slot)) {
+            klog("[boot] apps: duplicate slot in %s\n", elf_node->name);
+            continue;
+        }
+        uintptr_t slot_base = NATIVE_APP_BASE + slot * NATIVE_APP_SLOT_SIZE;
+        if (!elf_load(fs_data(elf_node), fs_size(elf_node), slot_base,
+                      NATIVE_APP_SLOT_SIZE, &elf_entry)) {
             klog("[boot] apps: failed to load %s\n", elf_node->name);
             continue;
         }
+        used_slots |= 1u << slot;
         ((app_main_fn)elf_entry)(&abi, entry.name, entry.summary,
                                  entry.category, entry.icon,
                                  entry.custom_icon);

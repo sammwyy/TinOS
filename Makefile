@@ -86,6 +86,7 @@ FORCE:
 
 # --- host unit tests --------------------------------------------------
 HOST_SRCS   := $(sort $(wildcard kernel/fs/*.c) $(wildcard kernel/sh/*.c) \
+                      kernel/proc/elf.c \
                       libraries/audio/codec.c libraries/audio/wav.c \
                       libraries/audio/vorbis.c kernel/lib/printf.c \
                       $(wildcard tests/host/*.c))
