@@ -103,6 +103,6 @@ void tty_run(void)
             }
         }
 
-        __asm__ volatile("sti; hlt");
+        arch_idle();
     }
 }

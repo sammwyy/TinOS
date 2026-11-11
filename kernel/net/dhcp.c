@@ -1,5 +1,6 @@
 /* DHCP client and lease parsing. */
 
+#include <tinos/arch.h>
 #include <tinos/kernel.h>
 #include <tinos/string.h>
 #include <tinos/timer.h>
@@ -140,7 +141,7 @@ bool net_dhcp_exchange(void)
     uint64_t deadline = timer_ticks() + 3000;
     while (timer_ticks() < deadline && !net.dhcp_offer_received) {
         net_poll();
-        __asm__ volatile("sti; hlt");
+        arch_idle();
     }
     if (!net.dhcp_offer_received) {
         klog("[net ] DHCP offer timeout\n");
@@ -150,7 +151,7 @@ bool net_dhcp_exchange(void)
     deadline = timer_ticks() + 3000;
     while (timer_ticks() < deadline) {
         net_poll();
-        __asm__ volatile("sti; hlt");
+        arch_idle();
         if (net.config.configured)
             return true;
     }

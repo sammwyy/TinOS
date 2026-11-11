@@ -1,5 +1,6 @@
 /* Internet Control Message Protocol echo support. */
 
+#include <tinos/arch.h>
 #include <tinos/string.h>
 #include <tinos/timer.h>
 
@@ -38,7 +39,7 @@ bool net_ping(uint32_t address, uint32_t timeout_ms, uint32_t *elapsed_ms)
     uint64_t deadline = timer_ticks() + timeout_ms;
     while (sent && timer_ticks() < deadline && !net.ping_received) {
         net_poll();
-        __asm__ volatile("sti; hlt");
+        arch_idle();
     }
     net.ping_waiting = false;
     if (elapsed_ms)

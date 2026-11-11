@@ -1,5 +1,6 @@
 /* Small DNS A-record resolver. */
 
+#include <tinos/arch.h>
 #include <tinos/string.h>
 #include <tinos/timer.h>
 
@@ -79,7 +80,7 @@ bool net_dns_lookup(const char *name, uint32_t *address, uint32_t timeout_ms)
     uint64_t deadline = timer_ticks() + timeout_ms;
     while (sent && timer_ticks() < deadline && !net.dns_received) {
         net_poll();
-        __asm__ volatile("sti; hlt");
+        arch_idle();
     }
     net.dns_waiting = false;
     if (!sent || !net.dns_received)

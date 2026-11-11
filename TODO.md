@@ -187,6 +187,8 @@ State today: only `kernel/arch/x86` exists. `kernel/fs`, `kernel/net`
 protocols, `kernel/mm/heap.c`, `kernel/sh` and `kernel/lib` are portable C.
 The items below are what any second architecture trips over.
 
+- [x] Replace `sti; hlt` in the desktop, TTY, network waits and timer sleep
+      with `arch_idle()`, implemented by `kernel/arch/x86/cpu.c`.
 - [ ] `kernel/include/tinos/arch.h` is the x86 interface, not an arch-neutral
       one: it exposes `regs_t` with x86 registers, `pic_*`, `irq_install()`
       with 8259 IRQ numbers and CPUID helpers, and is included by generic

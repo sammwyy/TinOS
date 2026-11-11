@@ -85,6 +85,11 @@ NORETURN void arch_halt(void)
         __asm__ volatile("cli; hlt");
 }
 
+void arch_idle(void)
+{
+    __asm__ volatile("sti; hlt" : : : "memory");
+}
+
 NORETURN void arch_reboot(void)
 {
     /* Pulse the keyboard controller reset line, then fall back to a triple

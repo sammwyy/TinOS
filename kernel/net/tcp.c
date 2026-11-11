@@ -1,5 +1,6 @@
 /* Minimal TCP client used by the HTTP helper. */
 
+#include <tinos/arch.h>
 #include <tinos/string.h>
 #include <tinos/timer.h>
 #include <tinos/printf.h>
@@ -122,7 +123,7 @@ bool net_http_get(const char *host, const char *path, char *response,
     uint64_t deadline = timer_ticks() + timeout_ms;
     while (timer_ticks() < deadline && !net.tcp_connected) {
         net_poll();
-        __asm__ volatile("sti; hlt");
+        arch_idle();
     }
     if (!net.tcp_connected) {
         net.tcp_waiting = false;
@@ -142,7 +143,7 @@ bool net_http_get(const char *host, const char *path, char *response,
     deadline = timer_ticks() + timeout_ms;
     while (timer_ticks() < deadline && !net.tcp_closed) {
         net_poll();
-        __asm__ volatile("sti; hlt");
+        arch_idle();
     }
     response[net.tcp_length] = 0;
     net.tcp_waiting = false;

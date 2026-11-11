@@ -1,6 +1,6 @@
 /* Address Resolution Protocol and the IPv4 neighbor cache. */
 
-#include <tinos/io.h>
+#include <tinos/arch.h>
 #include <tinos/string.h>
 #include <tinos/timer.h>
 
@@ -39,7 +39,7 @@ static bool wait_for(uint32_t address, uint32_t timeout)
         net_poll();
         if (net.arp_valid && net.arp_ip == address)
             return true;
-        __asm__ volatile("sti; hlt");
+        arch_idle();
     }
     return false;
 }

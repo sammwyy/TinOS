@@ -60,5 +60,5 @@ void timer_sleep(uint32_t ms)
 {
     uint64_t target = timer_ticks() + ms;
     while (timer_ticks() < target)
-        __asm__ volatile("sti; hlt");
+        arch_idle();
 }

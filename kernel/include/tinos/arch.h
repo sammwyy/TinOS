@@ -66,5 +66,7 @@ bool arch_fpu_init(void);
 NORETURN void arch_reboot(void);
 NORETURN void arch_shutdown(void);
 NORETURN void arch_halt(void);
+/* Enable interrupts and sleep until the next interrupt. */
+void arch_idle(void);
 
 #endif /* TINOS_ARCH_H */

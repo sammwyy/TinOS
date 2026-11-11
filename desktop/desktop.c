@@ -1130,6 +1130,6 @@ void desktop_run(void)
             cursor_restore();
         }
 
-        __asm__ volatile("sti; hlt");
+        arch_idle();
     }
 }
