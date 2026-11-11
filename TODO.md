@@ -102,23 +102,27 @@ of physical RAM. The current prototype still needs SSE2 and Bochs DISPI for
 graphics; this is not yet a claim of support for arbitrary PCs.
 
 - [x] Keep app slots inside physical RAM: check each slot against the
-      Multiboot2 memory map before writing executable pages, and reject a
+      boot information memory map before writing executable pages, and reject a
       slot overlapping the initrd module.
 - [x] Relink nine bundled apps to 128 KiB slots at 6 MiB (previously 1 MiB
       slots starting at 16 MiB); enforce slot size at link time. This is a
       transitional fixed-address scheme pending per-process relocation.
-- [ ] At 8 MiB, GRUB2 sometimes omits the ramfs module, depending on its
-      memory placement. Make the shell usable without bundled apps (already
-      true), then provide a smaller app package or another load path.
+- [x] Place the initrd deterministically immediately after the kernel; the
+      BIOS loader does not drop the module under memory pressure.
 - [x] Grow heap in 256 KiB minimum arenas rather than reserving 4 MiB at
       initialization; allow a 16 MiB machine to boot the full desktop.
-- [ ] 4 MiB: GRUB2 `multiboot2` fails with
-      `relocator.c:1286:out of memory` before handing control to the kernel,
-      even with no ramfs module and a debug-stripped 686 KiB ELF (tested with
-      a minimal GRUB ISO). Reducing the disk image alone is insufficient;
-      measure GRUB's relocation/physical-memory requirements, provide an
-      alternate low-memory boot path or smaller loaded kernel, then run a
-      real 4 MiB QEMU acceptance test.
+- [x] Replace GRUB/Multiboot2 with a TinOS El Torito BIOS loader. At 4 MiB
+      it omits the native-app initrd, enters the kernel in protected mode
+      and boots the TTY. The previous GRUB2 relocator failed before handoff.
+- [ ] Implement a BIOS disk boot path (raw USB/HDD image). The current boot
+      image uses El Torito CD-ROM BIOS services and is not a USB bootloader.
+- [ ] Add an alternative firmware loader for UEFI PCs. Keep both loaders
+      behind the same `boot_info_t`; there is no universal BIOS/UEFI/DSi
+      executable.
+- [ ] Harden the BIOS loader for real hardware: E820 failure handling,
+      verify ACPI RSDP before use, A20 activation fallback, EDD/ATAPI
+      compatibility, disk read errors and a memory bound for every
+      kernel/initrd write. QEMU exercises only one BIOS implementation.
 - [ ] Avoid loading and unpacking graphical apps during text-only boot; a
       later `desktop` command should load them on demand if RAM permits.
 - [x] Exercise the 640x480 fallback at 8 MiB with the desktop and a terminal
@@ -133,7 +137,7 @@ graphics; this is not yet a claim of support for arbitrary PCs.
       before changing the video mode.
 - [ ] Choose display modes from adapter capabilities and use a tested
       small-screen desktop layout, rather than fixed fallback dimensions.
-- [x] Bind files in the ramfs to the reserved Multiboot2 module instead of
+- [x] Bind files in the ramfs to the reserved initrd instead of
       copying every ELF/icon/manifest into a second heap buffer. On write,
       allocate a private copy. An 8 MiB boot with nine apps now has about
       2672 KiB free before graphics and starts a 640x480 desktop.
@@ -146,7 +150,8 @@ graphics; this is not yet a claim of support for arbitrary PCs.
       track kernel, ramfs, app slots, heap and framebuffer usage separately.
 - [x] Add QEMU tests for 8 and 16 MiB, and for a non-DISPI VGA adapter.
 - [x] Add an 8 MiB graphical boot/window-layout acceptance test.
-- [ ] Add a 4 MiB boot test after replacing the boot path; extend
+- [x] Add a 4 MiB text console boot test under QEMU.
+- [ ] Extend
       low-memory testing to file editing, image decode and multiple windows.
 
 ### Build
@@ -193,8 +198,8 @@ graphics; this is not yet a claim of support for arbitrary PCs.
 - [ ] Build with cross-compilers (`i686-elf-gcc`,
       `arm-none-eabi-gcc`) instead of host `gcc -m32`; scripts go in
       `toolchain/`. `CC`/`LD` are hard-coded to `gcc`/`ld` in both Makefiles.
-- [ ] **(decision)** Boot protocol: keep GRUB/Multiboot2 BIOS-only, or add
-      UEFI (GRUB EFI or Limine). Affects the console (no VGA text on UEFI).
+- [x] Use TinOS's own BIOS El Torito loader and a versionable `boot_info_t`
+      handoff. An independent UEFI boot path remains future work.
 
 ### Scheduler independent of the desktop
 
@@ -270,11 +275,11 @@ The items below are what any second architecture trips over.
       `arch_fpu_save/restore()`.
 - [ ] Interrupt controller abstraction (8259/IOAPIC on x86, GIC on ARM, PLIC
       on RISC-V) and a timer abstraction (PIT/LAPIC, generic timer, CLINT).
-- [ ] Boot information abstraction: `kmain()` takes a Multiboot2 pointer and
-      `pmm_init()`, `smp_init()` and `find_ramfs_module()` parse Multiboot2
-      tags directly. Convert to an arch-neutral `boot_info` (memory map,
-      command line, initrd, framebuffer, ACPI/devicetree pointer) filled by
-      each arch's boot stub.
+- [x] `kmain()`, PMM and SMP consume size- and version-checked `boot_info_t`
+      (memory map, command line, initrd and ACPI RSDP) instead of
+      Multiboot2 tags.
+- [ ] Add optional framebuffer/devicetree fields and compatibility rules
+      for extending the versioned handoff on future platforms.
 - [ ] Device discovery without PCI/ACPI: devicetree parser and a platform bus.
 - [ ] `kernel/main.c` calls x86 functions by name (`gdt_init`, `idt_init`,
       `paging_init`, `rtc_init`, `vga_text_*`, `keyboard_init`, `mouse_init`,
@@ -284,7 +289,7 @@ The items below are what any second architecture trips over.
       and `serial_write` directly.
 - [ ] Word-size and endianness audit: `uint32_t` used for addresses and
       sizes (`pmm`, `elf.c` is ELF32/EM_386 only, DMA, framebuffer BARs).
-- [ ] Per-arch pieces outside the kernel: `boot/linker.ld`, `boot/grub.cfg`,
+- [ ] Per-arch pieces outside the kernel: `boot/linker.ld`, `boot/x86/`,
       `apps/link.ld`, `-m32`/`elf_i386` flags in both Makefiles, the SSE
       `CODEC_CFLAGS`, `tools/run.sh` (QEMU binary and machine).
 - [ ] Userspace later: per-arch syscall entry, `crt0` and syscall stubs in
@@ -302,7 +307,7 @@ types) so a 64-bit port stays possible.
       ACPI, CPUID) versus per-mode code (`boot.S`, `context.S`, `isr.S`,
       `trampoline.S`, `gdt.c`, `idt.c`, `paging.c`). Either
       `arch/x86/{32,64}/` or `arch/i386` + `arch/x86_64` + `arch/x86-common`.
-- [ ] Boot: Multiboot2 enters in 32-bit protected mode; add the long-mode
+- [ ] Boot: the TinOS BIOS loader enters in 32-bit protected mode; add the long-mode
       transition in the boot stub (enable PAE, set `EFER.LME`, load a 64-bit
       GDT, far jump), or switch to a bootloader that enters in long mode
       (Limine) **(decision)**.

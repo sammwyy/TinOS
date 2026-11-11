@@ -15,10 +15,11 @@
 
 NAME      := tinos
 BUILD     := build
-ISODIR    := $(BUILD)/isodir
 KERNEL    := $(BUILD)/$(NAME).elf
 ISO       := $(BUILD)/$(NAME).iso
 MAP       := $(BUILD)/$(NAME).map
+BOOT_IMAGE := $(BUILD)/tinos-boot.img
+ISODIR    := $(BUILD)/iso-native
 
 # Selects which kernel/arch/<ARCH> subtree gets built, e.g. `make ARCH=arm`.
 # Only x86 exists today; CPU bring-up, page tables and the boot stub live
@@ -35,7 +36,6 @@ include kernel/arch/$(ARCH)/drivers.mk
 CC        := gcc
 LD        := ld
 OBJCOPY   := objcopy
-GRUB_ISO  := $(shell command -v grub2-mkrescue 2>/dev/null || command -v grub-mkrescue 2>/dev/null)
 
 # Each self-contained unit (kernel core, the desktop/window manager, and the
 # image/audio format libraries) owns its own public headers under its own
@@ -167,7 +167,7 @@ kernel: $(KERNEL)
 # app.conf manifest and optional icon.png next to it (own Makefile, own
 # linker script - see apps/Makefile); ramfs.tar bundles those directories
 # (everything under $(NATIVE_BUILD) except its obj/ intermediates) for
-# GRUB to hand to the kernel as a module2 payload (boot/grub.cfg), which
+# the TinOS loader to hand to the kernel as an initrd, which
 # kernel/fs/tar.c unpacks into /apps and kernel/proc/elf.c loads and runs
 # (see kernel/main.c's load_native_apps()).
 NATIVE_BUILD := $(BUILD)/native
@@ -186,47 +186,19 @@ $(RAMFS): native-apps
 		--owner=0 --group=0 --numeric-owner -cf $(abspath $@) \
 		$$(ls | grep -v '^obj$$')
 
-# --- bootable ISO -----------------------------------------------------
-# -d .../i386-pc keeps the image BIOS-only (no EFI payload), which is what
-# QEMU's default machine boots and keeps the ISO under 5 MiB.
-#
-# Getting a byte-identical ISO out of grub2-mkrescue takes three passes:
-#   1. -volume_date pins the primary volume descriptor's own creation/
-#      modification fields and the per-file Rock Ridge dates for anything
-#      copied from ISODIR (the "touch -t 2000..." below only fixes mtime,
-#      which is all -volume_date all_file_dates reads back).
-#   2. A second xorriso pass rewrites those same fields on the assembled
-#      image; "-boot_image any patch" keeps the existing El Torito boot
-#      catalog instead of regenerating (and thereby randomising) it.
-#   3. grub2-mkrescue's own module files still carry one field neither pass
-#      above can reach: the Rock Ridge "attribute change" timestamp, sourced
-#      from the real on-disk ctime of files copied into grub2-mkrescue's own
-#      scratch directory, which touch(1) cannot set. tools/pin_iso_dates.py
-#      patches that field directly in the finished image.
-GRUB_BIOS_DIR := $(firstword $(wildcard /usr/lib/grub/i386-pc \
-                                        /usr/share/grub/i386-pc))
-GRUB_ISO_ARGS := $(if $(GRUB_BIOS_DIR),-d $(GRUB_BIOS_DIR),)
+# --- BIOS El Torito ISO ------------------------------------------------
+$(BOOT_IMAGE): $(KERNEL) $(RAMFS) boot/x86/loader.asm boot/x86/build_image.py
+	python3 boot/x86/build_image.py $(KERNEL) $(RAMFS) boot/x86/loader.asm $@
 
-$(ISO): $(KERNEL) $(RAMFS) boot/grub.cfg tools/pin_iso_dates.py
-ifeq ($(GRUB_ISO),)
-	$(error grub2-mkrescue/grub-mkrescue not found - install grub2-tools-extra and xorriso)
-endif
-	@rm -rf $(ISODIR)
-	@mkdir -p $(ISODIR)/boot/grub
-	@cp $(KERNEL) $(ISODIR)/boot/$(NAME).elf
-	@cp $(RAMFS) $(ISODIR)/boot/ramfs.tar
-	@cp boot/grub.cfg $(ISODIR)/boot/grub/grub.cfg
+$(ISO): $(BOOT_IMAGE)
+	@mkdir -p $(ISODIR)/boot
+	@cp $(BOOT_IMAGE) $(ISODIR)/boot/tinos-boot.img
 	@find $(ISODIR) -exec touch -t 200001010000.00 {} +
-	$(GRUB_ISO) $(GRUB_ISO_ARGS) --compress=xz -o $@ $(ISODIR) \
-		-- -volid TINOS -volume_date all_file_dates =0 \
-		   -volume_date uuid 2000010100000000 \
-		   -volume_date c 2000010100000000 \
-		   -volume_date m 2000010100000000 >/dev/null 2>&1
-	@xorriso -indev $@ -boot_image any patch -outdev $@.tmp \
-		-volume_date c 2000010100000000 -volume_date m 2000010100000000 \
-		-alter_date_r b 2000010100000000 / -- -commit >/dev/null 2>&1
-	@mv $@.tmp $@
-	@python3 tools/pin_iso_dates.py $@ >/dev/null
+	xorriso -as mkisofs -o $@ -volid TINOS \
+		--modification-date=2000010100000000 \
+		--set_all_file_dates 2000010100000000 \
+		-b boot/tinos-boot.img -no-emul-boot -boot-load-size 4 \
+		-boot-info-table $(ISODIR) >/dev/null 2>&1
 	@echo "  image : $@ ($$(stat -c%s $@) bytes)"
 
 iso: $(ISO)
@@ -262,8 +234,10 @@ check: test $(ISO)
 	python3 tests/qemu/text_mode_test.py --iso $(ISO)
 	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 16
 	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 8 --no-desktop
+	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 4 --boot-default --no-desktop
 	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 16 --vga cirrus --boot-default --no-desktop --retry-desktop
 	python3 tests/qemu/low_memory_gui_test.py --iso $(ISO)
+	python3 tests/qemu/smp_boot_test.py --iso $(ISO)
 
 # Build the kernel and ISO twice from a clean tree and compare the results.
 verify-reproducible:

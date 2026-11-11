@@ -55,7 +55,7 @@ def char_to_keys(ch):
 
 class Tinos:
     def __init__(self, iso, mem=256, qmp_port=4455, serial=None, verbose=True,
-                 vga="std"):
+                 vga="std", cpus=1):
         self.iso = iso
         self.mem = mem
         self.qmp_port = qmp_port
@@ -67,6 +67,7 @@ class Tinos:
         self.verbose = verbose
         self.cursor = None
         self.vga = vga
+        self.cpus = cpus
 
     # -- lifecycle ---------------------------------------------------------
     def start(self):
@@ -74,6 +75,7 @@ class Tinos:
             "qemu-system-i386",
             "-cdrom", self.iso,
             "-m", str(self.mem),
+            "-smp", str(self.cpus),
             "-vga", self.vga,
             "-machine", "pc,pcspk-audiodev=tinos-audio",
             "-audiodev", "driver=none,id=tinos-audio",
@@ -310,8 +312,8 @@ def run_scenario(iso, shots_dir):
 
         # ---------------------------------------------------------------
         print("\n== text mode boot ==")
-        c.check(vm.wait_for_serial("multiboot2: bootloader=", timeout=30),
-                "kernel starts and reports the Multiboot2 handover")
+        c.check(vm.wait_for_serial("boot: TinOS BIOS loader", timeout=30),
+                "kernel starts through the TinOS BIOS loader")
         time.sleep(1.2)
         boot = shot("boot-text", settle=0)
         c.check(boot.size == (720, 400),

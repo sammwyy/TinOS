@@ -63,33 +63,19 @@ static bool checksum_ok(const void *data, size_t len)
     return sum == 0;
 }
 
-static const acpi_rsdp_v2_t *find_rsdp(const mb_info_t *mbi)
+static const acpi_rsdp_v2_t *find_rsdp(const boot_info_t *info)
 {
-    const mb_tag_acpi_t *old_tag = NULL;
-    const mb_tag_acpi_t *new_tag = NULL;
-    MB_FOR_EACH_TAG(mbi, tag)
-    {
-        if (tag->type == MB_TAG_ACPI_NEW)
-            new_tag = (const mb_tag_acpi_t *)tag;
-        else if (tag->type == MB_TAG_ACPI_OLD)
-            old_tag = (const mb_tag_acpi_t *)tag;
-    }
-
-    if (new_tag) {
-        const acpi_rsdp_v2_t *rsdp = (const acpi_rsdp_v2_t *)new_tag->rsdp;
-        if (memcmp(rsdp->v1.sig, "RSD PTR ", 8) == 0 &&
-            checksum_ok(&rsdp->v1, sizeof(rsdp->v1)) &&
-            rsdp->v1.revision >= 2 &&
-            checksum_ok(rsdp, sizeof(*rsdp)))
-            return rsdp;
-    }
-    if (old_tag) {
-        const acpi_rsdp_v1_t *rsdp = (const acpi_rsdp_v1_t *)old_tag->rsdp;
-        if (memcmp(rsdp->sig, "RSD PTR ", 8) == 0 &&
-            checksum_ok(rsdp, sizeof(*rsdp)))
-            return (const acpi_rsdp_v2_t *)rsdp; /* only ->v1 is valid */
-    }
-    return NULL;
+    if (!info->rsdp_address)
+        return NULL;
+    const acpi_rsdp_v2_t *rsdp =
+        (const acpi_rsdp_v2_t *)(uintptr_t)info->rsdp_address;
+    if (memcmp(rsdp->v1.sig, "RSD PTR ", 8) != 0 ||
+        !checksum_ok(&rsdp->v1, sizeof(rsdp->v1)))
+        return NULL;
+    if (rsdp->v1.revision >= 2 &&
+        (!rsdp->length || !checksum_ok(rsdp, rsdp->length)))
+        return NULL;
+    return rsdp;
 }
 
 /* Scans an RSDT (32-bit table pointers) or XSDT (64-bit, truncated - every
@@ -124,11 +110,11 @@ static const acpi_sdt_header_t *find_table(const acpi_sdt_header_t *root,
     return NULL;
 }
 
-bool acpi_find_madt(const mb_info_t *mbi, acpi_madt_info_t *out)
+bool acpi_find_madt(const boot_info_t *info, acpi_madt_info_t *out)
 {
     memset(out, 0, sizeof(*out));
 
-    const acpi_rsdp_v2_t *rsdp = find_rsdp(mbi);
+    const acpi_rsdp_v2_t *rsdp = find_rsdp(info);
     if (!rsdp)
         return false;
 

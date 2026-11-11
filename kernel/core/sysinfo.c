@@ -25,7 +25,7 @@ void sys_info_get(sys_info_t *out)
                   "clock unavailable (up %u s)", out->uptime_ms / 1000);
 
     cpu_brand_string(out->cpu, sizeof(out->cpu));
-    strlcpy(out->platform, "i386 protected mode (Multiboot2)",
+    strlcpy(out->platform, "i386 protected mode (TinOS BIOS loader)",
             sizeof(out->platform));
 
     out->mem_total = pmm_total_bytes();

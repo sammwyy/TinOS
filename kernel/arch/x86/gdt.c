@@ -1,9 +1,8 @@
 /* Flat 32-bit global descriptor table.
  *
- * GRUB leaves us with a GDT of its own that we must not rely on, so the
- * kernel installs a minimal flat model: one code and one data segment
- * spanning the whole 4 GiB address space.  TinOS runs entirely in ring 0
- * and does not use paging, so link addresses are physical addresses.
+ * The BIOS loader installs an initial flat GDT; the kernel replaces it
+ * with its own code and data segments spanning the full address space.
+ * TinOS runs in ring 0 with identity-mapped paging.
  */
 
 #include <tinos/arch.h>

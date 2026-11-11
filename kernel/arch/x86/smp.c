@@ -65,10 +65,10 @@ void ap_entry(void)
     }
 }
 
-size_t smp_init(const mb_info_t *mbi)
+size_t smp_init(const boot_info_t *info)
 {
     acpi_madt_info_t madt;
-    bool has_madt = acpi_find_madt(mbi, &madt);
+    bool has_madt = acpi_find_madt(info, &madt);
 
     /* Bring up this core's own local APIC either way: even single-core,
      * thread.c needs lapic_id() to answer "which CPU am I". 0xFEE00000 is

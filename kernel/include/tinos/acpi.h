@@ -5,7 +5,7 @@
 #ifndef TINOS_ACPI_H
 #define TINOS_ACPI_H
 
-#include <tinos/multiboot2.h>
+#include <tinos/boot_info.h>
 #include <tinos/types.h>
 
 #define ACPI_MAX_CPUS 32
@@ -16,10 +16,10 @@ typedef struct {
     size_t   cpu_count;
 } acpi_madt_info_t;
 
-/* Finds the RSDP GRUB copied into the multiboot2 info block, walks
+/* Finds the RSDP supplied by the bootloader, walks
  * RSDT/XSDT to the MADT, and fills `out`. Returns false if no usable,
  * checksum-valid MADT was found - the caller should then treat the
  * machine as single-CPU rather than guess. */
-bool acpi_find_madt(const mb_info_t *mbi, acpi_madt_info_t *out);
+bool acpi_find_madt(const boot_info_t *info, acpi_madt_info_t *out);
 
 #endif /* TINOS_ACPI_H */

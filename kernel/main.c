@@ -32,7 +32,7 @@
 #include <tinos/mm.h>
 #include <tinos/native_app.h>
 #include <tinos/net.h>
-#include <tinos/multiboot2.h>
+#include <tinos/boot_info.h>
 #include <tinos/pci.h>
 #include <tinos/printf.h>
 #include <tinos/selftest.h>
@@ -152,41 +152,14 @@ static void pause_ms(uint32_t ms)
     timer_sleep(ms);
 }
 
-/* Locate the command line and bootloader name tags for reporting. */
-static void read_multiboot_strings(const mb_info_t *mbi, const char **loader)
+/* Reserve bootloader payloads before the heap acquires its first frame. */
+static void reserve_native_app_memory(const boot_info_t *info)
 {
-    *loader = "unknown";
-    MB_FOR_EACH_TAG(mbi, tag)
-    {
-        const mb_tag_string_t *s = (const mb_tag_string_t *)tag;
-        if (tag->type == MB_TAG_CMDLINE)
-            boot_cmdline = s->string;
-        else if (tag->type == MB_TAG_BOOT_LOADER)
-            *loader = s->string;
-    }
-}
-
-static const mb_tag_module_t *find_ramfs_module(const mb_info_t *mbi)
-{
-    MB_FOR_EACH_TAG(mbi, tag)
-    {
-        if (tag->type == MB_TAG_MODULE)
-            return (const mb_tag_module_t *)tag;
-    }
-    return NULL;
-}
-
-/* GRUB loads module2 payloads into RAM before the kernel runs, at addresses
- * the pmm bitmap does not know about yet. Called right after pmm_init(),
- * before heap_init() takes its first frame, so nothing can land on top of
- * the ramfs or the arena native apps get loaded into. */
-static void reserve_native_app_memory(const mb_info_t *mbi)
-{
-    const mb_tag_module_t *mod = find_ramfs_module(mbi);
-    if (mod) {
+    if (info->initrd_end > info->initrd_start) {
         klog("[boot] ramfs module 0x%08x..0x%08x\n",
-             mod->mod_start, mod->mod_end);
-        pmm_reserve_range(mod->mod_start, mod->mod_end - mod->mod_start);
+             info->initrd_start, info->initrd_end);
+        pmm_reserve_range(info->initrd_start,
+                          info->initrd_end - info->initrd_start);
     }
     pmm_reserve_range(NATIVE_APP_BASE, NATIVE_APP_ARENA_SIZE);
 }
@@ -279,14 +252,13 @@ typedef void (*app_main_fn)(const tinos_abi_t *abi, const char *name,
  * NATIVE_APP_BASE arena. A subdirectory's app.conf and icon file (see
  * parse_manifest() and load_icon() above) become the arguments passed to
  * its app_main(), which builds its own app_entry_t and registers it. */
-static size_t load_native_apps(const mb_info_t *mbi)
+static size_t load_native_apps(const boot_info_t *info)
 {
-    const mb_tag_module_t *mod = find_ramfs_module(mbi);
-    if (!mod)
+    if (info->initrd_end <= info->initrd_start)
         return 0;
 
-    const void *image = (const void *)(uintptr_t)mod->mod_start;
-    size_t      size   = mod->mod_end - mod->mod_start;
+    const void *image = (const void *)(uintptr_t)info->initrd_start;
+    size_t      size   = info->initrd_end - info->initrd_start;
     if (tar_extract(image, size, "/apps") == 0)
         return 0;
 
@@ -340,8 +312,8 @@ static size_t load_native_apps(const mb_info_t *mbi)
             klog("[boot] apps: %s slot is outside usable RAM\n", elf_node->name);
             continue;
         }
-        if (slot_base < mod->mod_end &&
-            mod->mod_start < slot_base + NATIVE_APP_SLOT_SIZE) {
+        if (slot_base < info->initrd_end &&
+            info->initrd_start < slot_base + NATIVE_APP_SLOT_SIZE) {
             klog("[boot] apps: %s slot overlaps the ramfs module\n",
                  elf_node->name);
             continue;
@@ -364,28 +336,28 @@ static size_t load_native_apps(const mb_info_t *mbi)
     return loaded;
 }
 
-void kmain(uint32_t magic, uint32_t mbi_addr)
+void kmain(uint32_t magic, uint32_t info_addr)
 {
-    const mb_info_t *mbi = (const mb_info_t *)(uintptr_t)mbi_addr;
+    const boot_info_t *info = (const boot_info_t *)(uintptr_t)info_addr;
 
     serial_init();
     vga_text_init();
     boot_banner();
 
     klog("[boot] " TINOS_NAME " " TINOS_VERSION " starting, magic=0x%08x "
-         "mbi=0x%08x\n",
-         magic, mbi_addr);
+         "boot_info=0x%08x\n",
+         magic, info_addr);
 
-    if (magic != MULTIBOOT2_BOOTLOADER_MAGIC) {
-        boot_fail("multiboot2: bad magic 0x%08x (expected 0x%08x)",
-                  magic, MULTIBOOT2_BOOTLOADER_MAGIC);
-        panic("bad multiboot2 magic 0x%08x - expected 0x%08x", magic,
-              MULTIBOOT2_BOOTLOADER_MAGIC);
+    if (magic != TINOS_BOOT_MAGIC || !info ||
+        info->size != sizeof(*info) ||
+        info->version != TINOS_BOOT_VERSION ||
+        info->memory_count > BOOT_MEMORY_ENTRIES) {
+        boot_fail("boot: invalid handoff 0x%08x", magic);
+        panic("invalid boot information");
     }
 
-    const char *loader = NULL;
-    read_multiboot_strings(mbi, &loader);
-    boot_step("multiboot2: bootloader=%s", loader);
+    boot_cmdline = info->command_line;
+    boot_step("boot: TinOS BIOS loader");
 
     /* Platform */
     gdt_init();
@@ -411,8 +383,8 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     boot_note("cpu: %s", cpu);
 
     /* Memory */
-    pmm_init(mbi);
-    reserve_native_app_memory(mbi);
+    pmm_init(info);
+    reserve_native_app_memory(info);
     heap_init();
     async_init();
     bus_init();
@@ -434,7 +406,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     pause_ms(BOOT_STEP_DELAY_MS);
 
     /* SMP */
-    size_t cpus = smp_init(mbi);
+    size_t cpus = smp_init(info);
     if (cpus > 1)
         boot_step("smp: %u cpus online", (uint32_t)cpus);
     else
@@ -464,7 +436,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     pause_ms(BOOT_STEP_DELAY_MS);
 
     /* Native applications */
-    size_t native_apps = load_native_apps(mbi);
+    size_t native_apps = load_native_apps(info);
     if (native_apps)
         boot_step("apps: loaded %u native app(s) from the ramfs",
                   (uint32_t)native_apps);

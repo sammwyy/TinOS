@@ -1,45 +1,9 @@
 /*
- * TinOS - Multiboot2 entry point (i386 protected mode)
+ * TinOS - i386 protected-mode entry point.
  *
- * GRUB2 loads us at 1 MiB already in 32-bit protected mode with paging
- * disabled and a flat (but unknown) GDT.  We request an EGA text-mode
- * framebuffer so that the kernel starts life in 80x25 text mode and performs
- * the switch into graphics mode itself (see kernel/drivers/video/vbe.c).
+ * The BIOS loader loads the image at 1 MiB and passes its boot_info address
+ * in EBX, with TINOS_BOOT_MAGIC in EAX. Paging is disabled.
  */
-
-.set MB2_MAGIC,     0xE85250D6
-.set MB2_ARCH_I386, 0
-
-/* Multiboot2 header */
-.section .multiboot, "a"
-.align 8
-mb2_header_start:
-    .long   MB2_MAGIC
-    .long   MB2_ARCH_I386
-    .long   mb2_header_end - mb2_header_start
-    .long   -(MB2_MAGIC + MB2_ARCH_I386 + (mb2_header_end - mb2_header_start))
-
-    /* Console flags tag, with no framebuffer tag alongside it.
-     *
-     * This combination tells GRUB that the kernel drives an EGA text console
-     * itself, which makes it set "gfxpayload=text" and hand control over in
-     * 80x25 text mode.  Requesting a framebuffer tag here (even with depth 0)
-     * would instead make GRUB pick a graphics mode and leave the text console
-     * unusable, which is exactly what TinOS does not want: the boot log is
-     * printed in text mode and the kernel switches to graphics on its own. */
-.align 8
-mb2_tag_console_start:
-    .short  4                       /* MULTIBOOT_HEADER_TAG_CONSOLE_FLAGS */
-    .short  0                       /* flags: required                    */
-    .long   mb2_tag_console_end - mb2_tag_console_start
-    .long   3                       /* console required | EGA text support */
-mb2_tag_console_end:
-
-.align 8
-    .short  0                       /* end tag */
-    .short  0
-    .long   8
-mb2_header_end:
 
 /* Boot stack */
 .section .bss, "aw", @nobits
@@ -60,7 +24,18 @@ _start:
     movl    $boot_stack_top, %esp
     xorl    %ebp, %ebp                  /* terminate stack traces here */
 
-    /* kmain(uint32_t magic, uint32_t mbi_phys) - cdecl, args right to left */
+    /* The loader keeps the AP trampoline in the low-memory bounce area
+     * until execution has left the El Torito boot sector at 0x7c00. */
+    pushl   %eax
+    pushl   %ebx
+    movl    $0x10000, %esi
+    movl    $ap_trampoline_start, %edi
+    movl    $AP_TRAMPOLINE_SIZE, %ecx
+    rep movsb
+    popl    %ebx
+    popl    %eax
+
+    /* kmain(uint32_t magic, uint32_t boot_info_phys) */
     pushl   %ebx
     pushl   %eax
     call    kmain

@@ -2,17 +2,17 @@
 
 A small graphical operating system for QEMU, written from scratch: its own
 32-bit kernel, VGA graphics driver, window manager, in-memory filesystem and
-shell. It boots through GRUB, prints a text-mode start-up log, switches the
-display into a 1024x768x32 linear framebuffer, and hands over to a desktop
+shell. It boots through its own BIOS El Torito loader, prints a text-mode
+start-up log, selects a supported framebuffer resolution, and hands over to a desktop
 with a taskbar, a start menu, a terminal, a file explorer and a text editor.
 
-It is not based on Linux and contains no Linux userspace: after GRUB hands
-over control, every instruction that runs is from this repository (plus
-libgcc's 64-bit arithmetic helpers).
+It is not based on Linux and contains no Linux userspace: the bootloader
+uses BIOS services for disk and memory discovery, then enters the kernel,
+whose code is from this repository (plus libgcc's arithmetic helpers).
 
 ```
    +-----------------------------------------------------------+
-   |  GRUB2  --multiboot2-->  kernel/main.c  (text mode)        |
+   |  TinOS BIOS loader  -->  kernel/main.c  (text mode)        |
    |                              |                             |
    |            gdt -> idt/pic -> pit/rtc -> pmm/heap ->        |
    |            keyboard/mouse -> ramfs -> pci -> vbe           |
@@ -29,27 +29,26 @@ libgcc's 64-bit arithmetic helpers).
 ## Quick start
 
 ```sh
-sudo dnf install gcc binutils make grub2-tools-extra xorriso qemu-system-x86 \
+sudo dnf install gcc binutils make nasm xorriso qemu-system-x86 \
                  libgcc.i686           # 32-bit libgcc for -m32 code
 make                                    # builds build/tinos.iso
 make run                                # boots it in QEMU
 ```
 
-The first screen is the GRUB menu (3 seconds), then the text-mode boot log
+The first screen is the TinOS boot menu (3 seconds), then the text-mode boot log
 for about three seconds, then the desktop.
 
-Choose "TinOS (text console)" in GRUB to keep the VGA console and run the
-interactive shell. Type `desktop` to enter the graphical session. The text
+Press Down twice and Enter in the boot menu to keep the VGA console and run
+the interactive shell. Type `desktop` to enter the graphical session. The text
 console currently runs in the kernel address space; the desktop is not yet a
 separate process and cannot return to the console after it starts.
 
 With 16 MiB of QEMU RAM the text console and graphical desktop load the
-bundled apps. An 8 MiB graphical boot runs at 640x480 when GRUB2 loads the
-app module; depending on GRUB2's memory placement it may instead omit the
-module, in which case the text console remains usable. Graphics also falls
-back to the console on unsupported video hardware. A 4 MiB boot is not
-supported yet: GRUB2 runs out of memory before it transfers control, even
-without the ramfs module.
+bundled apps. An 8 MiB graphical boot runs at 640x480 with the app archive.
+At 4 MiB the loader skips that archive and boots into the text console; the
+graphical desktop and native apps do not fit. Graphics also falls back to
+the console on unsupported video hardware. This BIOS boot image is currently
+for optical ISO media, not UEFI or a raw USB disk.
 
 ## Requirements
 
@@ -57,13 +56,13 @@ without the ramfs module.
 |------|-----|----------------|
 | `gcc` with `-m32` | compiles the freestanding 32-bit kernel | `gcc`, `libgcc.i686` |
 | `ld` | links the kernel with a custom linker script | `binutils` |
-| `grub2-mkrescue` | builds the bootable ISO | `grub2-tools-extra` |
-| `xorriso` | ISO filesystem writer used by grub2-mkrescue | `xorriso` |
+| `nasm` | assembles the 16-bit BIOS loader | `nasm` |
+| `xorriso` | writes the El Torito ISO | `xorriso` |
 | `qemu-system-i386` | runs the image | `qemu-system-x86` |
 | `python3` + Pillow + numpy | optional: automated GUI tests | `python3-pillow`, `python3-numpy` |
 
 Everything above is already present on a stock Fedora workstation except
-possibly `libgcc.i686` and `grub2-tools-extra`.
+possibly `libgcc.i686` and `nasm`.
 
 ## Build and run
 
@@ -148,12 +147,14 @@ another backend is required. Automated headless tests select `none` explicitly.
 The `doremi` shell command remains a blocking AC'97 hardware test; music
 playback and controls are provided by Media Player.
 
-The GRUB menu has two entries:
+The TinOS boot menu has three selections (Down/Up, then Enter):
 
 * **TinOS** - the normal desktop.
 * **TinOS (kernel self-test on serial)** - runs the in-kernel assertions over
   the heap, path handling, filesystem and shell before starting the desktop
   and prints the results to the serial port.
+* **TinOS (text console)** - stays on the VGA console until `desktop` is
+  requested.
 
 ## Controls
 
@@ -473,10 +474,10 @@ to the nearest surviving ancestor.
 
 | Area | Files | What it does |
 |------|-------|--------------|
-| Boot | `kernel/arch/x86/boot.S`, `boot/linker.ld`, `boot/grub.cfg` | Multiboot2 header, stack, entry; kernel linked at 1 MiB |
-| Arch | `kernel/arch/x86/` | GDT, IDT + 48 interrupt stubs, 8259A PIC, PIT, CMOS RTC, CPUID, reboot/power-off, page tables, the Multiboot2 boot stub - everything specific to the target picked by `make ARCH=...` (only `x86` exists today) |
+| Boot | `boot/x86/`, `boot/linker.ld`, `kernel/arch/x86/boot.S` | El Torito BIOS loader, shared boot information, protected-mode entry; kernel linked at 1 MiB |
+| Arch | `kernel/arch/x86/` | GDT, IDT + 48 interrupt stubs, 8259A PIC, PIT, CMOS RTC, CPUID, reboot/power-off, page tables - everything specific to the target picked by `make ARCH=...` (only `x86` exists today) |
 | SMP | `kernel/arch/x86/{acpi,lapic,smp,trampoline.S}` | ACPI MADT parsing, local APIC, AP bring-up (see below) |
-| Memory | `kernel/mm/`, `kernel/arch/x86/{pmm,paging}.c` | bitmap page frame allocator over the Multiboot2 memory map and the x86 page tables (arch-specific, under `kernel/arch/x86/`); first-fit heap with coalescing that grows by taking new arenas from the frame allocator (portable, under `kernel/mm/`) |
+| Memory | `kernel/mm/`, `kernel/arch/x86/{pmm,paging}.c` | bitmap page frame allocator over the boot information memory map and the x86 page tables (arch-specific, under `kernel/arch/x86/`); first-fit heap with coalescing that grows by taking new arenas from the frame allocator (portable, under `kernel/mm/`) |
 | Devices | `kernel/drivers/<class>/` | drivers grouped by device class (`bus`, `block`, `net`, `usb`, `input`, `video`, `audio`, `char`): COM1 serial log, VGA text console, PCI enumeration, Bochs DISPI mode setting, PS/2 keyboard, PS/2 mouse with IntelliMouse wheel support |
 | Graphics | `kernel/gfx/` | double-buffered framebuffer with multi-region dirty upload, rectangles, lines, gradients, alpha blending, clipping stack, 8x16 bitmap font |
 | Filesystem | `kernel/fs/` | node tree, path resolution, textual path helpers |
@@ -485,7 +486,7 @@ to the nearest surviving ancestor.
 | Libraries | `libraries/image/` | PNG, JPEG and WebP decoding on top of stb_image/simplewebp; own kernel thread, real SSE2 |
 | Libraries | `libraries/audio/` | WAV and Ogg Vorbis decoding, codec dispatch; own kernel thread, real SSE2 |
 | Desktop | `desktop/` | window manager, widgets, icons, application registry, taskbar/start menu/event loop |
-| Applications | `apps/`, `kernel/proc/elf.c`, `kernel/core/abi.c`, `kernel/fs/tar.c` | terminal, file explorer, text editor, image viewer, media player, calculator, control panel, system information, about - each its own freestanding ELF binary (own Makefile, own linker script), bundled into `build/ramfs.tar`, handed to the kernel as a Multiboot2 module and loaded at boot (see below) |
+| Applications | `apps/`, `kernel/proc/elf.c`, `kernel/core/abi.c`, `kernel/fs/tar.c` | terminal, file explorer, text editor, image viewer, media player, calculator, control panel, system information, about - each its own freestanding ELF binary (own Makefile, own linker script), bundled into `build/ramfs.tar`, handed to the kernel as an initrd and loaded at boot (see below) |
 
 Each self-contained unit owns its own public headers under its own
 `include/tinos/` tree - `kernel/include/tinos/` for the kernel core (shared
@@ -510,10 +511,8 @@ it (see below) - it buys no memory isolation yet, so a wild pointer write
 still does not fault, which is why `crash gpf` uses an invalid segment
 selector rather than a bad address.
 
-**Text mode first, then our own mode switch.** The Multiboot2 header asks
-GRUB for an EGA text console and deliberately does *not* include a framebuffer
-tag - with one, GRUB picks a graphics mode itself and the text-mode boot log
-would never be visible. The kernel then switches to graphics on its own by
+**Text mode first, then our own mode switch.** The BIOS loader leaves the
+machine in VGA text mode, and the kernel switches to graphics on its own by
 programming the DISPI registers (ports 0x1CE/0x1CF) and reading the
 framebuffer address out of BAR0 of the PCI display device, rather than
 hardcoding QEMU's 0xFD000000 or dropping to real mode for a BIOS call.
@@ -575,11 +574,11 @@ interleave. `arch_fpu_init()` (`kernel/arch/x86/cpu.c`) enables CR0/CR4 and
 resets the FPU once at boot, before any thread runs.
 
 **SMP: real cores, sharing the thread pool.** `kernel/arch/x86/acpi.c` reads
-the RSDP GRUB hands off via the multiboot2 ACPI tag and walks RSDT/XSDT to
+the RSDP found by the BIOS loader and walks RSDT/XSDT to
 the MADT to find every CPU's APIC ID and the local APIC's address;
 `lapic.c` then sends each one the INIT-SIPI-SIPI sequence. Every
 application processor boots through `trampoline.S` - 16-bit real mode code
-linked *and loaded* (`boot/linker.ld`'s `AT()` placement) at a fixed low
+linked at a fixed low
 physical address so its SIPI vector is known at build time - which loads
 the boot processor's own flat GDT, enters 32-bit protected mode, and calls
 into `smp.c:ap_entry()`, which activates the shared identity-mapped page
@@ -629,8 +628,8 @@ polling-oriented kernel service rather than a userspace socket subsystem.
 against `apps/link.ld`, which links it at a fixed address inside the
 arena `kernel/include/tinos/native_app.h` reserves (`kernel/arch/x86/
 pmm.c` never hands those frames to anything else). `make` bundles every
-app's `.elf` into `build/ramfs.tar` and GRUB loads it as a Multiboot2
-module (`boot/grub.cfg`'s `module2` line); at boot, `kernel/fs/tar.c`
+app's `.elf` into `build/ramfs.tar`; the BIOS loader places it in RAM as
+an initrd, and at boot `kernel/fs/tar.c`
 unpacks it into `/apps` and `kernel/proc/elf.c` copies each `.elf`'s
 `PT_LOAD` segments to their literal (fixed, pre-reserved) `p_vaddr` -
 correct only because paging identity-maps the whole address space, so
@@ -701,7 +700,7 @@ make check     # the above plus the scripted QEMU boot/GUI session
   redirection, pipelines, sequencing, two shells sharing one tree, and a
   hostile-input fuzz list.
 
-* **In-kernel self-test** (`tests/kernel/selftest.c`, second GRUB entry) runs
+* **In-kernel self-test** (`tests/kernel/selftest.c`, second boot selection) runs
   the kernel assertions against the real heap and prints the result to serial.
 
 * **Scripted QEMU session** (`tests/qemu/qemu_test.py`) boots the ISO headless,
@@ -737,8 +736,7 @@ scan, VGA/DISPI driver, graphics engine, keyboard and mouse drivers,
 filesystem, shell and parser, window manager, widgets, and all five
 applications), the build system, the test harnesses and this documentation.
 
-Reused: GRUB2 as the bootloader (an explicitly allowed foundational
-component); `libgcc` for 64-bit division helpers; the glyph shapes in
+Reused: `libgcc` for 64-bit division helpers; the glyph shapes in
 `kernel/gfx/font8x16.c`, which `tools/mkfont.py` rasterised once from
 Liberation Mono on the host - the font *renderer* is ours, only the bitmaps
 are derived. No operating system code was copied from another project.
@@ -746,7 +744,7 @@ are derived. No operating system code was copied from another project.
 ## Repository layout
 
 ```
-boot/            linker script, GRUB config (multiboot2 entry lives in arch/x86/)
+boot/            kernel linker script and BIOS El Torito loader under x86/
 kernel/
   arch/x86/      GDT, IDT, interrupt stubs, PIC, PIT, RTC, CPU, reset,
                  page tables, physical memory allocator, boot.S - every

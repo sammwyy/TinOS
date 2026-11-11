@@ -1,11 +1,8 @@
 /* Physical page frame allocator.
  *
- * TinOS runs with paging disabled, so "physical" and "virtual" addresses are
- * the same thing.  The allocator is a straightforward bitmap over the first
- * 4 GiB of address space: every frame starts out reserved and only the
- * regions the bootloader reports as available are released, after which the
- * areas we must not hand out (low memory, the kernel image, the multiboot
- * information block) are reserved again.
+ * Identity-mapped paging keeps physical and virtual addresses equal.
+ * All frames start reserved; boot-reported usable regions are released,
+ * then low memory and the kernel image are reserved again.
  */
 
 #include <tinos/kernel.h>
@@ -26,21 +23,17 @@ static uint64_t managed_frames;
 static size_t   regions;
 static size_t   search_hint;
 static spinlock_t pmm_lock = SPINLOCK_INIT;
-static const mb_tag_mmap_t *memory_map;
+static const boot_info_t *memory_map;
 
 bool pmm_range_is_ram(uintptr_t base, size_t length)
 {
     if (!memory_map || !length || (uint64_t)base + length > 0x100000000ULL)
         return false;
 
-    size_t count = (memory_map->size - sizeof(*memory_map)) /
-                   memory_map->entry_size;
-    for (size_t i = 0; i < count; i++) {
-        const mb_mmap_entry_t *e =
-            (const mb_mmap_entry_t *)((uintptr_t)memory_map->entries +
-                                      i * memory_map->entry_size);
-        if (e->type == MB_MEMORY_AVAILABLE && (uint64_t)base >= e->addr &&
-            (uint64_t)base + length - e->addr <= e->len)
+    for (size_t i = 0; i < memory_map->memory_count; i++) {
+        const boot_memory_entry_t *e = &memory_map->memory[i];
+        if (e->type == BOOT_MEMORY_USABLE && (uint64_t)base >= e->base &&
+            (uint64_t)base + length - e->base <= e->length)
             return true;
     }
     return false;
@@ -104,7 +97,7 @@ static void release_range(uint64_t base, uint64_t length)
     }
 }
 
-void pmm_init(const mb_info_t *mbi)
+void pmm_init(const boot_info_t *info)
 {
     memset(bitmap, 0xFF, sizeof(bitmap)); /* everything reserved */
     used_frames    = MAX_FRAMES;
@@ -112,36 +105,24 @@ void pmm_init(const mb_info_t *mbi)
     total_bytes    = 0;
     regions        = 0;
 
-    const mb_tag_mmap_t *mmap = NULL;
-    MB_FOR_EACH_TAG(mbi, tag)
-    {
-        if (tag->type == MB_TAG_MMAP)
-            mmap = (const mb_tag_mmap_t *)tag;
-    }
+    if (!info || !info->memory_count ||
+        info->memory_count > BOOT_MEMORY_ENTRIES)
+        panic("boot: invalid memory map");
 
-    if (!mmap)
-        panic("multiboot2: no memory map provided by the bootloader");
-
-    memory_map = mmap;
-    size_t count = (mmap->size - sizeof(mb_tag_mmap_t)) / mmap->entry_size;
-    for (size_t i = 0; i < count; i++) {
-        const mb_mmap_entry_t *e =
-            (const mb_mmap_entry_t *)((uintptr_t)mmap->entries +
-                                      i * mmap->entry_size);
-        if (e->type != MB_MEMORY_AVAILABLE)
+    memory_map = info;
+    for (size_t i = 0; i < info->memory_count; i++) {
+        const boot_memory_entry_t *e = &info->memory[i];
+        if (e->type != BOOT_MEMORY_USABLE)
             continue;
         regions++;
-        total_bytes += e->len;
-        release_range(e->addr, e->len);
+        total_bytes += e->length;
+        release_range(e->base, e->length);
     }
 
-    /* Never hand out the first megabyte (BIOS data, VGA, EBDA), the kernel
-     * image itself, or the multiboot information block. */
+    /* The boot information resides below the first megabyte. */
     pmm_reserve_range(0, 0x100000);
     pmm_reserve_range((uintptr_t)__kernel_start,
                       (size_t)(__kernel_end - __kernel_start));
-    const mb_info_t *info = mbi;
-    pmm_reserve_range((uintptr_t)info, info->total_size);
 
     search_hint = 0x100000 / PAGE_SIZE;
 }

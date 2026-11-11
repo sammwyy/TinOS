@@ -1,7 +1,7 @@
 /* In-kernel self tests.
  *
- * Run when the kernel command line contains "selftest" (the second GRUB menu
- * entry).  These exercise the same filesystem and shell code the host test
+ * Run when the boot command line contains "selftest" (the second boot
+ * selection). These exercise the same filesystem and shell code the host test
  * harness covers, but inside the real kernel with the real heap, which is
  * what catches allocator problems the host build cannot see.
  *

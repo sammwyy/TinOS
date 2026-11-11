@@ -1,7 +1,7 @@
 /* VGA text mode console used for the boot stage.
  *
- * This is the very first thing the user sees: GRUB hands over in EGA text
- * mode and the kernel prints its start-up progress here before the VBE
+ * The BIOS loader leaves the adapter in VGA text mode. The kernel prints
+ * its start-up progress here before the VBE
  * driver switches the adapter into a linear framebuffer mode.
  */
 

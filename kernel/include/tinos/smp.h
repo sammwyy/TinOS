@@ -14,12 +14,12 @@
 #ifndef TINOS_SMP_H
 #define TINOS_SMP_H
 
-#include <tinos/multiboot2.h>
+#include <tinos/boot_info.h>
 #include <tinos/types.h>
 
 /* Returns the number of CPUs now online (always >= 1: the boot processor
  * counts itself even if no other core could be started). */
-size_t smp_init(const mb_info_t *mbi);
+size_t smp_init(const boot_info_t *info);
 
 /* The boot processor's local APIC ID, valid once smp_init() has run (it
  * always brings up the local APIC, even single-core / without ACPI). Used

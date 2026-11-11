@@ -23,7 +23,7 @@ address space with no privilege separation.
 | Property            | Today                                                        |
 |---------------------|--------------------------------------------------------------|
 | CPU target          | i386 (`-m32`), protected mode                                |
-| Boot                | GRUB2, Multiboot2, BIOS only, EGA text console at handoff    |
+| Boot                | TinOS El Torito loader, BIOS only, VGA text console at handoff |
 | Privilege           | Everything in ring 0; flat GDT, no TSS, no ring 3            |
 | Paging              | Identity map of the full 4 GiB with 4 MiB PSE pages          |
 | Memory isolation    | None                                                         |
@@ -39,7 +39,9 @@ address space with no privilege separation.
 ### 1.2 Boot flow
 
 ```
-GRUB2 (multiboot2 /boot/tinos.elf + module2 /boot/ramfs.tar)
+TinOS BIOS loader (boot/x86/loader.asm, El Torito boot image)
+  -> BIOS E820 memory map, optional initrd, ACPI RSDP -> boot_info_t v1
+  -> load kernel at 1 MiB, enter 32-bit protected mode
   -> kernel/arch/x86/boot.S     _start, 64 KiB boot stack
   -> kernel/main.c kmain()
        serial, VGA text console
@@ -105,14 +107,14 @@ first.
   to their link address by `kernel/proc/elf.c`, and their `app_main()` is
   called once in kernel context. It registers an `app_entry_t` with a
   `launch` callback; from then on the desktop calls into app code directly.
-- The tar-backed files refer directly to the reserved GRUB module. Writes
+- The tar-backed files refer directly to the reserved initrd. Writes
   allocate private buffers so the original archive remains unchanged.
   The module remains reserved for the lifetime of these files.
 - The ELF loader validates the entire program-header table before copying
   segments. Each app is restricted to its own slot, and duplicate slots
   are rejected at boot. This does not isolate apps from one another at
   runtime.
-- App slots must fit the Multiboot2 usable-memory map and must not overlap
+- App slots must fit the boot information's usable-memory map and must not overlap
   the ramfs module; apps outside physical RAM are skipped.
 - Apps call the kernel through `tinos_abi_t` (`kernel/include/tinos/abi.h`),
   a struct of roughly 130 function pointers. `apps/lib/shim.c` re-exports
@@ -135,17 +137,16 @@ removed or replaced independently.
 
 ### 1.7 Build and test
 
-- GNU Make, host `gcc -m32`, host `ld`; `grub2-mkrescue` + `xorriso` for the ISO.
+- GNU Make, host `gcc -m32`, host `ld`; NASM and `xorriso` for the ISO.
 - Byte-reproducible kernel and ISO (`make verify-reproducible`).
 - Host unit tests with ASan/UBSan for `kernel/fs`, `kernel/sh`, audio codecs
   (`make test`).
 - In-kernel self-test (`tests/kernel/`) selected by the `selftest` kernel command-line flag.
 - Scripted QEMU session with screenshot OCR (`make check`, `tests/qemu/qemu_test.py`).
-- Current memory acceptance in QEMU: 8 MiB supports a 640x480 desktop when
-  GRUB loads the app module; 16 MiB supports the regular 1024x768 desktop.
-  With an unsupported display adapter, boot continues into the VGA text
-  console. At 4 MiB GRUB2's relocator fails before the kernel runs, even
-  with a debug-stripped kernel and no ramfs module.
+- Current memory acceptance in QEMU: 4 MiB boots the text console without
+  bundled apps, 8 MiB supports the 640x480 desktop with apps, and 16 MiB
+  supports the regular 1024x768 desktop. With an unsupported display
+  adapter, boot continues into the VGA text console.
 
 ---
 
@@ -336,7 +337,7 @@ code that will move there; the prerequisite for each move is listed in the
 "Deferred file moves" table in [TODO.md](TODO.md).
 
 ```
-boot/                      GRUB config, kernel linker script
+boot/                      BIOS El Torito loader and kernel linker script
 kernel/
   arch/x86/                CPU and platform bring-up
   core/                    logging, panic, locks, timers, driver model, app ABI table
