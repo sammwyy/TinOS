@@ -141,6 +141,11 @@ removed or replaced independently.
   (`make test`).
 - In-kernel self-test (`tests/kernel/`) selected by the `selftest` kernel command-line flag.
 - Scripted QEMU session with screenshot OCR (`make check`, `tests/qemu/qemu_test.py`).
+- Current memory acceptance in QEMU: 8 MiB supports a 640x480 desktop when
+  GRUB loads the app module; 16 MiB supports the regular 1024x768 desktop.
+  With an unsupported display adapter, boot continues into the VGA text
+  console. At 4 MiB GRUB2's relocator fails before the kernel runs, even
+  with a debug-stripped kernel and no ramfs module.
 
 ---
 

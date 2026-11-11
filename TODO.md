@@ -114,8 +114,11 @@ graphics; this is not yet a claim of support for arbitrary PCs.
       initialization; allow a 16 MiB machine to boot the full desktop.
 - [ ] 4 MiB: GRUB2 `multiboot2` fails with
       `relocator.c:1286:out of memory` before handing control to the kernel,
-      even with no ramfs module. Provide a smaller image and/or an alternate
-      boot path, then run a real 4 MiB QEMU acceptance test.
+      even with no ramfs module and a debug-stripped 686 KiB ELF (tested with
+      a minimal GRUB ISO). Reducing the disk image alone is insufficient;
+      measure GRUB's relocation/physical-memory requirements, provide an
+      alternate low-memory boot path or smaller loaded kernel, then run a
+      real 4 MiB QEMU acceptance test.
 - [ ] Avoid loading and unpacking graphical apps during text-only boot; a
       later `desktop` command should load them on demand if RAM permits.
 - [x] Exercise the 640x480 fallback at 8 MiB with the desktop and a terminal
