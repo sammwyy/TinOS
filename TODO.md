@@ -64,7 +64,7 @@ never found. Both were found by bisection, not diagnosis.
 - [ ] Root-cause why `app_main()` has to take its fields by value instead of
       a pointer to an `app_entry_t` (`app_main_fn` comment in `kernel/main.c`).
 - [ ] Ruled out so far: slot overflow. All nine app ELFs are 12-23 KiB against
-      a 1 MiB slot.
+      a 128 KiB slot.
 - [ ] Candidates not yet checked:
   - `parse_manifest()` stores `kstrdup()` results in `entry`, but the
     defaults (`dir->name`, string literals) have different lifetimes; check
@@ -83,7 +83,7 @@ never found. Both were found by bisection, not diagnosis.
 
 ### App loader and ABI
 
-- [x] Validate each app's ELF against its own 1 MiB slot, not the entire arena.
+- [x] Validate each app's ELF against its own slot, not the entire arena.
 - [x] Reject overflowing ELF program-header and segment bounds before writing
       any segments. Host tests exercise invalid headers and out-of-slot loads.
 - [x] Reject two apps linked to the same slot at load time.
@@ -93,7 +93,41 @@ never found. Both were found by bisection, not diagnosis.
 - [ ] `tinos_abi_t` has no version or size field. Add `abi_version` and
       `abi_size` as the first members and reject mismatching apps.
 - [ ] Freeze field order in `tinos_abi_t`: append only, never insert.
-- [ ] `native_app.h` comment says "8 in use today"; nine apps exist.
+- [x] Correct the native app count in `native_app.h`.
+
+### Low-memory i386 boot
+
+The target is a usable text or graphical session on i386 PCs with 4-16 MiB
+of physical RAM. The current prototype still needs SSE2 and Bochs DISPI for
+graphics; this is not yet a claim of support for arbitrary PCs.
+
+- [x] Keep app slots inside physical RAM: check each slot against the
+      Multiboot2 memory map before writing executable pages, and reject a
+      slot overlapping the initrd module.
+- [x] Relink nine bundled apps to 128 KiB slots at 8 MiB (previously 1 MiB
+      slots starting at 16 MiB); enforce slot size at link time. This is a
+      transitional fixed-address scheme pending per-process relocation.
+- [x] Grow heap in 256 KiB minimum arenas rather than reserving 4 MiB at
+      initialization; allow a 16 MiB machine to boot the full desktop.
+- [ ] 4 MiB: GRUB2 `multiboot2` fails with
+      `relocator.c:1286:out of memory` before handing control to the kernel,
+      even with no ramfs module. Provide a smaller image and/or an alternate
+      boot path, then run a real 4 MiB QEMU acceptance test.
+- [ ] Avoid loading and unpacking graphical apps during text-only boot; a
+      later `desktop` command should load them on demand if RAM permits.
+- [ ] Decide a minimum usable GUI resolution and memory budget. Current
+      desktop back buffer alone needs 3 MiB at 1024x768x32, before any
+      window cache or decoded image.
+- [ ] Detect graphics allocation or driver failure and remain in text
+      mode instead of panicking; text mode must work without DISPI.
+- [ ] Choose display mode from reported memory and adapter capabilities,
+      with a tested small-screen layout rather than hard-coded 1024x768.
+- [ ] Remove the SSE2 boot requirement or provide a scalar codec build for
+      older i386 processors. Test on representative pre-SSE2 hardware.
+- [ ] Ensure FAT/ramfs and the app loader degrade gracefully under OOM;
+      track kernel, ramfs, app slots, heap and framebuffer usage separately.
+- [ ] Add emulator acceptance tests for 4, 8 and 16 MiB, including text
+      commands, app launch and a low-memory graphics session.
 
 ### Build
 

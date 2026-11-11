@@ -17,3 +17,6 @@ SECTIONS
 
     /DISCARD/ : { *(.comment) *(.eh_frame) *(.note.*) }
 }
+
+ASSERT(. <= NATIVE_APP_LOAD_ADDR + NATIVE_APP_SLOT_SIZE,
+       "native app exceeds its load slot")

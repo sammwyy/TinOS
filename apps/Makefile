@@ -40,19 +40,19 @@ APP_DIRS := $(patsubst %/,%,$(wildcard $(ROOT)/apps/*/))
 APPS     := $(filter-out lib,$(notdir $(APP_DIRS)))
 ELFS     := $(foreach a,$(APPS),$(BUILD)/$(a)/$(a).elf)
 
-# One fixed, non-overlapping 1 MiB slot per app inside the arena
+# One fixed, non-overlapping 128 KiB slot per app inside the arena
 # kernel/include/tinos/native_app.h reserves (NATIVE_APP_BASE upward);
 # --defsym feeds the chosen address into link.ld's NATIVE_APP_LOAD_ADDR.
-# A new app just needs a new line here, at the next free 0x00100000 step.
-NATIVE_APP_SLOT_calculator    := 0x01000000
-NATIVE_APP_SLOT_control_panel := 0x01100000
-NATIVE_APP_SLOT_editor        := 0x01200000
-NATIVE_APP_SLOT_explorer      := 0x01300000
-NATIVE_APP_SLOT_image_viewer  := 0x01400000
-NATIVE_APP_SLOT_media_player  := 0x01500000
-NATIVE_APP_SLOT_terminal      := 0x01600000
-NATIVE_APP_SLOT_about         := 0x01700000
-NATIVE_APP_SLOT_sysinfo       := 0x01800000
+# A new app just needs a new line here, at the next free 0x00020000 step.
+NATIVE_APP_SLOT_calculator    := 0x00800000
+NATIVE_APP_SLOT_control_panel := 0x00820000
+NATIVE_APP_SLOT_editor        := 0x00840000
+NATIVE_APP_SLOT_explorer      := 0x00860000
+NATIVE_APP_SLOT_image_viewer  := 0x00880000
+NATIVE_APP_SLOT_media_player  := 0x008a0000
+NATIVE_APP_SLOT_terminal      := 0x008c0000
+NATIVE_APP_SLOT_about         := 0x008e0000
+NATIVE_APP_SLOT_sysinfo       := 0x00900000
 
 .PHONY: all clean
 all: $(ELFS)
@@ -76,9 +76,10 @@ $$(error no NATIVE_APP_SLOT_$(1) address - add one next to the others in apps/Ma
 endif
 
 $(BUILD)/$(1)/$(1).elf: $$(APP_OBJS_$(1)) $(ROOT)/apps/link.ld \
-                        $(ROOT)/apps/$(1)/app.conf
+                        $(ROOT)/apps/$(1)/app.conf $(ROOT)/apps/Makefile
 	@mkdir -p $(BUILD)/$(1)
 	$(LD) $(LDFLAGS) --defsym=NATIVE_APP_LOAD_ADDR=$$(NATIVE_APP_SLOT_$(1)) \
+		--defsym=NATIVE_APP_SLOT_SIZE=0x00020000 \
 		-o $$@ $$(APP_OBJS_$(1)) $(LIBGCC)
 	@cp $(ROOT)/apps/$(1)/app.conf $(BUILD)/$(1)/app.conf
 	@if [ -f $(ROOT)/apps/$(1)/icon.png ]; then \

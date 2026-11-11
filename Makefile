@@ -260,6 +260,8 @@ test: $(HOST_BIN)
 check: test $(ISO)
 	tests/qemu/qemu_test.py --iso $(ISO)
 	python3 tests/qemu/text_mode_test.py --iso $(ISO)
+	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 16
+	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 8 --no-desktop
 
 # Build the kernel and ISO twice from a clean tree and compare the results.
 verify-reproducible:

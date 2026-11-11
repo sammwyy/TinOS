@@ -43,6 +43,11 @@ interactive shell. Type `desktop` to enter the graphical session. The text
 console currently runs in the kernel address space; the desktop is not yet a
 separate process and cannot return to the console after it starts.
 
+With 16 MiB of QEMU RAM the text console and the graphical desktop load the
+bundled apps. An 8 MiB text boot is also tested, but app slots start at 8 MiB
+and cannot be loaded there. A 4 MiB boot is not supported yet: GRUB2 runs out
+of memory before it transfers control, even without the ramfs module.
+
 ## Requirements
 
 | Tool | Why | Fedora package |

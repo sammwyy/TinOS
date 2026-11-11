@@ -98,7 +98,7 @@ first.
 - `libraries/image` and `libraries/audio` (stb_image, simplewebp, stb_vorbis
   wrappers) are also linked into the kernel, with per-directory SSE2 flags.
 - `apps/<name>/` each build to a separate `ET_EXEC` ELF32 linked at a fixed
-  1 MiB slot starting at `0x01000000` (`apps/Makefile`,
+  128 KiB slot starting at `0x00800000` (`apps/Makefile`,
   `kernel/include/tinos/native_app.h`), at most 12 slots.
 - The apps are packed into `ramfs.tar`, unpacked into `/apps` at boot, copied
   to their link address by `kernel/proc/elf.c`, and their `app_main()` is
@@ -108,6 +108,8 @@ first.
   segments. Each app is restricted to its own slot, and duplicate slots
   are rejected at boot. This does not isolate apps from one another at
   runtime.
+- App slots must fit the Multiboot2 usable-memory map and must not overlap
+  the ramfs module; apps outside physical RAM are skipped.
 - Apps call the kernel through `tinos_abi_t` (`kernel/include/tinos/abi.h`),
   a struct of roughly 130 function pointers. `apps/lib/shim.c` re-exports
   each one under the kernel function's own name.

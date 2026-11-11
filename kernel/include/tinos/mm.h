@@ -13,6 +13,8 @@ void *pmm_alloc_contig(size_t frames);
 void  pmm_free_frame(void *frame);
 void  pmm_free_contig(void *base, size_t frames);
 void  pmm_reserve_range(uintptr_t base, size_t length);
+/* True only when the complete range is reported as usable RAM. */
+bool  pmm_range_is_ram(uintptr_t base, size_t length);
 
 uint64_t pmm_total_bytes(void);
 uint64_t pmm_free_bytes(void);

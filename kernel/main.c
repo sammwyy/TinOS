@@ -324,11 +324,21 @@ static size_t load_native_apps(const mb_info_t *mbi)
             continue;
         }
         size_t slot = (entry_address - NATIVE_APP_BASE) / NATIVE_APP_SLOT_SIZE;
+        uintptr_t slot_base = NATIVE_APP_BASE + slot * NATIVE_APP_SLOT_SIZE;
+        if (!pmm_range_is_ram(slot_base, NATIVE_APP_SLOT_SIZE)) {
+            klog("[boot] apps: %s slot is outside usable RAM\n", elf_node->name);
+            continue;
+        }
+        if (slot_base < mod->mod_end &&
+            mod->mod_start < slot_base + NATIVE_APP_SLOT_SIZE) {
+            klog("[boot] apps: %s slot overlaps the ramfs module\n",
+                 elf_node->name);
+            continue;
+        }
         if (used_slots & (1u << slot)) {
             klog("[boot] apps: duplicate slot in %s\n", elf_node->name);
             continue;
         }
-        uintptr_t slot_base = NATIVE_APP_BASE + slot * NATIVE_APP_SLOT_SIZE;
         if (!elf_load(fs_data(elf_node), fs_size(elf_node), slot_base,
                       NATIVE_APP_SLOT_SIZE, &elf_entry)) {
             klog("[boot] apps: failed to load %s\n", elf_node->name);
@@ -448,7 +458,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
         boot_step("apps: loaded %u native app(s) from the ramfs",
                   (uint32_t)native_apps);
     else
-        boot_note("apps: no ramfs module, no native apps loaded");
+        boot_note("apps: no native apps loaded");
     pause_ms(BOOT_STEP_DELAY_MS);
 
     /* Optional self test */

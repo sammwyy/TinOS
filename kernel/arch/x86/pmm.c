@@ -26,6 +26,25 @@ static uint64_t managed_frames;
 static size_t   regions;
 static size_t   search_hint;
 static spinlock_t pmm_lock = SPINLOCK_INIT;
+static const mb_tag_mmap_t *memory_map;
+
+bool pmm_range_is_ram(uintptr_t base, size_t length)
+{
+    if (!memory_map || !length || (uint64_t)base + length > 0x100000000ULL)
+        return false;
+
+    size_t count = (memory_map->size - sizeof(*memory_map)) /
+                   memory_map->entry_size;
+    for (size_t i = 0; i < count; i++) {
+        const mb_mmap_entry_t *e =
+            (const mb_mmap_entry_t *)((uintptr_t)memory_map->entries +
+                                      i * memory_map->entry_size);
+        if (e->type == MB_MEMORY_AVAILABLE && (uint64_t)base >= e->addr &&
+            (uint64_t)base + length - e->addr <= e->len)
+            return true;
+    }
+    return false;
+}
 
 static inline bool frame_used(size_t idx)
 {
@@ -103,6 +122,7 @@ void pmm_init(const mb_info_t *mbi)
     if (!mmap)
         panic("multiboot2: no memory map provided by the bootloader");
 
+    memory_map = mmap;
     size_t count = (mmap->size - sizeof(mb_tag_mmap_t)) / mmap->entry_size;
     for (size_t i = 0; i < count; i++) {
         const mb_mmap_entry_t *e =

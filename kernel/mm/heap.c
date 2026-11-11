@@ -16,7 +16,7 @@
 
 #define HEAP_MAGIC      0x4E4F5641u /* "TINOS" */
 #define HEAP_ALIGN      8u
-#define ARENA_MIN_PAGES 1024u       /* 4 MiB growth increments */
+#define ARENA_MIN_PAGES 64u         /* 256 KiB minimum growth increment */
 
 typedef struct block {
     uint32_t      magic;
@@ -37,9 +37,8 @@ static size_t   stat_total;
 static size_t   stat_used;
 static size_t   stat_allocs;
 static size_t   stat_frees;
-/* One coarse lock over the whole allocator: arenas are typically a handful
- * of 4 MiB regions and allocations are brief, so per-arena locking would
- * only add complexity without a measurable win here. */
+/* Allocations are brief; per-arena locking would add complexity without
+ * a measurable win here. */
 static spinlock_t heap_lock = SPINLOCK_INIT;
 
 static const size_t block_overhead = ALIGN_UP(sizeof(block_t), HEAP_ALIGN);
