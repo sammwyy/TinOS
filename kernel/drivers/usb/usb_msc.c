@@ -17,6 +17,7 @@
 #define MSC_CBW_LENGTH    31
 #define MSC_CSW_LENGTH    13
 #define MSC_MAX_TRANSFER  64
+#define MSC_MAX_ATTEMPTS  4
 
 #define SCSI_TEST_UNIT_READY 0x00
 #define SCSI_INQUIRY         0x12
@@ -50,6 +51,10 @@ typedef struct {
 
 static msc_disk_t disk;
 
+/* Bulk transfers occasionally stall or time out on real controllers under
+ * load; a single glitch used to surface as a hard failure (e.g. a decoder
+ * giving up on a file mid-read). Retry the whole command a few times,
+ * resetting the device between attempts, before reporting failure. */
 static bool transfer(msc_disk_t *msc, uint8_t command, uint32_t lba,
                      void *data, uint32_t length, bool write)
 {
@@ -57,42 +62,42 @@ static bool transfer(msc_disk_t *msc, uint8_t command, uint32_t lba,
     if (locked)
         kmutex_lock(&msc->lock);
     bool result = false;
-    msc_cbw_t cbw;
-    memset(&cbw, 0, sizeof(cbw));
-    cbw.signature = MSC_CBW_SIGNATURE;
-    cbw.tag = ++msc->tag;
-    cbw.transfer_length = length;
-    cbw.flags = write ? 0 : 0x80;
-    cbw.lun = msc->transport->lun;
-    cbw.command_length = 10;
-    cbw.command[0] = command;
-    cbw.command[2] = (uint8_t)(lba >> 24);
-    cbw.command[3] = (uint8_t)(lba >> 16);
-    cbw.command[4] = (uint8_t)(lba >> 8);
-    cbw.command[5] = (uint8_t)lba;
-    cbw.command[7] = (uint8_t)(length / msc->transport->block_size >> 8);
-    cbw.command[8] = (uint8_t)(length / msc->transport->block_size);
+    for (int attempt = 0; attempt < MSC_MAX_ATTEMPTS && !result; attempt++) {
+        msc_cbw_t cbw;
+        memset(&cbw, 0, sizeof(cbw));
+        cbw.signature = MSC_CBW_SIGNATURE;
+        cbw.tag = ++msc->tag;
+        cbw.transfer_length = length;
+        cbw.flags = write ? 0 : 0x80;
+        cbw.lun = msc->transport->lun;
+        cbw.command_length = 10;
+        cbw.command[0] = command;
+        cbw.command[2] = (uint8_t)(lba >> 24);
+        cbw.command[3] = (uint8_t)(lba >> 16);
+        cbw.command[4] = (uint8_t)(lba >> 8);
+        cbw.command[5] = (uint8_t)lba;
+        cbw.command[7] = (uint8_t)(length / msc->transport->block_size >> 8);
+        cbw.command[8] = (uint8_t)(length / msc->transport->block_size);
 
-    if (!msc->transport->bulk_out(msc->transport->context, &cbw,
-                                  MSC_CBW_LENGTH))
-        goto done;
-    if (length && data) {
-        usb_msc_bulk_fn transfer_fn = write ? msc->transport->bulk_out :
-                                              msc->transport->bulk_in;
-        if (!transfer_fn(msc->transport->context, data, length))
-            goto done;
+        bool ok = msc->transport->bulk_out(msc->transport->context, &cbw,
+                                           MSC_CBW_LENGTH);
+        if (ok && length && data) {
+            usb_msc_bulk_fn transfer_fn = write ? msc->transport->bulk_out :
+                                                  msc->transport->bulk_in;
+            ok = transfer_fn(msc->transport->context, data, length);
+        }
+        if (ok) {
+            msc_csw_t csw;
+            memset(&csw, 0, sizeof(csw));
+            ok = msc->transport->bulk_in(msc->transport->context, &csw,
+                                         MSC_CSW_LENGTH);
+            if (ok)
+                result = csw.signature == MSC_CSW_SIGNATURE &&
+                         csw.tag == cbw.tag && csw.status == 0;
+        }
+        if (!result && msc->transport->reset)
+            msc->transport->reset(msc->transport->context);
     }
-
-    msc_csw_t csw;
-    memset(&csw, 0, sizeof(csw));
-    if (!msc->transport->bulk_in(msc->transport->context, &csw,
-                                 MSC_CSW_LENGTH))
-        goto done;
-    result = csw.signature == MSC_CSW_SIGNATURE && csw.tag == cbw.tag &&
-             csw.status == 0;
-done:
-    if (!result && msc->transport->reset)
-        msc->transport->reset(msc->transport->context);
     if (locked)
         kmutex_unlock(&msc->lock);
     return result;

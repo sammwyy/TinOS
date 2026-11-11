@@ -4,7 +4,7 @@
  * GRUB2 loads us at 1 MiB already in 32-bit protected mode with paging
  * disabled and a flat (but unknown) GDT.  We request an EGA text-mode
  * framebuffer so that the kernel starts life in 80x25 text mode and performs
- * the switch into graphics mode itself (see kernel/dev/vbe.c).
+ * the switch into graphics mode itself (see kernel/drivers/video/vbe.c).
  */
 
 .set MB2_MAGIC,     0xE85250D6

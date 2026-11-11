@@ -29,7 +29,7 @@ arch_context_switch:
 arch_resume_context:
     /* %eax already holds the thread_context_t* to resume: it travels in
      * the synthetic frame's own eax slot (see prepare_cooperative_frame()
-     * in kernel/core/thread.c) and popa, in isr_common's tail, restored it
+     * in kernel/sched/thread.c) and popa, in isr_common's tail, restored it
      * before the iret that landed us here. Per-core by construction - no
      * shared global needed, unlike the single thread_irq_resume_context
      * this replaced, which broke once two cores could each be resuming a

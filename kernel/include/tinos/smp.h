@@ -23,7 +23,7 @@ size_t smp_init(const mb_info_t *mbi);
 
 /* The boot processor's local APIC ID, valid once smp_init() has run (it
  * always brings up the local APIC, even single-core / without ACPI). Used
- * by kernel/core/thread.c to keep filesystem/network/gfx-touching threads
+ * by kernel/sched/thread.c to keep filesystem/network/gfx-touching threads
  * pinned to the one core whose access to that state is actually safe. */
 uint32_t smp_bsp_apic_id(void);
 

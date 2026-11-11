@@ -11,6 +11,8 @@
 #  make clean      remove build products
 # =====================================================================
 
+.DEFAULT_GOAL := all
+
 NAME      := tinos
 BUILD     := build
 ISODIR    := $(BUILD)/isodir
@@ -18,15 +20,16 @@ KERNEL    := $(BUILD)/$(NAME).elf
 ISO       := $(BUILD)/$(NAME).iso
 MAP       := $(BUILD)/$(NAME).map
 
-# Selects which kernel/arch/<ARCH> and kernel/dev/<ARCH> subtree gets built,
-# e.g. `make ARCH=arm`. Only x86 exists today; everything platform-specific
-# (CPU bring-up, page tables, the boot stub, and every driver that speaks
-# port I/O or PCI) lives under an <ARCH> directory so a future port adds a
-# sibling tree instead of touching this one.
+# Selects which kernel/arch/<ARCH> subtree gets built, e.g. `make ARCH=arm`.
+# Only x86 exists today; CPU bring-up, page tables and the boot stub live
+# under an <ARCH> directory so a future port adds a sibling tree instead of
+# touching this one. Drivers live under kernel/drivers/<class>/; each
+# architecture picks the ones it builds in kernel/arch/<ARCH>/drivers.mk.
 ARCH      := x86
 ifeq ($(wildcard kernel/arch/$(ARCH)),)
 $(error unknown ARCH '$(ARCH)' - no kernel/arch/$(ARCH) directory)
 endif
+include kernel/arch/$(ARCH)/drivers.mk
 
 # --- toolchain --------------------------------------------------------
 CC        := gcc
@@ -55,22 +58,22 @@ LDFLAGS := -m elf_i386 -T boot/linker.ld -nostdlib -z noexecstack \
 LIBGCC  := $(shell $(CC) -m32 -print-libgcc-file-name)
 
 # --- sources ----------------------------------------------------------
-# kernel/core, fs, gfx, lib, mm, net and sh hold no arch-specific code -
-# they build for every target. kernel/dev/*.c (flat, not in an <ARCH>
-# subdir) is likewise transport-agnostic (e.g. usb_msc.c). Everything
-# under kernel/arch/$(ARCH) and kernel/dev/$(ARCH) is that target's own:
-# CPU/platform bring-up, page tables, the boot stub, and drivers tied to
-# that platform's bus/IO model. apps/ is excluded entirely: every
+# kernel/core, sched, proc, fs, gfx, lib, mm, net and sh hold no
+# arch-specific code - they build for every target. ARCH_DRIVERS (from
+# kernel/arch/$(ARCH)/drivers.mk) selects files under kernel/drivers/.
+# tests/kernel holds the in-kernel self-test.
+# Everything under kernel/arch/$(ARCH) is that target's own: CPU/platform
+# bring-up, page tables and the boot stub. apps/ is excluded entirely: every
 # application is its own freestanding ELF binary, built by apps/Makefile
 # and loaded from the ramfs at boot instead of linked into the kernel
 # image (see the "native apps" target below).
 SRCS_C := $(sort kernel/main.c \
-                  $(shell find kernel/core kernel/fs kernel/gfx kernel/lib \
-                          kernel/mm kernel/net kernel/sh desktop \
-                          libraries -name '*.c') \
-                  $(wildcard kernel/dev/*.c) \
-                  $(shell find kernel/dev/$(ARCH) kernel/arch/$(ARCH) \
-                          -name '*.c'))
+                  $(shell find kernel/core kernel/sched kernel/proc \
+                          kernel/fs kernel/gfx kernel/lib kernel/mm \
+                          kernel/net kernel/sh tests/kernel \
+                          desktop libraries -name '*.c') \
+                  $(addprefix kernel/drivers/,$(ARCH_DRIVERS)) \
+                  $(shell find kernel/arch/$(ARCH) -name '*.c'))
 SRCS_S := $(sort $(shell find kernel/arch/$(ARCH) -name '*.S'))
 OBJS   := $(patsubst %.c,$(BUILD)/%.c.o,$(SRCS_C)) \
           $(patsubst %.S,$(BUILD)/%.S.o,$(SRCS_S))
@@ -126,7 +129,7 @@ $(BUILD)/%.c.o: %.c
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
 # Image/audio decode never runs inside an interrupt handler - it runs on its
-# own kernel thread, and kernel/core/thread.c saves and restores each
+# own kernel thread, and kernel/sched/thread.c saves and restores each
 # thread's FXSAVE state (x87 + SSE) on every context switch. So unlike the
 # rest of the kernel, these translation units get real SSE2 codegen and
 # auto-vectorization instead of the interrupt-safe scalar baseline.
@@ -164,7 +167,7 @@ kernel: $(KERNEL)
 # linker script - see apps/Makefile); ramfs.tar bundles those directories
 # (everything under $(NATIVE_BUILD) except its obj/ intermediates) for
 # GRUB to hand to the kernel as a module2 payload (boot/grub.cfg), which
-# kernel/fs/tar.c unpacks into /apps and kernel/core/elf.c loads and runs
+# kernel/fs/tar.c unpacks into /apps and kernel/proc/elf.c loads and runs
 # (see kernel/main.c's load_native_apps()).
 NATIVE_BUILD := $(BUILD)/native
 RAMFS        := $(BUILD)/ramfs.tar
@@ -254,7 +257,7 @@ test: $(HOST_BIN)
 	@$(HOST_BIN)
 
 check: test $(ISO)
-	tools/qemu_test.py --iso $(ISO)
+	tests/qemu/qemu_test.py --iso $(ISO)
 
 # Build the kernel and ISO twice from a clean tree and compare the results.
 verify-reproducible:

@@ -6,7 +6,7 @@ be searched for an exact string by template matching with the very same
 glyphs the kernel uses (kernel/gfx/font8x16.c).  That lets the automated
 tests assert on what is actually on screen instead of eyeballing pictures.
 
-    tools/screen_ocr.py shot.png "kernel test"
+    tests/qemu/screen_ocr.py shot.png "kernel test"
 """
 
 import os
@@ -16,7 +16,7 @@ import sys
 import numpy as np
 from PIL import Image
 
-FONT_C = os.path.join(os.path.dirname(__file__), "..", "kernel", "gfx",
+FONT_C = os.path.join(os.path.dirname(__file__), "..", "..", "kernel", "gfx",
                       "font8x16.c")
 
 _glyph_cache = None

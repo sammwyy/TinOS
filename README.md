@@ -67,7 +67,7 @@ possibly `libgcc.i686` and `grub2-tools-extra`.
 
 Every target above builds for `ARCH=x86` (`make ARCH=x86 ...`), the only
 target implemented today. The build picks its sources from
-`kernel/arch/$(ARCH)/` and `kernel/dev/$(ARCH)/`, so a future port (e.g.
+`kernel/arch/$(ARCH)/`, so a future port (e.g.
 `ARCH=arm`) is a sibling directory tree, not a rewrite of this one; passing
 an `ARCH` with no matching directory fails the build immediately with a
 clear error instead of a wall of missing-symbol linker errors.
@@ -461,10 +461,10 @@ to the nearest surviving ancestor.
 | Area | Files | What it does |
 |------|-------|--------------|
 | Boot | `kernel/arch/x86/boot.S`, `boot/linker.ld`, `boot/grub.cfg` | Multiboot2 header, stack, entry; kernel linked at 1 MiB |
-| Arch | `kernel/arch/x86/` | GDT, IDT + 48 interrupt stubs, 8259A PIC, PIT, CMOS RTC, CPUID, reboot/power-off, page tables, the Multiboot2 boot stub - everything specific to the target picked by `make ARCH=...` (only `x86` exists today; `kernel/dev/x86/` holds that target's drivers the same way) |
+| Arch | `kernel/arch/x86/` | GDT, IDT + 48 interrupt stubs, 8259A PIC, PIT, CMOS RTC, CPUID, reboot/power-off, page tables, the Multiboot2 boot stub - everything specific to the target picked by `make ARCH=...` (only `x86` exists today) |
 | SMP | `kernel/arch/x86/{acpi,lapic,smp,trampoline.S}` | ACPI MADT parsing, local APIC, AP bring-up (see below) |
 | Memory | `kernel/mm/`, `kernel/arch/x86/{pmm,paging}.c` | bitmap page frame allocator over the Multiboot2 memory map and the x86 page tables (arch-specific, under `kernel/arch/x86/`); first-fit heap with coalescing that grows by taking new arenas from the frame allocator (portable, under `kernel/mm/`) |
-| Devices | `kernel/dev/`, `kernel/dev/x86/` | `kernel/dev/` holds transport-agnostic device logic (USB mass storage); `kernel/dev/x86/` holds this target's drivers: COM1 serial log, VGA text console, PCI enumeration, Bochs DISPI mode setting, PS/2 keyboard, PS/2 mouse with IntelliMouse wheel support |
+| Devices | `kernel/drivers/<class>/` | drivers grouped by device class (`bus`, `block`, `net`, `usb`, `input`, `video`, `audio`, `char`): COM1 serial log, VGA text console, PCI enumeration, Bochs DISPI mode setting, PS/2 keyboard, PS/2 mouse with IntelliMouse wheel support |
 | Graphics | `kernel/gfx/` | double-buffered framebuffer with multi-region dirty upload, rectangles, lines, gradients, alpha blending, clipping stack, 8x16 bitmap font |
 | Filesystem | `kernel/fs/` | node tree, path resolution, textual path helpers |
 | Shell | `kernel/sh/` | byte streams, tokeniser/parser, execution engine, 32 built-ins |
@@ -472,7 +472,7 @@ to the nearest surviving ancestor.
 | Libraries | `libraries/image/` | PNG, JPEG and WebP decoding on top of stb_image/simplewebp; own kernel thread, real SSE2 |
 | Libraries | `libraries/audio/` | WAV and Ogg Vorbis decoding, codec dispatch; own kernel thread, real SSE2 |
 | Desktop | `desktop/` | window manager, widgets, icons, application registry, taskbar/start menu/event loop |
-| Applications | `apps/`, `kernel/core/{elf,abi}.c`, `kernel/fs/tar.c` | terminal, file explorer, text editor, image viewer, media player, calculator, control panel, system information, about - each its own freestanding ELF binary (own Makefile, own linker script), bundled into `build/ramfs.tar`, handed to the kernel as a Multiboot2 module and loaded at boot (see below) |
+| Applications | `apps/`, `kernel/proc/elf.c`, `kernel/core/abi.c`, `kernel/fs/tar.c` | terminal, file explorer, text editor, image viewer, media player, calculator, control panel, system information, about - each its own freestanding ELF binary (own Makefile, own linker script), bundled into `build/ramfs.tar`, handed to the kernel as a Multiboot2 module and loaded at boot (see below) |
 
 Each self-contained unit owns its own public headers under its own
 `include/tinos/` tree - `kernel/include/tinos/` for the kernel core (shared
@@ -534,7 +534,7 @@ loop, a slow computation) would stall the whole desktop, since one C
 function call is the entire scheduling unit.
 
 **Asynchronous workers and kernel threads.** `kernel/core/async.c` provides a
-stackless state-machine API for short operations, while `kernel/core/thread.c`
+stackless state-machine API for short operations, while `kernel/sched/thread.c`
 and `kernel/arch/x86/context.S` provide real kernel threads with private
 stacks. Async tasks and threads are both run outside interrupt handlers, and
 the desktop gives each subsystem a bounded scheduling budget. Threads can
@@ -543,7 +543,7 @@ therefore use a blocking-looking worker API without blocking the GUI. The PIT
 can preempt a running worker, while explicit yields and blocking calls
 remain available for predictable hand-off points.
 
-`kernel/core/sync.c` supplies scheduler-aware mutexes and auto-reset events.
+`kernel/sched/sync.c` supplies scheduler-aware mutexes and auto-reset events.
 `kmutex_lock()` and `kevent_wait()` put the current worker in a blocked state
 instead of spinning; an unlock or signal wakes it. Interrupt handlers should
 only publish data and wake a worker, never acquire a mutex or execute a
@@ -555,7 +555,7 @@ FPU/SSE register contents are never saved - a wild use would silently
 corrupt whatever another thread left there. `libraries/image/` and
 `libraries/audio/` are the one exception: they run only on their own kernel
 thread (never inside an interrupt handler), get real `-msse2` codegen and
-auto-vectorization, and `kernel/core/thread.c` FXSAVEs/FXRSTORs a 512-byte
+auto-vectorization, and `kernel/sched/thread.c` FXSAVEs/FXRSTORs a 512-byte
 area per thread on every context switch (cooperative or PIT-preempted) so
 two such threads - say a WAV decode and a JPEG decode - can freely
 interleave. `arch_fpu_init()` (`kernel/arch/x86/cpu.c`) enables CR0/CR4 and
@@ -586,10 +586,10 @@ reads, storage/network workers, and audio *loading*/*decoding*, which
 streams from the filesystem a chunk at a time) on the boot processor;
 plain `thread_spawn()` is for self-contained, in-memory compute that any
 core can run - today, image decode and audio *playback*. The AC'97 driver
-(`kernel/dev/x86/audio.c`) and each media player's decode->playback ring
+(`kernel/drivers/audio/audio.c`) and each media player's decode->playback ring
 buffer got their own spinlocks specifically so playback, which only reads
 already-decoded samples and pushes them at the device, could move off the
-boot processor safely. Verified with `tools/qemu_test.py` and a stress
+boot processor safely. Verified with `tests/qemu/qemu_test.py` and a stress
 scenario that opens several images and an audio track at once under
 `-smp 4`.
 
@@ -618,7 +618,7 @@ arena `kernel/include/tinos/native_app.h` reserves (`kernel/arch/x86/
 pmm.c` never hands those frames to anything else). `make` bundles every
 app's `.elf` into `build/ramfs.tar` and GRUB loads it as a Multiboot2
 module (`boot/grub.cfg`'s `module2` line); at boot, `kernel/fs/tar.c`
-unpacks it into `/apps` and `kernel/core/elf.c` copies each `.elf`'s
+unpacks it into `/apps` and `kernel/proc/elf.c` copies each `.elf`'s
 `PT_LOAD` segments to their literal (fixed, pre-reserved) `p_vaddr` -
 correct only because paging identity-maps the whole address space, so
 there is no relocation processing to do.
@@ -688,12 +688,12 @@ make check     # the above plus the scripted QEMU boot/GUI session
   redirection, pipelines, sequencing, two shells sharing one tree, and a
   hostile-input fuzz list.
 
-* **In-kernel self-test** (`kernel/core/selftest.c`, second GRUB entry) runs
+* **In-kernel self-test** (`tests/kernel/selftest.c`, second GRUB entry) runs
   the kernel assertions against the real heap and prints the result to serial.
 
-* **Scripted QEMU session** (`tools/qemu_test.py`) boots the ISO headless,
+* **Scripted QEMU session** (`tests/qemu/qemu_test.py`) boots the ISO headless,
   drives it through the QMP monitor (keystrokes, mouse moves, clicks, drags),
-  captures screenshots and *reads the text off them*: `tools/screen_ocr.py`
+  captures screenshots and *reads the text off them*: `tests/qemu/screen_ocr.py`
   template-matches the screen against the kernel's own 8x16 font, so a check
   like "the terminal shows `kernel test`" is verified against real pixels.
 
@@ -738,11 +738,14 @@ kernel/
   arch/x86/      GDT, IDT, interrupt stubs, PIC, PIT, RTC, CPU, reset,
                  page tables, physical memory allocator, boot.S - every
                  target's own arch/<ARCH> tree looks like this one
-  core/          logging, panic, clock glue, system info, self-tests,
-                 the ELF loader and the native app ABI table
-  dev/           transport-agnostic device logic (USB mass storage);
-                 dev/x86/ holds this target's drivers: serial, VGA text,
-                 PCI, VBE/DISPI, keyboard, mouse
+  core/          logging, panic, clock glue, system info, locks, timers,
+                 the driver model and the native app ABI table
+  sched/         kernel threads, mutexes and events
+  proc/          the ELF loader
+  drivers/       drivers by device class: bus (PCI), block (ATA,
+                 virtio-blk), net (e1000), usb (UHCI, mass storage),
+                 input (PS/2 keyboard, mouse), video (VGA text, DISPI),
+                 audio (AC'97, PC speaker), char (serial)
   gfx/           framebuffer engine and the generated font
   fs/            in-memory filesystem, path helpers, the ustar reader
   net/           Ethernet and layered IPv4 networking protocols
@@ -758,8 +761,14 @@ apps/            every application, each its own standalone ELF binary
                  ramfs at boot (see "Native apps" above)
 libraries/       image (PNG/JPEG/WebP) and audio (WAV/Vorbis) codecs
 tests/host/      native unit tests and the kernel-service shims
-tools/           run script, USB image helper, QEMU test driver, screen OCR
-                 and font generator
+tests/kernel/    in-kernel self-test (linked into the kernel image)
+tests/qemu/      QEMU test driver and screen OCR
+tools/           run script, USB image helper, icon and font generators
+```
+
+Empty placeholder directories (`userland/`, `libraries/{libc,gfx,ui}`,
+`kernel/{syscall,ipc,tty}`, `ports/`, `toolchain/`, `docs/`) belong to the
+target layout described in [ARCHITECTURE.md](ARCHITECTURE.md).
 ```
 
 `REPORT.md` records what was verified, how, and what remains incomplete.

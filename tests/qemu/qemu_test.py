@@ -5,9 +5,9 @@ Boots the ISO in a headless QEMU, drives it through the QMP monitor
 (keystrokes, mouse, screenshots) and checks the serial log, so the desktop
 can be exercised without a human at the keyboard.
 
-    tools/qemu_test.py --iso build/tinos.iso            run the full scenario
-    tools/qemu_test.py --shots-dir /tmp/shots          keep the screenshots
-    tools/qemu_test.py --interactive 20                boot and idle, taking
+    tests/qemu/qemu_test.py --iso build/tinos.iso            run the full scenario
+    tests/qemu/qemu_test.py --shots-dir /tmp/shots          keep the screenshots
+    tests/qemu/qemu_test.py --interactive 20                boot and idle, taking
                                                        one screenshot per second
 """
 

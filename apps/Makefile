@@ -1,6 +1,6 @@
 # Builds every app under apps/<name>/ as its own freestanding ELF32
 # binary, separate from the main kernel build (see the top-level Makefile
-# and kernel/core/elf.c for how they get loaded).
+# and kernel/proc/elf.c for how they get loaded).
 #
 # Each app directory's .c files, plus the shared shim (apps/lib) and the
 # kernel library files that have no kernel-state dependency (string.c,
