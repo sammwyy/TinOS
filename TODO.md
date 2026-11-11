@@ -148,9 +148,11 @@ never found. Both were found by bisection, not diagnosis.
 
 ### Scheduler independent of the desktop
 
-- [ ] The boot processor only runs threads when `desktop/desktop.c` calls
-      `thread_run(8)`. Add a kernel idle loop / per-CPU scheduler so threads
-      run without any UI. Prerequisite for a text-mode system.
+- [x] The text console drives the existing thread, async and timer pollers
+      without starting graphics (`kernel/tty/tty.c`).
+- [ ] The boot processor still only runs threads when the desktop or text
+      console polls `thread_run(8)`. Add a kernel-owned idle/scheduler loop
+      independent of either UI.
 - [x] Move `kernel/core/thread.c` and `sync.c` to `kernel/sched/`.
 - [ ] Replace the `thread_run(budget)` pull model with per-CPU run queues and
       preemptive switching on every CPU.
@@ -561,8 +563,11 @@ Testing:
 - [ ] Commands that reach into kernel internals (`crash`, network
       configuration, desktop control) become syscalls, device ioctls, or
       desktop IPC requests.
+- [x] `tinos.mode=text` boots an interactive VGA shell, and its `desktop`
+      command starts the existing graphical session (still ring 0).
 - [ ] `kmain()` ends by starting `init`, not `desktop_run()`.
-- [ ] Kernel command line: `tinos.mode=text|desktop`, `init=`, `root=`.
+- [ ] Complete kernel command line parsing for `tinos.mode=text|desktop`,
+      `init=`, `root=`; current text mode checks for a substring.
 
 ---
 

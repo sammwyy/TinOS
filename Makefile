@@ -7,7 +7,7 @@
 #  make runvnc     launch QEMU serving the display over VNC (127.0.0.1:0)
 #  make usb-image  create/reuse the FAT32 USB development image
 #  make test       build and run the host-side unit tests
-#  make check      host unit tests + automated QEMU boot/GUI test
+#  make check      host unit tests + automated QEMU boot/GUI and text tests
 #  make clean      remove build products
 # =====================================================================
 
@@ -70,7 +70,7 @@ LIBGCC  := $(shell $(CC) -m32 -print-libgcc-file-name)
 SRCS_C := $(sort kernel/main.c \
                   $(shell find kernel/core kernel/sched kernel/proc \
                           kernel/fs kernel/gfx kernel/lib kernel/mm \
-                          kernel/net kernel/sh tests/kernel \
+                          kernel/net kernel/sh kernel/tty tests/kernel \
                           desktop libraries -name '*.c') \
                   $(addprefix kernel/drivers/,$(ARCH_DRIVERS)) \
                   $(shell find kernel/arch/$(ARCH) -name '*.c'))
@@ -258,6 +258,7 @@ test: $(HOST_BIN)
 
 check: test $(ISO)
 	tests/qemu/qemu_test.py --iso $(ISO)
+	python3 tests/qemu/text_mode_test.py --iso $(ISO)
 
 # Build the kernel and ISO twice from a clean tree and compare the results.
 verify-reproducible:

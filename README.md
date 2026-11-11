@@ -38,6 +38,11 @@ make run                                # boots it in QEMU
 The first screen is the GRUB menu (3 seconds), then the text-mode boot log
 for about three seconds, then the desktop.
 
+Choose "TinOS (text console)" in GRUB to keep the VGA console and run the
+interactive shell. Type `desktop` to enter the graphical session. The text
+console currently runs in the kernel address space; the desktop is not yet a
+separate process and cannot return to the console after it starts.
+
 ## Requirements
 
 | Tool | Why | Fedora package |

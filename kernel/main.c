@@ -41,6 +41,7 @@
 #include <tinos/tar.h>
 #include <tinos/thread.h>
 #include <tinos/timer.h>
+#include <tinos/tty.h>
 
 #define SCREEN_WIDTH  1024
 #define SCREEN_HEIGHT 768
@@ -445,7 +446,7 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
         pause_ms(BOOT_STEP_DELAY_MS);
     }
 
-    /* Graphics */
+    /* Devices */
     size_t devices = pci_scan();
     size_t bound = driver_bind_all();
     for (size_t i = 0; i < virtio_blk_count(); i++)
@@ -470,6 +471,10 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
               (uint32_t)device_count(), (uint32_t)bound);
     boot_note("net: %s", network ? "dhcp configured" : "unavailable");
 
+    if (strstr(boot_cmdline, "tinos.mode=text"))
+        tty_run();
+
+    /* Graphics */
     vga_text_set_color(VGA_YELLOW, VGA_BLACK);
     vga_text_printf("\n  Starting the graphical desktop at %dx%d ...\n",
                     SCREEN_WIDTH, SCREEN_HEIGHT);

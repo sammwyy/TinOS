@@ -1165,9 +1165,16 @@ static int cmd_reboot(shell_t *sh, int argc, char **argv, stream_t *in,
 }
 
 static int cmd_shutdown(shell_t *sh, int argc, char **argv, stream_t *in,
-                        stream_t *out, stream_t *err)
+                      stream_t *out, stream_t *err)
 {
     shell_request(sh, SH_REQ_SHUTDOWN, NULL);
+    return 0;
+}
+
+static int cmd_desktop(shell_t *sh, int argc, char **argv, stream_t *in,
+                       stream_t *out, stream_t *err)
+{
+    shell_request(sh, SH_REQ_DESKTOP, NULL);
     return 0;
 }
 
@@ -1243,6 +1250,8 @@ static const sh_command_def_t commands[] = {
       "trigger a fault to show the panic screen",    cmd_crash },
     { "date",     "date",
       "show the current date and time",              cmd_date },
+    { "desktop",  "desktop",
+      "start the graphical desktop",                 cmd_desktop },
     { "doremi",   "doremi",
       "run the AC'97 audio hardware test",           cmd_doremi },
     { "echo",     "echo [-n] text...",

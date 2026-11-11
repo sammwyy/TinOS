@@ -191,6 +191,9 @@ static void term_run(window_t *win, terminal_t *t)
     case SH_REQ_SHUTDOWN:
         desktop_shutdown(false);
         break;
+    case SH_REQ_DESKTOP:
+        desktop_notify("Desktop is already running");
+        break;
     case SH_REQ_NONE:
         break;
     }

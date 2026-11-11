@@ -50,12 +50,14 @@ GRUB2 (multiboot2 /boot/tinos.elf + module2 /boot/ramfs.tar)
        PS/2 keyboard + mouse, ATA PIO, tmpfs root, FAT mounts
        load_native_apps(): untar ramfs into /apps, ELF-load and call each app_main()
        PCI scan, driver binding (e1000, virtio-blk, AC'97), UHCI, network + DHCP
+       if tinos.mode=text: tty_run() on VGA; desktop command resumes kmain
        gfx_init(1024x768), VGA text disabled
        desktop_run()   <- never returns
 ```
 
-`kmain()` unconditionally ends in `desktop_run()`. There is no text-mode
-operating mode after boot: the VGA text console is only a boot log.
+The text console runs the existing in-kernel shell without the graphics
+device. `desktop` leaves the console and enters the desktop; it cannot
+return to the console. Neither shell nor desktop is a userspace process yet.
 
 ### 1.3 Kernel subsystems
 
@@ -78,8 +80,9 @@ operating mode after boot: the VGA text console is only a boot log.
 Kernel threads have private stacks and are preemptible from the PIT, but they
 are not driven by an independent scheduler loop:
 
-- On the boot processor, threads run when the **desktop event loop** calls
-  `thread_run(8)` (`desktop/desktop.c`).
+- On the boot processor, threads run when the **desktop event loop** or
+  **text console loop** calls `thread_run(8)` (`desktop/desktop.c` or
+  `kernel/tty/tty.c`).
 - On application processors, `smp.c:ap_entry()` loops on `thread_run(4)`.
 - `thread_spawn_pinned()` restricts a thread to the boot processor because the
   filesystem and network stack have no SMP-safe locking.

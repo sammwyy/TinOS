@@ -502,6 +502,9 @@ static void test_commands(void)
     char arg[FS_PATH_MAX];
     CHECK(shell_take_request(sh, arg, sizeof(arg)) == SH_REQ_CLEAR);
     CHECK(shell_take_request(sh, arg, sizeof(arg)) == SH_REQ_NONE);
+    check_output(sh, "desktop", "");
+    CHECK(shell_take_request(sh, arg, sizeof(arg)) == SH_REQ_DESKTOP);
+    CHECK(shell_take_request(sh, arg, sizeof(arg)) == SH_REQ_NONE);
 
     /* History. */
     CHECK(shell_history_count(sh) > 10);

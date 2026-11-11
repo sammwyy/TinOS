@@ -87,6 +87,7 @@ typedef enum {
     SH_REQ_SYSINFO,
     SH_REQ_REBOOT,
     SH_REQ_SHUTDOWN,
+    SH_REQ_DESKTOP,
 } sh_request_t;
 
 typedef struct shell shell_t;
