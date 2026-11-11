@@ -1184,7 +1184,7 @@ static int cmd_desktop(shell_t *sh, int argc, char **argv, stream_t *in,
 static int cmd_run(shell_t *sh, int argc, char **argv, stream_t *in,
                    stream_t *out, stream_t *err)
 {
-    if (argc != 2) {
+    if (argc < 2) {
         usage_error(err, "run");
         return 1;
     }
@@ -1204,7 +1204,8 @@ static int cmd_run(shell_t *sh, int argc, char **argv, stream_t *in,
         return 1;
     }
     int status;
-    if (!process_run(fs_data(file), fs_size(file), &status)) {
+    if (!process_run(fs_data(file), fs_size(file), argc - 1,
+                     (const char *const *)&argv[1], &status)) {
         stream_puts(err, "run: invalid ELF or insufficient memory\n");
         return 1;
     }
@@ -1328,7 +1329,7 @@ static const sh_command_def_t commands[] = {
     { "rm",       "rm [-rf] path...",
       "remove files and directories",                cmd_rm },
 #ifndef TINOS_HOST
-    { "run",      "run <ELF32 file>",
+    { "run",      "run <ELF32 file> [arguments...]",
       "run an isolated ring 3 program",              cmd_run },
 #endif
     { "shutdown", "shutdown",

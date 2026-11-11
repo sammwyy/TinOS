@@ -57,6 +57,15 @@ def main():
         vm.line("hello process")
         assert vm.wait_for_serial("ring3 echo: hello process", timeout=15), vm.serial()
 
+        vm.line("run /apps/cat.elf /README.txt")
+        assert vm.wait_for_serial("Welcome to TinOS!", timeout=15), vm.serial()
+        vm.line("run /apps/fdtest.elf /README.txt")
+        assert vm.wait_for_serial("ring3: independent file descriptors",
+                                  timeout=15), vm.serial()
+        vm.line("run /apps/cat.elf /missing")
+        assert vm.wait_for_serial("cat: cannot open /missing",
+                                  timeout=15), vm.serial()
+
         vm.line("run /apps/hello.elf")
         deadline = time.time() + 15
         while vm.serial().count("ring3: hello from an isolated ELF") < 2:

@@ -19,7 +19,8 @@ code.
 The kernel, text shell, desktop, codecs and nine native desktop apps still
 share one ring-0 address space. Separately linked programs under
 `userland/bin/` can run in ring 3 through `run <path>`; they execute one at a
-time while their caller waits and have only console I/O syscalls.
+time while their caller waits. They have console I/O and read-only access to
+memory-backed files through private integer descriptors.
 
 | Property            | Today                                                        |
 |---------------------|--------------------------------------------------------------|
@@ -32,7 +33,7 @@ time while their caller waits and have only console I/O syscalls.
 | Threads             | Kernel threads, `THREAD_MAX` = 32, 16 KiB stacks             |
 | SMP                 | APs brought up via ACPI MADT + LAPIC INIT/SIPI               |
 | Interrupts          | 8259 PIC, PIT timer                                          |
-| Syscalls            | `int 0x80`: read console, write console, exit (native apps use pointers) |
+| Syscalls            | `int 0x80`: console I/O, read-only open/read/close, exit      |
 | Filesystem          | In-memory node tree; FAT16/FAT32 imported read-only          |
 | Network             | Polling Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS in the kernel |
 | Graphics            | Bochs/QEMU DISPI only, software framebuffer in the kernel    |
@@ -64,10 +65,11 @@ The text console runs the existing in-kernel shell without the graphics
 device. `desktop` leaves the console and enters the desktop; it cannot
 return to the console. Neither shell nor desktop is a userspace process yet.
 From the VGA text console, `run` loads a validated ELF32 into a fresh
-address space and blocks until exit; its mapped user memory is freed afterward.
-User faults return a
-nonzero status without halting the kernel. A BSP TSS supplies the privilege
-transition stack; `int 0x80` validates mapped user buffers for console I/O.
+address space, copies arguments onto the user stack and blocks until exit.
+Its mapped pages and file descriptors are released afterward. User faults
+return a nonzero status without halting the kernel. A BSP TSS supplies the
+privilege transition stack; `int 0x80` validates mapped user buffers, copies
+pathnames into the kernel and reads file data through a kernel bounce buffer.
 Floating-point instructions trap until per-process FPU state exists.
 
 ### 1.3 Kernel subsystems
@@ -79,6 +81,7 @@ Floating-point instructions trap until per-process FPU state exists.
 | Scheduling  | `kernel/sched/`                       | kernel threads, mutexes/events |
 | Loader      | `kernel/proc/`                        | native and ring-3 ELF loaders, synchronous process lifecycle |
 | Syscalls    | `kernel/syscall/`, `kernel/include/uapi/tinos/` | `int 0x80` ABI, user pointer validation |
+| Userspace   | `libraries/libc/`, `userland/bin/`   | freestanding crt0, syscall stubs and ELF32 command-line programs |
 | Memory      | `kernel/mm/`                          | first-fit coalescing heap, DMA buffers |
 | Drivers     | `kernel/drivers/<class>/`             | serial, VGA text, PCI, DISPI, PS/2 keyboard/mouse, ATA PIO, virtio-blk, e1000, UHCI, USB mass storage, AC'97, PC speaker |
 | Filesystem  | `kernel/fs/`                          | ramfs node tree, path helpers, block layer, MBR, FAT16, FAT32, ustar reader, async whole-file reads |

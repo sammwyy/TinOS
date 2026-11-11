@@ -46,13 +46,13 @@ separate process and cannot return to the console after it starts.
 
 From the VGA text console, the `run` shell command starts a separate
 ring-3 ELF32 executable. For example, `run /apps/hello.elf` prints a
-message and exits, and
-`run /apps/echo.elf` reads one line from the keyboard and writes it to the
-console. These programs use `int 0x80` (`read`, `write`, `exit`); they cannot
-access kernel memory. `run /apps/fault.elf` demonstrates that a user page
-fault terminates only that program. Processes currently run one at a time
-while the shell waits; the desktop and nine existing native apps remain
-kernel-linked/ring 0.
+message and exits; `run /apps/echo.elf` reads a line from the keyboard.
+`run /apps/cat.elf /README.txt` reads a file through a read-only descriptor
+and prints it using the new userspace libc. `run /apps/fault.elf` demonstrates
+that a user page fault terminates only that program. Programs receive
+arguments on their own user stack and call `int 0x80`; they cannot access
+kernel memory. Processes still run one at a time while the shell waits;
+the desktop and nine existing native apps remain kernel-linked/ring 0.
 
 With 16 MiB of QEMU RAM the text console and graphical desktop load the
 bundled apps. An 8 MiB graphical boot runs at 640x480 with the app archive.
@@ -723,8 +723,9 @@ make check     # the above plus the scripted QEMU boot/GUI session
   the writable base tree is not persisted back to disk.
 * There are no user accounts or permissions, concurrent userspace processes,
   NTFS support, or USB host controllers beyond the current UHCI path.
-  The small ring-3 syscall ABI has only console I/O and exit, not VFS or
-  graphical APIs. Ring-3 floating-point instructions currently trap; an
+  The ring-3 syscall ABI has console I/O, read-only access to memory-backed
+  files, and exit; it has no writable files, graphical APIs, or process
+  scheduling. Ring-3 floating-point instructions currently trap; an
   independent FPU context is still pending.
 * The RTC is read directly, so the taskbar clock follows the host clock via
   `-rtc base=localtime`; without that flag QEMU reports UTC.

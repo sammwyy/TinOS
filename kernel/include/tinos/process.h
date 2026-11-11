@@ -5,9 +5,13 @@
 #include <tinos/types.h>
 
 /* Runs one ELF32 process synchronously; returns its exit status. */
-bool process_run(const void *image, size_t length, int *status);
+bool process_run(const void *image, size_t length, int argc,
+                 const char *const argv[], int *status);
 bool process_active(void);
 bool process_user_buffer(uintptr_t address, size_t length, bool writable);
+int process_file_open(const char *path);
+int process_file_read(int fd, void *buffer, size_t length);
+int process_file_close(int fd);
 NORETURN void process_abort(int reason);
 
 #endif /* TINOS_PROCESS_H */

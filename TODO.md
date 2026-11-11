@@ -28,7 +28,7 @@ kernel.
 | `kernel/sh/{shell,parse,stream,regex}.c` | `userland/sh/` | Phase 2: processes, syscalls, libc, pipes |
 | `kernel/sh/commands.c` (split per command) | `userland/bin/` | Same as above, plus `spawn`/`wait` |
 | `kernel/include/tinos/{sh,regex}.h` | `userland/sh/` | With `kernel/sh` |
-| `apps/lib/shim.[ch]` (replaced, not moved) | `libraries/libc/` | Phase 2: syscall interface exists |
+| `apps/lib/shim.[ch]` (replaced, not moved) | `libraries/libc/` | After all nine native apps use the minimal syscall library (now created) |
 | `kernel/lib/{string,printf}.c` (userspace copy) | `libraries/libc/` | Phase 2: libc build and sysroot exist; kernel keeps its own copy |
 | `kernel/fs/path.c` (userspace copy) | `libraries/libc/` | Same as above |
 | `kernel/gfx/gfx.c`, `font8x16.c` | `libraries/gfx/` | Phase 2 console done (kernel has its own text renderer) and Phase 3 framebuffer device exists |
@@ -41,12 +41,11 @@ kernel.
 | `kernel/drivers/video/vga_text.c` console logic | `kernel/tty/` | Phase 2: TTY core and console driver interface exist |
 | Bitmap allocator part of `kernel/arch/x86/pmm.c` | `kernel/mm/` | Phase 1: PMM split (needs code change, not a plain move) |
 | Driver-private headers (`e1000.h`, `ata.h`, `uhci.h`, `virtio_blk.h`, `usb_msc.h`, `vbe.h`) | next to each driver in `kernel/drivers/<class>/` | Phase 1: initcall table (so `kernel/main.c` stops including them) |
-| Syscall numbers, error codes, shared structs (new files) | `kernel/include/uapi/tinos/` | Phase 2: syscall interface designed |
+| Public error codes and shared structs (new files) | `kernel/include/uapi/tinos/` | Once the existing syscall numbers need structured results |
 | README sections (build, shell, filesystem, testing) | `docs/` | Any time; pure documentation |
 
-Placeholder directories that stay empty until their phase: `kernel/syscall`,
-`kernel/ipc`, `kernel/tty`, `kernel/include/uapi`, `userland/*`,
-`libraries/{libc,gfx,ui}`, `ports`, `toolchain`, `docs`.
+Placeholder directories that stay empty until their phase: `kernel/ipc`,
+`userland/{init,sh}`, `libraries/{gfx,ui}`, `ports`, `toolchain`, `docs`.
 
 ---
 
@@ -529,21 +528,28 @@ Testing:
       live in `userland/bin/`; the nine native desktop apps still run in ring 0.
 - [ ] Run processes asynchronously from the scheduler. `run` currently blocks
       the caller, supports only one process on the BSP and has no time slice,
-      PID, user arguments, parent or file descriptors. A CPU-bound program
+      PID, parent or waitable child handle. A CPU-bound program
       can stall the caller indefinitely; the kernel remains reachable via
       interrupts but cannot recover the shell without a user fault/exit.
 - [ ] Route process standard streams through terminal/TTY file descriptors
       so `run` works from the graphical terminal too. It currently runs only
       from the VGA text console; the desktop event loop cannot redraw while
       `run` blocks.
-- [ ] Process object in `kernel/proc/`: address space, threads, file
-      descriptor table, working directory, parent, exit status.
-- [ ] `exec`: load an ELF into a fresh address space with a user stack,
-      arguments and environment, extending `kernel/proc/elf.c`.
+- [x] The current synchronous process stores its address space, 16-slot
+      read-only descriptor table and independent file offsets.
+- [ ] Expand process state with threads, working directory, parent, PID
+      and an exit status that a separate caller can wait on.
+- [x] `exec` loads an ELF into a fresh address space with a user stack,
+      `argc`/`argv` and an entry point; the booting shell owns the initial
+      arguments.
+- [ ] Supply an environment, relocatable executables and dynamic linking.
 - [ ] Process creation (`spawn` or `fork`+`exec`) **(decision)**, `exit`,
       `wait`.
 - [x] Validate mapped user pages in console `read`/`write` and reject bad
       pointers without a kernel fault.
+- [x] Copy validated user pathnames into the kernel; transfer file reads
+      through a kernel bounce buffer rather than handing device code a
+      virtual user pointer.
 - [ ] General copy-in/copy-out helpers with fault recovery for future VFS,
       IPC and ioctl syscalls.
 - [x] A fault in ring 3 terminates the process instead of calling `panic()`.
@@ -564,11 +570,14 @@ Testing:
 
 ### Syscall interface
 
-- [x] `int 0x80` ring-3 syscall gate, with `exit`, blocking console `read`
-      and console `write` implemented in `kernel/syscall/`.
+- [x] `int 0x80` ring-3 syscall gate with `exit`, blocking keyboard `read`,
+      console `write`, and read-only `open`/`read`/`close` for memory-backed
+      VFS files.
 - [ ] Add a fast syscall entry if useful after the ABI stabilizes.
 - [x] Place the current syscall numbers under `kernel/include/uapi/tinos/`;
       the sample userspace binaries include only this public header.
+- [x] Build a separate `libraries/libc/` with i386 syscall stubs and `crt0`;
+      `userland/bin/cat.c` uses no kernel-private headers.
 - [ ] Define public error codes and versioned structs before adding
       filesystem or graphical APIs; no internal kernel headers in userspace.
 - [ ] No kernel pointers across the boundary. Today's ABI exposes
@@ -587,6 +596,9 @@ Testing:
 
 ### VFS
 
+- [ ] Add write-capable file descriptors and independent open-file objects.
+      Today's 16-slot table points at ramfs nodes directly, with no refcount
+      or filesystem locking; disk-backed files are not opened by userspace.
 - [ ] `fs_node_t` is simultaneously the directory entry, the inode and the
       file contents buffer. Split into vnode operations, a mount table, and
       open-file objects with an offset.

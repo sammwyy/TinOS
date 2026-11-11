@@ -71,7 +71,7 @@ SRCS_C := $(sort kernel/main.c \
                   $(shell find kernel/core kernel/sched kernel/proc kernel/syscall \
                           kernel/fs kernel/gfx kernel/lib kernel/mm \
                           kernel/net kernel/sh kernel/tty tests/kernel \
-                          desktop libraries -name '*.c') \
+                          desktop libraries/image libraries/audio -name '*.c') \
                   $(addprefix kernel/drivers/,$(ARCH_DRIVERS)) \
                   $(shell find kernel/arch/$(ARCH) -name '*.c'))
 SRCS_S := $(sort $(shell find kernel/arch/$(ARCH) -name '*.S'))
@@ -179,6 +179,7 @@ native-apps:
 
 .PHONY: userland-apps
 userland-apps:
+	$(MAKE) -C libraries/libc
 	$(MAKE) -C userland/bin
 
 # --mtime/--owner/--group/--sort keep the archive's bytes independent of
@@ -194,6 +195,8 @@ $(RAMFS): native-apps userland-apps
 	@cp $(BUILD)/userland/io.elf $(NATIVE_BUILD)/io.elf
 	@cp $(BUILD)/userland/df.elf $(NATIVE_BUILD)/df.elf
 	@cp $(BUILD)/userland/textwrite.elf $(NATIVE_BUILD)/textwrite.elf
+	@cp $(BUILD)/userland/cat.elf $(NATIVE_BUILD)/cat.elf
+	@cp $(BUILD)/userland/fdtest.elf $(NATIVE_BUILD)/fdtest.elf
 	@cd $(NATIVE_BUILD) && tar --format=ustar --sort=name --mtime=@0 \
 		--owner=0 --group=0 --numeric-owner -cf $(abspath $@) \
 		$$(ls | grep -v '^obj$$')

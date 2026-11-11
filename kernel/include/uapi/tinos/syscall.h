@@ -5,5 +5,7 @@
 #define TINOS_SYS_EXIT  1u
 #define TINOS_SYS_WRITE 2u
 #define TINOS_SYS_READ  3u
+#define TINOS_SYS_OPEN  4u
+#define TINOS_SYS_CLOSE 5u
 
 #endif /* TINOS_UAPI_SYSCALL_H */
