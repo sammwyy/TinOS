@@ -4,9 +4,9 @@
 
 #include <tinos/types.h>
 
-/* Extracts every regular file in the ustar archive at [image, image+size)
- * under dest_dir (created if it does not exist yet). Returns the number of
- * files written. */
+/* Mounts regular files from the ustar archive at [image, image+size)
+ * under dest_dir (created if it does not exist yet). The archive memory
+ * must remain valid while the files exist. Returns the number of files. */
 size_t tar_extract(const void *image, size_t size, const char *dest_dir);
 
 #endif /* TINOS_TAR_H */

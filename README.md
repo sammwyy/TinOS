@@ -43,13 +43,13 @@ interactive shell. Type `desktop` to enter the graphical session. The text
 console currently runs in the kernel address space; the desktop is not yet a
 separate process and cannot return to the console after it starts.
 
-With 16 MiB of QEMU RAM the text console and the graphical desktop load the
-bundled apps. An 8 MiB text boot also works, but GRUB2 may omit the app
-module when memory is tight; graphics falls back to the console when there
-is not enough RAM for a framebuffer. An unsupported video adapter also
-leaves the text console usable. A 4 MiB boot is not supported
-yet: GRUB2 runs out of memory before it transfers control, even without the
-ramfs module.
+With 16 MiB of QEMU RAM the text console and graphical desktop load the
+bundled apps. An 8 MiB graphical boot runs at 640x480 when GRUB2 loads the
+app module; depending on GRUB2's memory placement it may instead omit the
+module, in which case the text console remains usable. Graphics also falls
+back to the console on unsupported video hardware. A 4 MiB boot is not
+supported yet: GRUB2 runs out of memory before it transfers control, even
+without the ramfs module.
 
 ## Requirements
 

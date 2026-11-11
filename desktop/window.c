@@ -297,7 +297,8 @@ window_t *wm_open(const app_class_t *cls, int width, int height,
     int    step   = (int)(window_count % 6) * 26;
     win->id       = next_id++;
     win->cls      = cls;
-    win->frame    = rect_make(48 + step, 40 + step, width, height);
+    win->frame    = rect_make(48 + step, 40 + step,
+                              MIN(width, space.w), MIN(height, space.h));
 
     if (win->frame.x + win->frame.w > space.w)
         win->frame.x = MAX(0, space.w - win->frame.w);
@@ -312,8 +313,8 @@ window_t *wm_open(const app_class_t *cls, int width, int height,
         cls->on_open(win, arg);
 
     wm_invalidate_all();
-    klog("[wm  ] opened window %d '%s' (%dx%d)\n", win->id, win->title, width,
-         height);
+    klog("[wm  ] opened window %d '%s' (%dx%d)\n", win->id, win->title,
+         win->frame.w, win->frame.h);
     return win;
 }
 

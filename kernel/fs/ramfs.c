@@ -67,7 +67,7 @@ static void node_free(fs_node_t *node)
 {
     if (node->backend_release && node->backend)
         node->backend_release(node->backend);
-    if (node->data) {
+    if (node->data && !node->data_borrowed) {
         total_bytes -= node->capacity;
         kfree(node->data);
     }
@@ -690,21 +690,51 @@ fs_result_t fs_copy(fs_node_t *cwd, const char *src, const char *dst,
 
 /* File contents */
 
+fs_result_t fs_bind_external(fs_node_t *file, const void *data, size_t len)
+{
+    if (!file)
+        return FS_ERR_NOENT;
+    if (file->type != FS_FILE)
+        return FS_ERR_ISDIR;
+    if (file->backend || (!data && len))
+        return FS_ERR_INVAL;
+    if (file->data && !file->data_borrowed) {
+        total_bytes -= file->capacity;
+        kfree(file->data);
+    }
+    file->data = (uint8_t *)data;
+    file->size = len;
+    file->capacity = 0;
+    file->data_borrowed = true;
+    file->modified = fs_clock_ms();
+    touch_generation();
+    return FS_OK;
+}
+
 static fs_result_t ensure_capacity(fs_node_t *file, size_t needed)
 {
-    if (file->capacity >= needed)
+    if (!file->data_borrowed && file->capacity >= needed)
         return FS_OK;
 
     size_t capacity = file->capacity ? file->capacity : 64;
-    while (capacity < needed)
+    size_t minimum = file->data_borrowed && file->size > needed ?
+                     file->size : needed;
+    while (capacity < minimum) {
+        if (capacity > (size_t)-1 / 2)
+            return FS_ERR_NOMEM;
         capacity *= 2;
+    }
 
-    uint8_t *buf = krealloc(file->data, capacity);
+    uint8_t *buf = file->data_borrowed ? kmalloc(capacity) :
+                                         krealloc(file->data, capacity);
     if (!buf)
         return FS_ERR_NOMEM;
+    if (file->data_borrowed && file->size)
+        memcpy(buf, file->data, file->size);
     total_bytes += capacity - file->capacity;
     file->data     = buf;
     file->capacity = capacity;
+    file->data_borrowed = false;
     return FS_OK;
 }
 
@@ -744,6 +774,8 @@ fs_result_t fs_append(fs_node_t *file, const void *data, size_t len)
     if (len == 0)
         return FS_OK;
 
+    if (len > (size_t)-1 - file->size)
+        return FS_ERR_NOMEM;
     fs_result_t r = ensure_capacity(file, file->size + len);
     if (r != FS_OK)
         return r;

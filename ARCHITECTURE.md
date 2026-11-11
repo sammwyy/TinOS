@@ -105,6 +105,9 @@ first.
   to their link address by `kernel/proc/elf.c`, and their `app_main()` is
   called once in kernel context. It registers an `app_entry_t` with a
   `launch` callback; from then on the desktop calls into app code directly.
+- The tar-backed files refer directly to the reserved GRUB module. Writes
+  allocate private buffers so the original archive remains unchanged.
+  The module remains reserved for the lifetime of these files.
 - The ELF loader validates the entire program-header table before copying
   segments. Each app is restricted to its own slot, and duplicate slots
   are rejected at boot. This does not isolate apps from one another at

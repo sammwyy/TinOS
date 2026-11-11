@@ -262,8 +262,8 @@ check: test $(ISO)
 	python3 tests/qemu/text_mode_test.py --iso $(ISO)
 	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 16
 	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 8 --no-desktop
-	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 8 --boot-default --no-desktop --retry-desktop
-	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 16 --vga cirrus --boot-default --no-desktop
+	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 16 --vga cirrus --boot-default --no-desktop --retry-desktop
+	python3 tests/qemu/low_memory_gui_test.py --iso $(ISO)
 
 # Build the kernel and ISO twice from a clean tree and compare the results.
 verify-reproducible:

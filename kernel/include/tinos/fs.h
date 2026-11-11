@@ -50,7 +50,8 @@ struct fs_node {
 
     uint8_t *data;     /* regular files: contents (not NUL terminated) */
     size_t   size;
-    size_t   capacity;
+    size_t   capacity; /* owned heap bytes, zero for external contents */
+    bool     data_borrowed;
     uint32_t modified; /* fs_clock_ms() at the last modification       */
     void    *backend;
     fs_read_at_fn read_at;
@@ -99,6 +100,9 @@ fs_result_t fs_copy_node(fs_node_t *src, fs_node_t *dst_dir,
                          fs_node_t **out);
 
 /* File contents */
+/* Attach memory that remains valid for the file's lifetime. Writes detach
+ * the file from this storage by copying its contents into the heap. */
+fs_result_t fs_bind_external(fs_node_t *file, const void *data, size_t len);
 fs_result_t fs_write(fs_node_t *file, const void *data, size_t len);
 fs_result_t fs_append(fs_node_t *file, const void *data, size_t len);
 fs_result_t fs_write_path(fs_node_t *cwd, const char *path, const void *data,

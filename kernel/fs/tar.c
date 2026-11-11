@@ -58,7 +58,7 @@ size_t tar_extract(const void *image, size_t size, const char *dest_dir)
 
     size_t files    = 0;
     size_t offset   = 0;
-    while (offset + TAR_BLOCK_SIZE <= size) {
+    while (offset <= size && size - offset >= TAR_BLOCK_SIZE) {
         const tar_header_t *hdr = (const tar_header_t *)((const uint8_t *)image + offset);
         offset += TAR_BLOCK_SIZE;
         if (hdr->name[0] == '\0')
@@ -71,18 +71,27 @@ size_t tar_extract(const void *image, size_t size, const char *dest_dir)
         if (hdr->typeflag == TAR_DIRTYPE) {
             fs_mkdir_p(root, path, NULL);
         } else if (hdr->typeflag == TAR_REGTYPE || hdr->typeflag == TAR_AREGTYPE) {
-            if (offset + entry_size > size)
+            if (entry_size > size - offset)
                 break;
             char parent[FS_PATH_MAX];
             split_dirname(path, parent, sizeof(parent));
             if (parent[0])
                 fs_mkdir_p(root, parent, NULL);
-            if (fs_write_path(root, path, (const uint8_t *)image + offset,
-                              entry_size, false) == FS_OK)
+            fs_node_t *file = NULL;
+            fs_result_t result = fs_resolve(root, path, &file);
+            if (result == FS_ERR_NOENT)
+                result = fs_create(root, path, &file);
+            if (result == FS_OK &&
+                fs_bind_external(file, (const uint8_t *)image + offset,
+                                 entry_size) == FS_OK)
                 files++;
         }
 
-        offset += ALIGN_UP(entry_size, TAR_BLOCK_SIZE);
+        size_t blocks = entry_size / TAR_BLOCK_SIZE +
+                        (entry_size % TAR_BLOCK_SIZE != 0);
+        if (blocks > (size - offset) / TAR_BLOCK_SIZE)
+            break;
+        offset += blocks * TAR_BLOCK_SIZE;
     }
     return files;
 }

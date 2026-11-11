@@ -118,9 +118,11 @@ graphics; this is not yet a claim of support for arbitrary PCs.
       boot path, then run a real 4 MiB QEMU acceptance test.
 - [ ] Avoid loading and unpacking graphical apps during text-only boot; a
       later `desktop` command should load them on demand if RAM permits.
-- [ ] Decide a minimum usable GUI resolution and memory budget. Current
-      desktop back buffer alone needs 3 MiB at 1024x768x32, before any
-      window cache or decoded image.
+- [x] Exercise the 640x480 fallback at 8 MiB with the desktop and a terminal
+      window clamped to the available workspace.
+- [ ] Set a minimum usable GUI resolution and memory budget per app. The
+      desktop back buffer needs 3 MiB at 1024x768x32 or 1.2 MiB at
+      640x480x32, before any window cache or decoded image.
 - [x] Detect graphics allocation or driver failure and remain in text
       mode instead of panicking; text mode works without DISPI.
 - [x] Try 1024x768, 800x600, then 640x480 when memory permits, preserving
@@ -128,17 +130,21 @@ graphics; this is not yet a claim of support for arbitrary PCs.
       before changing the video mode.
 - [ ] Choose display modes from adapter capabilities and use a tested
       small-screen desktop layout, rather than fixed fallback dimensions.
-- [ ] An 8 MiB boot with nine apps has about 616 KiB free before graphics:
-      1024x768 needs 3 MiB just for the back buffer, and 640x480 needs
-      1.2 MiB. Remove duplication of initrd files in ramfs and reduce
-      compositor/window cache consumption before claiming an 8 MiB GUI.
+- [x] Bind files in the ramfs to the reserved Multiboot2 module instead of
+      copying every ELF/icon/manifest into a second heap buffer. On write,
+      allocate a private copy. An 8 MiB boot with nine apps now has about
+      2672 KiB free before graphics and starts a 640x480 desktop.
+- [ ] Continue reducing the compositor and per-window surface memory
+      footprint: every opened window currently allocates a cached
+      32-bit surface in addition to the desktop back buffer.
 - [ ] Remove the SSE2 boot requirement or provide a scalar codec build for
       older i386 processors. Test on representative pre-SSE2 hardware.
 - [ ] Ensure FAT/ramfs and the app loader degrade gracefully under OOM;
       track kernel, ramfs, app slots, heap and framebuffer usage separately.
 - [x] Add QEMU tests for 8 and 16 MiB, and for a non-DISPI VGA adapter.
-- [ ] Add a 4 MiB boot test after replacing the boot path; add low-memory
-      app interaction and desktop layout checks beyond the 16 MiB boot.
+- [x] Add an 8 MiB graphical boot/window-layout acceptance test.
+- [ ] Add a 4 MiB boot test after replacing the boot path; extend
+      low-memory testing to file editing, image decode and multiple windows.
 
 ### Build
 

@@ -16,6 +16,7 @@
 #include <tinos/elf.h>
 #include <tinos/path.h>
 #include <tinos/sh.h>
+#include <tinos/tar.h>
 
 static int checks;
 static int failures;
@@ -259,6 +260,39 @@ static void test_fs_mutation(void)
     CHECK_STR(dir->children->next->next->name, "zebra");
     CHECK(fs_child_count(dir) == 3);
 
+    fs_shutdown();
+}
+
+static void test_tar_memory(void)
+{
+    SUITE("archive-backed files");
+    fs_init();
+    uint8_t archive[1536] = { 0 };
+    memcpy(archive, "file.txt", 8);
+    memcpy(archive + 124, "00000000005", 11);
+    archive[156] = '0';
+    memcpy(archive + 512, "hello", 5);
+
+    size_t heap_bytes = fs_total_bytes();
+    CHECK(tar_extract(archive, sizeof(archive), "/apps") == 1);
+    fs_node_t *file = NULL;
+    CHECK(fs_resolve(fs_root(), "/apps/file.txt", &file) == FS_OK);
+    CHECK(file != NULL);
+    if (file) {
+        CHECK(fs_size(file) == 5);
+        CHECK(fs_data(file) == archive + 512);
+        CHECK(fs_total_bytes() == heap_bytes);
+        CHECK(fs_append(file, "!", 1) == FS_OK);
+        CHECK(fs_size(file) == 6);
+        CHECK(memcmp(fs_data(file), "hello!", 6) == 0);
+        CHECK(memcmp(archive + 512, "hello", 5) == 0);
+        CHECK(fs_data(file) != archive + 512);
+        CHECK(fs_write(file, "new", 3) == FS_OK);
+        CHECK(memcmp(fs_data(file), "new", 3) == 0);
+        CHECK(fs_remove(fs_root(), "/apps/file.txt", false) == FS_OK);
+    }
+
+    CHECK(tar_extract(archive, 512, "/apps") == 0);
     fs_shutdown();
 }
 
@@ -749,6 +783,7 @@ int main(void)
     test_paths();
     test_fs_basics();
     test_fs_mutation();
+    test_tar_memory();
     test_parser();
     test_commands();
     test_shared_state();
