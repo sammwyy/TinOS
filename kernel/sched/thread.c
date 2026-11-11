@@ -515,8 +515,13 @@ size_t thread_run(size_t budget)
             fpu_restore(thread->fpu);
 
         arch_context_switch(&scheduler_context, &thread->context);
-        scheduler_switching = false;
+        /* A timer IRQ may have switched to a different worker while the
+         * scheduler was suspended. Commit the state of the worker that
+         * actually returned to this context. */
+        thread = current;
         current = NULL;
+        scheduler_switching = false;
+        KASSERT(thread != NULL);
         ran++;
 
         /* The switch is now provably finished (arch_context_switch()

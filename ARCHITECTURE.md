@@ -87,6 +87,9 @@ are not driven by an independent scheduler loop:
   **text console loop** calls `thread_run(8)` (`desktop/desktop.c` or
   `kernel/tty/tty.c`).
 - On application processors, `smp.c:ap_entry()` loops on `thread_run(4)`.
+- PIT preemption can transfer control to another worker before `thread_run()`
+  resumes; its pending state is committed for the worker that actually
+  returned to the scheduler.
 - `thread_spawn_pinned()` restricts a thread to the boot processor because the
   filesystem and network stack have no SMP-safe locking.
 

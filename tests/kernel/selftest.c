@@ -185,6 +185,8 @@ static void preempt_a_entry(void *arg)
 static void preempt_b_entry(void *arg)
 {
     UNUSED(arg);
+    if (!preempt_a_running)
+        thread_yield();
     if (preempt_a_running)
         preempt_interleaved = 1;
 }

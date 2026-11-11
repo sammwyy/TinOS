@@ -205,6 +205,9 @@ graphics; this is not yet a claim of support for arbitrary PCs.
 
 - [x] The text console drives the existing thread, async and timer pollers
       without starting graphics (`kernel/tty/tty.c`).
+- [x] Commit the state of the worker that actually returns to the scheduler
+      after PIT preemption, not the worker originally dispatched. The
+      boot-menu kernel self-test exercises this transition (196 checks).
 - [ ] The boot processor still only runs threads when the desktop or text
       console polls `thread_run(8)`. Add a kernel-owned idle/scheduler loop
       independent of either UI.
