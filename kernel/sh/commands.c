@@ -16,6 +16,8 @@
 #include <tinos/sh.h>
 #include <tinos/string.h>
 #ifndef TINOS_HOST
+#include <tinos/console.h>
+#include <tinos/process.h>
 #include <tinos/thread.h>
 #endif
 
@@ -1178,6 +1180,39 @@ static int cmd_desktop(shell_t *sh, int argc, char **argv, stream_t *in,
     return 0;
 }
 
+#ifndef TINOS_HOST
+static int cmd_run(shell_t *sh, int argc, char **argv, stream_t *in,
+                   stream_t *out, stream_t *err)
+{
+    if (argc != 2) {
+        usage_error(err, "run");
+        return 1;
+    }
+    if (!vga_text_active()) {
+        stream_puts(err, "run: available from the text console only\n");
+        return 1;
+    }
+    fs_node_t *file = NULL;
+    fs_result_t result = fs_resolve(shell_cwd_node(sh), argv[1], &file);
+    if (result != FS_OK) {
+        report(err, "run", argv[1], result);
+        return 1;
+    }
+    if (file->type != FS_FILE || fs_size(file) > 256 * 1024 ||
+        !fs_data(file)) {
+        stream_puts(err, "run: executable must be a memory-backed file\n");
+        return 1;
+    }
+    int status;
+    if (!process_run(fs_data(file), fs_size(file), &status)) {
+        stream_puts(err, "run: invalid ELF or insufficient memory\n");
+        return 1;
+    }
+    stream_printf(out, "run: exit status %d\n", status);
+    return status ? 1 : 0;
+}
+#endif
+
 /* Table */
 
 static int cmd_ping(shell_t *sh, int argc, char **argv, stream_t *in,
@@ -1292,6 +1327,10 @@ static const sh_command_def_t commands[] = {
       "restart the machine",                         cmd_reboot },
     { "rm",       "rm [-rf] path...",
       "remove files and directories",                cmd_rm },
+#ifndef TINOS_HOST
+    { "run",      "run <ELF32 file>",
+      "run an isolated ring 3 program",              cmd_run },
+#endif
     { "shutdown", "shutdown",
       "power off the machine",                       cmd_shutdown },
     { "sort",     "sort [-r] [file...]",

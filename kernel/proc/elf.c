@@ -1,6 +1,9 @@
 #include <tinos/elf.h>
 #include <tinos/kernel.h>
 #include <tinos/string.h>
+#ifndef TINOS_HOST
+#include <tinos/user_vm.h>
+#endif
 
 #define EI_NIDENT   16
 #define ELFCLASS32  1
@@ -8,6 +11,8 @@
 #define ET_EXEC     2
 #define EM_386      3
 #define PT_LOAD     1
+#define PF_X        1u
+#define PF_W        2u
 
 typedef struct PACKED {
     uint8_t  e_ident[EI_NIDENT];
@@ -88,7 +93,8 @@ bool elf_load(const void *image, size_t image_size, uintptr_t region_base,
         size_t phdr_offset = ehdr->e_phoff + (size_t)i * ehdr->e_phentsize;
         const elf32_phdr_t *ph =
             (const elf32_phdr_t *)((const uint8_t *)image + phdr_offset);
-        if (ph->p_type != PT_LOAD)
+        if (ph->p_type != PT_LOAD ||
+            (ph->p_memsz == 0 && ph->p_filesz == 0))
             continue;
         if (ph->p_filesz > ph->p_memsz)
             return false;
@@ -108,7 +114,8 @@ bool elf_load(const void *image, size_t image_size, uintptr_t region_base,
         size_t phdr_offset = ehdr->e_phoff + (size_t)i * ehdr->e_phentsize;
         const elf32_phdr_t *ph =
             (const elf32_phdr_t *)((const uint8_t *)image + phdr_offset);
-        if (ph->p_type != PT_LOAD)
+        if (ph->p_type != PT_LOAD ||
+            (ph->p_memsz == 0 && ph->p_filesz == 0))
             continue;
         void *dst = (void *)(uintptr_t)ph->p_vaddr;
         memcpy(dst, (const uint8_t *)image + ph->p_offset, ph->p_filesz);
@@ -118,3 +125,78 @@ bool elf_load(const void *image, size_t image_size, uintptr_t region_base,
     *entry_out = (void *)address;
     return true;
 }
+
+#ifndef TINOS_HOST
+bool elf_user_load(const void *image, size_t image_size,
+                   bool (*map)(void *ctx, uintptr_t page), void *ctx,
+                   void (*protect)(void *ctx, uintptr_t page),
+                   void **entry_out)
+{
+    uintptr_t entry;
+    if (!image || !map || !protect || !entry_out ||
+        !elf_entry_address(image, image_size, &entry))
+        return false;
+    const elf32_ehdr_t *ehdr = image;
+    if (ehdr->e_phentsize != sizeof(elf32_phdr_t) || !ehdr->e_phnum ||
+        ehdr->e_phoff > image_size ||
+        ehdr->e_phnum > (image_size - ehdr->e_phoff) / sizeof(elf32_phdr_t))
+        return false;
+
+    const elf32_phdr_t *phdrs =
+        (const elf32_phdr_t *)((const uint8_t *)image + ehdr->e_phoff);
+    bool executable_entry = false;
+    for (size_t i = 0; i < ehdr->e_phnum; i++) {
+        const elf32_phdr_t *ph = &phdrs[i];
+        if (ph->p_type != PT_LOAD ||
+            (ph->p_memsz == 0 && ph->p_filesz == 0))
+            continue;
+        if (!ph->p_memsz || ph->p_filesz > ph->p_memsz ||
+            ph->p_offset > image_size ||
+            ph->p_filesz > image_size - ph->p_offset ||
+            !region_contains(USER_BASE, 0x100000u, ph->p_vaddr, ph->p_memsz) ||
+            ((ph->p_flags & (PF_X | PF_W)) == (PF_X | PF_W)))
+            return false;
+        uintptr_t first = ph->p_vaddr & ~0xfffu;
+        uintptr_t last = (ph->p_vaddr + ph->p_memsz - 1) & ~0xfffu;
+        if ((ph->p_flags & PF_X) && entry >= ph->p_vaddr &&
+            entry - ph->p_vaddr < ph->p_memsz)
+            executable_entry = true;
+        for (size_t j = 0; j < i; j++) {
+            const elf32_phdr_t *other = &phdrs[j];
+            if (other->p_type != PT_LOAD ||
+                (other->p_memsz == 0 && other->p_filesz == 0))
+                continue;
+            uintptr_t a = other->p_vaddr & ~0xfffu;
+            uintptr_t b = (other->p_vaddr + other->p_memsz - 1) & ~0xfffu;
+            if (a <= last && first <= b)
+                return false;
+        }
+    }
+    if (!executable_entry)
+        return false;
+
+    for (size_t i = 0; i < ehdr->e_phnum; i++) {
+        const elf32_phdr_t *ph = &phdrs[i];
+        if (ph->p_type != PT_LOAD ||
+            (ph->p_memsz == 0 && ph->p_filesz == 0))
+            continue;
+        uintptr_t first = ph->p_vaddr & ~0xfffu;
+        uintptr_t last = (ph->p_vaddr + ph->p_memsz - 1) & ~0xfffu;
+        for (uintptr_t page = first; page <= last; page += 4096)
+            if (!map(ctx, page))
+                return false;
+    }
+    if (!elf_load(image, image_size, USER_BASE, 0x100000u, entry_out))
+        return false;
+    for (size_t i = 0; i < ehdr->e_phnum; i++) {
+        const elf32_phdr_t *ph = &phdrs[i];
+        if (ph->p_type != PT_LOAD || !ph->p_memsz || (ph->p_flags & PF_W))
+            continue;
+        uintptr_t first = ph->p_vaddr & ~0xfffu;
+        uintptr_t last = (ph->p_vaddr + ph->p_memsz - 1) & ~0xfffu;
+        for (uintptr_t page = first; page <= last; page += 4096)
+            protect(ctx, page);
+    }
+    return true;
+}
+#endif

@@ -3,7 +3,9 @@
 #include <tinos/arch.h>
 #include <tinos/io.h>
 #include <tinos/kernel.h>
+#include <tinos/process.h>
 #include <tinos/string.h>
+#include <tinos/syscall.h>
 #include <tinos/thread.h>
 
 #define IDT_ENTRIES 256
@@ -43,6 +45,7 @@ extern void irq6(void);  extern void irq7(void);  extern void irq8(void);
 extern void irq9(void);  extern void irq10(void); extern void irq11(void);
 extern void irq12(void); extern void irq13(void); extern void irq14(void);
 extern void irq15(void);
+extern void isr128(void);
 
 static void *const exception_stubs[32] = {
     isr0,  isr1,  isr2,  isr3,  isr4,  isr5,  isr6,  isr7,
@@ -94,6 +97,7 @@ void idt_init(void)
         idt_set(i, exception_stubs[i], 0x8E); /* present, ring0, 32-bit gate */
     for (int i = 0; i < 16; i++)
         idt_set(32 + i, irq_stubs[i], 0x8E);
+    idt_set(128, isr128, 0xEE); /* interrupt gate accessible from ring 3 */
 
     idt_ptr.limit = (uint16_t)(sizeof(idt) - 1);
     idt_ptr.base  = (uint32_t)(uintptr_t)&idt;
@@ -131,6 +135,8 @@ void irq_uninstall(int irq)
 regs_t *isr_dispatch(regs_t *regs)
 {
     if (regs->int_no < 32) {
+        if ((regs->cs & 3) == 3 && process_active())
+            process_abort((int)regs->int_no);
         const char *name = exception_names[regs->int_no];
         uint32_t    cr2  = 0;
         if (regs->int_no == 14)
@@ -144,6 +150,10 @@ regs_t *isr_dispatch(regs_t *regs)
               regs->int_no, name, regs->err_code, regs->eip, regs->cs,
               regs->eflags, cr2, regs->eax, regs->ebx, regs->ecx, regs->edx,
               regs->esi, regs->edi, regs->ebp, (uint32_t)(uintptr_t)regs);
+    }
+    if (regs->int_no == 128) {
+        syscall_dispatch(regs);
+        return regs;
     }
 
     int irq = (int)regs->int_no - 32;

@@ -173,10 +173,6 @@ graphics; this is not yet a claim of support for arbitrary PCs.
 - [ ] Add a `LICENSE` file at the repository root.
 - [ ] Add CI: `make test`, `make check`, `make verify-reproducible`.
 - [ ] `README.md` contradicts the code:
-  - "Known limitations" says there is no SMP and no sound; both exist.
-  - "Cooperative, single-threaded. There are no processes or threads"
-    contradicts the following section on kernel threads and SMP.
-  - `boot/linker.ld` header comment says "No paging is used".
   - "all five applications"; nine exist.
   - References `REPORT.md`, which is git-ignored.
 - [ ] Split `README.md` (40 KB) into `docs/`: build, shell reference,
@@ -525,26 +521,56 @@ Testing:
 
 ### Ring 3 and processes
 
-- [ ] GDT: ring-3 code and data segments, one TSS per CPU with a kernel stack
-      pointer for privilege transitions.
+- [x] Add i386 ring-3 code/data segments and a BSP TSS with a kernel stack.
+- [ ] Add one TSS per CPU before allowing APs to execute user processes.
+- [x] `run <ELF32 file>` allocates a separate page directory with supervisor
+      kernel mappings, 4 KiB user pages and a user stack; it validates the ELF,
+      enters ring 3 and frees the address space on return. Initial programs
+      live in `userland/bin/`; the nine native desktop apps still run in ring 0.
+- [ ] Run processes asynchronously from the scheduler. `run` currently blocks
+      the caller, supports only one process on the BSP and has no time slice,
+      PID, user arguments, parent or file descriptors. A CPU-bound program
+      can stall the caller indefinitely; the kernel remains reachable via
+      interrupts but cannot recover the shell without a user fault/exit.
+- [ ] Route process standard streams through terminal/TTY file descriptors
+      so `run` works from the graphical terminal too. It currently runs only
+      from the VGA text console; the desktop event loop cannot redraw while
+      `run` blocks.
 - [ ] Process object in `kernel/proc/`: address space, threads, file
       descriptor table, working directory, parent, exit status.
 - [ ] `exec`: load an ELF into a fresh address space with a user stack,
       arguments and environment, extending `kernel/proc/elf.c`.
 - [ ] Process creation (`spawn` or `fork`+`exec`) **(decision)**, `exit`,
       `wait`.
-- [ ] User pointer validation and copy-in/copy-out helpers; fault recovery
-      when a user pointer is bad.
-- [ ] A fault in ring 3 terminates the process instead of calling `panic()`.
-- [ ] Per-process FPU/SSE state (already saved per thread; verify for ring 3).
+- [x] Validate mapped user pages in console `read`/`write` and reject bad
+      pointers without a kernel fault.
+- [ ] General copy-in/copy-out helpers with fault recovery for future VFS,
+      IPC and ioctl syscalls.
+- [x] A fault in ring 3 terminates the process instead of calling `panic()`.
+- [x] Raise #NM instead of exposing the kernel's FPU/SSE registers to ring 3;
+      restore the kernel's FPU availability after process exit.
+- [ ] Add per-process FPU/SSE state so userspace can use floating point
+      without sharing the kernel's state.
+- [ ] Prevent a process's user mapping at 1 GiB from masking physical
+      identity-mapped kernel RAM on machines with more than 1 GiB, by
+      separating kernel virtual mappings from physical addresses.
+- [x] Reject overlapping/W+X segments and protect executable pages
+      read-only after loading. A userspace write to text now faults.
+- [ ] Add an NX-capable backend where supported; page tables without PAE
+      cannot mark writable stack/data pages non-executable.
+- [ ] Reserve a low-memory base userspace program separately from the native
+      app archive: on 4 MiB the loader intentionally omits the entire initrd.
 - [ ] Signals or an equivalent asynchronous notification mechanism **(decision)**.
 
 ### Syscall interface
 
-- [ ] Syscall entry (`int` gate first, `sysenter`/`syscall` later) in
-      `kernel/syscall/`.
-- [ ] `kernel/include/uapi/tinos/`: syscall numbers, error codes, and every
-      struct that crosses the boundary. Userspace may include only this tree.
+- [x] `int 0x80` ring-3 syscall gate, with `exit`, blocking console `read`
+      and console `write` implemented in `kernel/syscall/`.
+- [ ] Add a fast syscall entry if useful after the ABI stabilizes.
+- [x] Place the current syscall numbers under `kernel/include/uapi/tinos/`;
+      the sample userspace binaries include only this public header.
+- [ ] Define public error codes and versioned structs before adding
+      filesystem or graphical APIs; no internal kernel headers in userspace.
 - [ ] No kernel pointers across the boundary. Today's ABI exposes
       `fs_node_t *`, `window_t *`, `kernel_thread_t *`, `shell_t *`,
       `audio_decoder_t *`; replace with integer handles / file descriptors.

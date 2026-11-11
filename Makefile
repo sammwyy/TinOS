@@ -68,7 +68,7 @@ LIBGCC  := $(shell $(CC) -m32 -print-libgcc-file-name)
 # and loaded from the ramfs at boot instead of linked into the kernel
 # image (see the "native apps" target below).
 SRCS_C := $(sort kernel/main.c \
-                  $(shell find kernel/core kernel/sched kernel/proc \
+                  $(shell find kernel/core kernel/sched kernel/proc kernel/syscall \
                           kernel/fs kernel/gfx kernel/lib kernel/mm \
                           kernel/net kernel/sh kernel/tty tests/kernel \
                           desktop libraries -name '*.c') \
@@ -177,11 +177,23 @@ RAMFS        := $(BUILD)/ramfs.tar
 native-apps:
 	$(MAKE) -C apps BUILD=$(abspath $(NATIVE_BUILD))
 
+.PHONY: userland-apps
+userland-apps:
+	$(MAKE) -C userland/bin
+
 # --mtime/--owner/--group/--sort keep the archive's bytes independent of
 # build-machine clock and user IDs, matching the ISO's own reproducibility
 # guarantees below.
-$(RAMFS): native-apps
+$(RAMFS): native-apps userland-apps
 	@mkdir -p $(dir $@)
+	@cp $(BUILD)/userland/hello.elf $(NATIVE_BUILD)/hello.elf
+	@cp $(BUILD)/userland/fault.elf $(NATIVE_BUILD)/fault.elf
+	@cp $(BUILD)/userland/badptr.elf $(NATIVE_BUILD)/badptr.elf
+	@cp $(BUILD)/userland/echo.elf $(NATIVE_BUILD)/echo.elf
+	@cp $(BUILD)/userland/fpu.elf $(NATIVE_BUILD)/fpu.elf
+	@cp $(BUILD)/userland/io.elf $(NATIVE_BUILD)/io.elf
+	@cp $(BUILD)/userland/df.elf $(NATIVE_BUILD)/df.elf
+	@cp $(BUILD)/userland/textwrite.elf $(NATIVE_BUILD)/textwrite.elf
 	@cd $(NATIVE_BUILD) && tar --format=ustar --sort=name --mtime=@0 \
 		--owner=0 --group=0 --numeric-owner -cf $(abspath $@) \
 		$$(ls | grep -v '^obj$$')
@@ -238,6 +250,7 @@ check: test $(ISO)
 	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 16 --vga cirrus --boot-default --no-desktop --retry-desktop
 	python3 tests/qemu/low_memory_gui_test.py --iso $(ISO)
 	python3 tests/qemu/bootloader_test.py --iso $(ISO)
+	python3 tests/qemu/user_process_test.py --iso $(ISO)
 
 # Build the kernel and ISO twice from a clean tree and compare the results.
 verify-reproducible:

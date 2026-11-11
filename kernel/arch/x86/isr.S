@@ -71,6 +71,7 @@ irq\num:
     ISR_NOERR 29
     ISR_ERR   30    /* security exception        */
     ISR_NOERR 31
+    ISR_NOERR 128   /* userspace syscall */
 
     IRQ 0,  32
     IRQ 1,  33
@@ -100,6 +101,7 @@ isr_common:
     pusha                       /* eax ecx edx ebx esp ebp esi edi */
     movl    %ds, %eax
     pushl   %eax                /* saved data segment */
+    cld                         /* user code may set DF before a trap */
 
     movw    $0x10, %ax          /* kernel data segment */
     movw    %ax, %ds

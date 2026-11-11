@@ -16,22 +16,23 @@ code.
 
 ### 1.1 Summary
 
-TinOS today is a single-address-space, ring-0 system. The kernel, the shell,
-the window manager, the codecs and every application share one identity-mapped
-address space with no privilege separation.
+The kernel, text shell, desktop, codecs and nine native desktop apps still
+share one ring-0 address space. Separately linked programs under
+`userland/bin/` can run in ring 3 through `run <path>`; they execute one at a
+time while their caller waits and have only console I/O syscalls.
 
 | Property            | Today                                                        |
 |---------------------|--------------------------------------------------------------|
 | CPU target          | i386 (`-m32`), protected mode                                |
 | Boot                | TinOS El Torito loader, BIOS only, VGA text console at handoff |
-| Privilege           | Everything in ring 0; flat GDT, no TSS, no ring 3            |
-| Paging              | Identity map of the full 4 GiB with 4 MiB PSE pages          |
-| Memory isolation    | None                                                         |
-| Processes           | None                                                         |
+| Privilege           | Kernel/desktop/native apps ring 0; `run` programs ring 3     |
+| Paging              | Supervisor identity map (PSE); 4 KiB user pages per process  |
+| Memory isolation    | Ring-3 programs cannot access the kernel or each other       |
+| Processes           | One synchronous process on the boot processor at a time      |
 | Threads             | Kernel threads, `THREAD_MAX` = 32, 16 KiB stacks             |
 | SMP                 | APs brought up via ACPI MADT + LAPIC INIT/SIPI               |
 | Interrupts          | 8259 PIC, PIT timer                                          |
-| Syscalls            | None; apps receive a table of kernel function pointers       |
+| Syscalls            | `int 0x80`: read console, write console, exit (native apps use pointers) |
 | Filesystem          | In-memory node tree; FAT16/FAT32 imported read-only          |
 | Network             | Polling Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS in the kernel |
 | Graphics            | Bochs/QEMU DISPI only, software framebuffer in the kernel    |
@@ -52,7 +53,8 @@ TinOS BIOS loader (boot/x86/loader.asm, El Torito boot image)
        PS/2 keyboard + mouse, ATA PIO, tmpfs root, FAT mounts
        load_native_apps(): untar ramfs into /apps, ELF-load and call each app_main()
        PCI scan, driver binding (e1000, virtio-blk, AC'97), UHCI, network + DHCP
-       if tinos.mode=text: tty_run() on VGA; desktop command resumes kmain
+       if tinos.mode=text: tty_run() on VGA; run executes ELF32 in ring 3
+       desktop command resumes kmain
        try gfx_init(1024x768, 800x600, 640x480)
        if no supported mode or not enough RAM: tty_run() on VGA
        otherwise: VGA text disabled; desktop_run() <- never returns
@@ -61,6 +63,12 @@ TinOS BIOS loader (boot/x86/loader.asm, El Torito boot image)
 The text console runs the existing in-kernel shell without the graphics
 device. `desktop` leaves the console and enters the desktop; it cannot
 return to the console. Neither shell nor desktop is a userspace process yet.
+From the VGA text console, `run` loads a validated ELF32 into a fresh
+address space and blocks until exit; its mapped user memory is freed afterward.
+User faults return a
+nonzero status without halting the kernel. A BSP TSS supplies the privilege
+transition stack; `int 0x80` validates mapped user buffers for console I/O.
+Floating-point instructions trap until per-process FPU state exists.
 
 ### 1.3 Kernel subsystems
 
@@ -69,7 +77,8 @@ return to the console. Neither shell nor desktop is a userspace process yet.
 | Arch        | `kernel/arch/x86/`                    | boot stub, GDT, IDT, ISR stubs, PIC, PIT, RTC, CPUID, paging, PMM, ACPI, LAPIC, SMP trampoline, context switch |
 | Core        | `kernel/core/`                        | spinlocks, async state machines, timers, event bus, driver model, logging, panic, app ABI table |
 | Scheduling  | `kernel/sched/`                       | kernel threads, mutexes/events |
-| Loader      | `kernel/proc/`                        | ELF loader |
+| Loader      | `kernel/proc/`                        | native and ring-3 ELF loaders, synchronous process lifecycle |
+| Syscalls    | `kernel/syscall/`, `kernel/include/uapi/tinos/` | `int 0x80` ABI, user pointer validation |
 | Memory      | `kernel/mm/`                          | first-fit coalescing heap, DMA buffers |
 | Drivers     | `kernel/drivers/<class>/`             | serial, VGA text, PCI, DISPI, PS/2 keyboard/mouse, ATA PIO, virtio-blk, e1000, UHCI, USB mass storage, AC'97, PC speaker |
 | Filesystem  | `kernel/fs/`                          | ramfs node tree, path helpers, block layer, MBR, FAT16, FAT32, ustar reader, async whole-file reads |

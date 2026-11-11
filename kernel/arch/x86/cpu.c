@@ -79,6 +79,19 @@ bool arch_fpu_init(void)
     return true;
 }
 
+void arch_user_fpu_disable(void)
+{
+    uint32_t cr0;
+    __asm__ volatile("movl %%cr0, %0" : "=r"(cr0));
+    cr0 |= 1u << 3; /* TS: user FPU instructions raise #NM. */
+    __asm__ volatile("movl %0, %%cr0" : : "r"(cr0) : "memory");
+}
+
+void arch_user_fpu_enable(void)
+{
+    __asm__ volatile("clts" : : : "memory");
+}
+
 NORETURN void arch_halt(void)
 {
     for (;;)

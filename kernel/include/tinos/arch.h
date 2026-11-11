@@ -16,9 +16,12 @@ typedef struct {
 /* Global descriptor table */
 #define GDT_KERNEL_CODE 0x08
 #define GDT_KERNEL_DATA 0x10
+#define GDT_USER_CODE   0x1B
+#define GDT_USER_DATA   0x23
 
 void gdt_init(void);
 const void *gdt_pointer(void); /* the 6-byte GDTR image, for AP bring-up */
+void gdt_set_kernel_stack(uintptr_t top);
 
 /* Interrupt descriptor table */
 typedef void (*irq_handler_t)(regs_t *regs);
@@ -61,6 +64,9 @@ void cpu_vendor_string(char *out, size_t size);
  * resets the FPU to a safe default state. Returns false if the CPU lacks
  * FXSR/SSE2, in which case no SSE-compiled code may ever run. */
 bool arch_fpu_init(void);
+/* Until user FPU state has separate storage, trap user x87/SSE instructions. */
+void arch_user_fpu_disable(void);
+void arch_user_fpu_enable(void);
 
 /* Reboot / power off */
 NORETURN void arch_reboot(void);

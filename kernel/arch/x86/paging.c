@@ -13,10 +13,14 @@
 
 #include <tinos/kernel.h>
 #include <tinos/mm.h>
+#include <tinos/string.h>
+#include <tinos/user_vm.h>
 
 #define PDE_PRESENT   (1u << 0)
 #define PDE_WRITABLE  (1u << 1)
+#define PDE_USER      (1u << 2)
 #define PDE_PAGE_SIZE (1u << 7) /* PS: this entry maps a 4 MiB page directly */
+#define USER_PDE_INDEX (USER_BASE >> 22)
 
 /* Must be page (4 KiB) aligned - this address is loaded straight into CR3. */
 static uint32_t page_directory[1024] __attribute__((aligned(4096)));
@@ -45,4 +49,69 @@ void paging_init(void)
         page_directory[i] = (i << 22) | PDE_PRESENT | PDE_WRITABLE |
                             PDE_PAGE_SIZE;
     paging_activate();
+}
+
+bool user_space_init(user_space_t *space)
+{
+    space->directory = pmm_alloc_frame();
+    if (!space->directory)
+        return false;
+    space->table = pmm_alloc_frame();
+    if (!space->table) {
+        pmm_free_frame(space->directory);
+        space->directory = NULL;
+        return false;
+    }
+    memcpy(space->directory, page_directory, PAGE_SIZE);
+    memset(space->table, 0, PAGE_SIZE);
+    space->directory[USER_PDE_INDEX] = (uint32_t)(uintptr_t)space->table |
+                                      PDE_PRESENT | PDE_WRITABLE | PDE_USER;
+    return true;
+}
+
+bool user_space_map(user_space_t *space, uintptr_t address)
+{
+    if (address < USER_BASE || address >= USER_REGION_END ||
+        (address & (PAGE_SIZE - 1)))
+        return false;
+    size_t index = (address - USER_BASE) / PAGE_SIZE;
+    if (space->table[index] & PDE_PRESENT)
+        return false;
+    void *frame = pmm_alloc_frame();
+    if (!frame)
+        return false;
+    memset(frame, 0, PAGE_SIZE);
+    space->table[index] = (uint32_t)(uintptr_t)frame |
+                          PDE_PRESENT | PDE_WRITABLE | PDE_USER;
+    return true;
+}
+
+void user_space_readonly(user_space_t *space, uintptr_t address)
+{
+    size_t index = (address - USER_BASE) / PAGE_SIZE;
+    space->table[index] &= ~PDE_WRITABLE;
+    __asm__ volatile("invlpg (%0)" : : "r"(address) : "memory");
+}
+
+void user_space_activate(const user_space_t *space)
+{
+    __asm__ volatile("movl %0, %%cr3" : : "r"(space->directory) : "memory");
+}
+
+void user_space_kernel(void)
+{
+    __asm__ volatile("movl %0, %%cr3" : : "r"(page_directory) : "memory");
+}
+
+void user_space_destroy(user_space_t *space)
+{
+    if (!space->directory)
+        return;
+    for (size_t i = 0; i < 1024; i++)
+        if (space->table[i] & PDE_PRESENT)
+            pmm_free_frame((void *)(uintptr_t)(space->table[i] & ~0xFFFu));
+    pmm_free_frame(space->table);
+    pmm_free_frame(space->directory);
+    space->directory = NULL;
+    space->table = NULL;
 }

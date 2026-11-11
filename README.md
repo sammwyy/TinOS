@@ -3,12 +3,13 @@
 A small graphical operating system for QEMU, written from scratch: its own
 32-bit kernel, VGA graphics driver, window manager, in-memory filesystem and
 shell. It boots through its own BIOS El Torito loader, prints a text-mode
-start-up log, selects a supported framebuffer resolution, and hands over to a desktop
-with a taskbar, a start menu, a terminal, a file explorer and a text editor.
+start-up log, selects a supported framebuffer resolution, and hands over to a
+desktop with a taskbar, a start menu, a terminal, a file explorer and an editor.
 
 It is not based on Linux and contains no Linux userspace: the bootloader
 uses BIOS services for disk and memory discovery, then enters the kernel,
 whose code is from this repository (plus libgcc's arithmetic helpers).
+TinOS also has a small, independently linked ELF32 userspace.
 
 ```
    +-----------------------------------------------------------+
@@ -42,6 +43,16 @@ Press Down twice and Enter in the boot menu to keep the VGA console and run
 the interactive shell. Type `desktop` to enter the graphical session. The text
 console currently runs in the kernel address space; the desktop is not yet a
 separate process and cannot return to the console after it starts.
+
+From the VGA text console, the `run` shell command starts a separate
+ring-3 ELF32 executable. For example, `run /apps/hello.elf` prints a
+message and exits, and
+`run /apps/echo.elf` reads one line from the keyboard and writes it to the
+console. These programs use `int 0x80` (`read`, `write`, `exit`); they cannot
+access kernel memory. `run /apps/fault.elf` demonstrates that a user page
+fault terminates only that program. Processes currently run one at a time
+while the shell waits; the desktop and nine existing native apps remain
+kernel-linked/ring 0.
 
 With 16 MiB of QEMU RAM the text console and graphical desktop load the
 bundled apps. An 8 MiB graphical boot runs at 640x480 with the app archive.
@@ -499,17 +510,12 @@ out.
 
 ### Decisions worth knowing
 
-**i386, protected mode, identity-mapped paging.** The kernel runs in ring 0
-with a flat GDT and `kernel/arch/x86/paging.c` maps every virtual address to the
-identical physical address (one page directory of 4 MiB pages, `CR4.PSE`,
-covering the full 4 GiB space - no page tables to allocate, no address that
-could end up unmapped by mistake). Physical and virtual addresses are
-therefore still the same number everywhere else in the kernel: the
-framebuffer, the heap and the DMA-free device model stay exactly as simple
-as they were with paging off. Paging exists at all only because SMP needs
-it (see below) - it buys no memory isolation yet, so a wild pointer write
-still does not fault, which is why `crash gpf` uses an invalid segment
-selector rather than a bad address.
+**i386, protected mode, separate user mappings.** The kernel uses
+supervisor-only 4 MiB identity-mapped pages (`CR4.PSE`); its physical and
+virtual addresses are equal. A `run` process gets its own page directory,
+with 4 KiB user pages at `0x40000000` for its ELF and a separate stack. It
+cannot access the kernel or another process's pages. Kernel-linked apps
+still share the kernel address space with no isolation.
 
 **Text mode first, then our own mode switch.** The BIOS loader leaves the
 machine in VGA text mode, and the kernel switches to graphics on its own by
@@ -534,16 +540,11 @@ rather than three megabytes.
 fall out naturally - and it is why the whole shell and filesystem can be
 compiled natively and unit-tested on the host.
 
-**Cooperative, single-threaded.** There are no processes or threads: the
-desktop event loop drains the input queues, ticks the applications, redraws
-what is dirty and then `hlt`s until the next interrupt. Interrupt handlers
-only enqueue events. Applications are C structs with a vtable
-(`app_class_t`), not separate address spaces. Nothing shipped needs more
-than this - there is no user-defined iteration for a command to hang in, and
-no callback in `apps/` runs longer than a screen redraw - but it is
-worth being explicit that a genuinely misbehaving callback (an infinite
-loop, a slow computation) would stall the whole desktop, since one C
-function call is the entire scheduling unit.
+**The desktop and text shell remain kernel services.** Their event loops
+poll the kernel's workers and preemptible threads. The new ring-3 programs
+run synchronously: the caller waits for an `exit` or a user-mode exception.
+A CPU-bound userspace program can still stall the session; a process
+scheduler, waitable handles and services in userspace remain future work.
 
 **Asynchronous workers and kernel threads.** `kernel/core/async.c` provides a
 stackless state-machine API for short operations, while `kernel/sched/thread.c`
@@ -648,8 +649,8 @@ the shared registry by name instead, since it cannot call that other
 app's ELF by symbol either. This still runs in ring 0 with no memory
 protection - a crashing app can corrupt the kernel exactly like anything
 else in it - so it buys build-time and load-time separation, not
-isolation; that would need real user-mode processes, a much larger
-project than this.
+isolation. The separate programs in `userland/bin/` use the new ring-3
+loader, but these nine desktop applications have not been migrated.
 
 Preemption is deliberately still a separate step: the PIT must save and
 restore a thread context instead of only marking events pending, and the
@@ -720,13 +721,15 @@ make check     # the above plus the scripted QEMU boot/GUI session
   they only render if a file already contains them.
 * The filesystem is session-oriented: imported FAT volumes are read-only and
   the writable base tree is not persisted back to disk.
-* There are no user accounts, permissions, userspace processes, SMP, sound,
+* There are no user accounts or permissions, concurrent userspace processes,
   NTFS support, or USB host controllers beyond the current UHCI path.
+  The small ring-3 syscall ABI has only console I/O and exit, not VFS or
+  graphical APIs. Ring-3 floating-point instructions currently trap; an
+  independent FPU context is still pending.
 * The RTC is read directly, so the taskbar clock follows the host clock via
   `-rtc base=localtime`; without that flag QEMU reports UTC.
 * Only the Bochs/QEMU DISPI graphics interface is supported. On hardware or
-  a VM without it the kernel stops with a diagnostic panic instead of
-  guessing.
+  a VM without it the kernel keeps the VGA text console.
 
 ## What is original and what is reused
 

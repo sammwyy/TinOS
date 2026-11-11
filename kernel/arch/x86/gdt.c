@@ -23,8 +23,18 @@ typedef struct PACKED {
     uint32_t base;
 } gdt_ptr_t;
 
-static gdt_entry_t gdt[3];
+typedef struct PACKED {
+    uint32_t previous, esp0, ss0, esp1, ss1, esp2, ss2;
+    uint32_t cr3, eip, eflags, eax, ecx, edx, ebx;
+    uint32_t esp, ebp, esi, edi, es, cs, ss, ds, fs, gs;
+    uint32_t ldt, trap_iomap;
+} tss_t;
+
+static gdt_entry_t gdt[6];
 static gdt_ptr_t   gdt_ptr;
+static tss_t       bsp_tss;
+
+_Static_assert(sizeof(tss_t) == 104, "i386 TSS size");
 
 static void gdt_set(int index, uint32_t base, uint32_t limit, uint8_t access,
                     uint8_t flags)
@@ -41,12 +51,16 @@ void gdt_init(void)
 {
     memset(gdt, 0, sizeof(gdt));
 
-    /* 0x00 null, 0x08 ring-0 code (RX), 0x10 ring-0 data (RW).
-     * access: present | ring0 | code-or-data | exec | rw
-     * flags : granularity 4 KiB | 32-bit */
     gdt_set(0, 0, 0, 0, 0);
     gdt_set(1, 0, 0x000FFFFF, 0x9A, 0xC0);
     gdt_set(2, 0, 0x000FFFFF, 0x92, 0xC0);
+    gdt_set(3, 0, 0x000FFFFF, 0xFA, 0xC0);
+    gdt_set(4, 0, 0x000FFFFF, 0xF2, 0xC0);
+    memset(&bsp_tss, 0, sizeof(bsp_tss));
+    bsp_tss.ss0 = GDT_KERNEL_DATA;
+    bsp_tss.trap_iomap = sizeof(bsp_tss) << 16;
+    gdt_set(5, (uint32_t)(uintptr_t)&bsp_tss, sizeof(bsp_tss) - 1,
+            0x89, 0);
 
     gdt_ptr.limit = (uint16_t)(sizeof(gdt) - 1);
     gdt_ptr.base  = (uint32_t)(uintptr_t)&gdt;
@@ -63,6 +77,12 @@ void gdt_init(void)
                      :
                      : "m"(gdt_ptr), "i"(GDT_KERNEL_DATA), "i"(GDT_KERNEL_CODE)
                      : "eax", "memory");
+    __asm__ volatile("ltr %%ax" : : "a"(0x28) : "memory");
+}
+
+void gdt_set_kernel_stack(uintptr_t top)
+{
+    bsp_tss.esp0 = (uint32_t)top;
 }
 
 /* The flat model is identical for every core, so an SMP application

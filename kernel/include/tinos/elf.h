@@ -22,4 +22,11 @@ bool elf_load(const void *image, size_t image_size, uintptr_t region_base,
 bool elf_entry_address(const void *image, size_t image_size,
                        uintptr_t *address_out);
 
+/* Validates an unprivileged ELF and allocates its loadable pages through map.
+ * The caller activates the destination address space before the load. */
+bool elf_user_load(const void *image, size_t image_size,
+                   bool (*map)(void *ctx, uintptr_t page), void *ctx,
+                   void (*protect)(void *ctx, uintptr_t page),
+                   void **entry_out);
+
 #endif /* TINOS_ELF_H */
