@@ -44,15 +44,15 @@ ELFS     := $(foreach a,$(APPS),$(BUILD)/$(a)/$(a).elf)
 # kernel/include/tinos/native_app.h reserves (NATIVE_APP_BASE upward);
 # --defsym feeds the chosen address into link.ld's NATIVE_APP_LOAD_ADDR.
 # A new app just needs a new line here, at the next free 0x00020000 step.
-NATIVE_APP_SLOT_calculator    := 0x00800000
-NATIVE_APP_SLOT_control_panel := 0x00820000
-NATIVE_APP_SLOT_editor        := 0x00840000
-NATIVE_APP_SLOT_explorer      := 0x00860000
-NATIVE_APP_SLOT_image_viewer  := 0x00880000
-NATIVE_APP_SLOT_media_player  := 0x008a0000
-NATIVE_APP_SLOT_terminal      := 0x008c0000
-NATIVE_APP_SLOT_about         := 0x008e0000
-NATIVE_APP_SLOT_sysinfo       := 0x00900000
+NATIVE_APP_SLOT_calculator    := 0x00600000
+NATIVE_APP_SLOT_control_panel := 0x00620000
+NATIVE_APP_SLOT_editor        := 0x00640000
+NATIVE_APP_SLOT_explorer      := 0x00660000
+NATIVE_APP_SLOT_image_viewer  := 0x00680000
+NATIVE_APP_SLOT_media_player  := 0x006a0000
+NATIVE_APP_SLOT_terminal      := 0x006c0000
+NATIVE_APP_SLOT_about         := 0x006e0000
+NATIVE_APP_SLOT_sysinfo       := 0x00700000
 
 .PHONY: all clean
 all: $(ELFS)

@@ -54,7 +54,8 @@ def char_to_keys(ch):
 
 
 class Tinos:
-    def __init__(self, iso, mem=256, qmp_port=4455, serial=None, verbose=True):
+    def __init__(self, iso, mem=256, qmp_port=4455, serial=None, verbose=True,
+                 vga="std"):
         self.iso = iso
         self.mem = mem
         self.qmp_port = qmp_port
@@ -65,6 +66,7 @@ class Tinos:
         self.file = None
         self.verbose = verbose
         self.cursor = None
+        self.vga = vga
 
     # -- lifecycle ---------------------------------------------------------
     def start(self):
@@ -72,7 +74,7 @@ class Tinos:
             "qemu-system-i386",
             "-cdrom", self.iso,
             "-m", str(self.mem),
-            "-vga", "std",
+            "-vga", self.vga,
             "-machine", "pc,pcspk-audiodev=tinos-audio",
             "-audiodev", "driver=none,id=tinos-audio",
             "-device", "AC97,audiodev=tinos-audio",

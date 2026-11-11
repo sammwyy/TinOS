@@ -43,8 +43,16 @@
 #include <tinos/timer.h>
 #include <tinos/tty.h>
 
-#define SCREEN_WIDTH  1024
-#define SCREEN_HEIGHT 768
+typedef struct {
+    int width;
+    int height;
+} screen_mode_t;
+
+static const screen_mode_t screen_modes[] = {
+    { 1024, 768 },
+    { 800, 600 },
+    { 640, 480 },
+};
 
 /* How long the text-mode stage stays on screen before the desktop starts. */
 #define BOOT_STEP_DELAY_MS  180
@@ -175,8 +183,11 @@ static const mb_tag_module_t *find_ramfs_module(const mb_info_t *mbi)
 static void reserve_native_app_memory(const mb_info_t *mbi)
 {
     const mb_tag_module_t *mod = find_ramfs_module(mbi);
-    if (mod)
+    if (mod) {
+        klog("[boot] ramfs module 0x%08x..0x%08x\n",
+             mod->mod_start, mod->mod_end);
         pmm_reserve_range(mod->mod_start, mod->mod_end - mod->mod_start);
+    }
     pmm_reserve_range(NATIVE_APP_BASE, NATIVE_APP_ARENA_SIZE);
 }
 
@@ -500,18 +511,33 @@ void kmain(uint32_t magic, uint32_t mbi_addr)
     if (strstr(boot_cmdline, "tinos.mode=text"))
         tty_run();
 
-    /* Graphics */
-    vga_text_set_color(VGA_YELLOW, VGA_BLACK);
-    vga_text_printf("\n  Starting the graphical desktop at %dx%d ...\n",
-                    SCREEN_WIDTH, SCREEN_HEIGHT);
-    vga_text_set_color(VGA_LGRAY, VGA_BLACK);
-    pause_ms(BOOT_HOLD_MS);
+    boot_note("mm: %u KiB free before graphics",
+              (uint32_t)(pmm_free_bytes() / 1024));
 
-    if (!gfx_init(SCREEN_WIDTH, SCREEN_HEIGHT)) {
-        boot_fail("vga: framebuffer init failed");
-        panic("no usable VGA framebuffer.\n"
-              "TinOS needs a Bochs/QEMU DISPI capable adapter.\n"
-              "Try: qemu-system-i386 -vga std -cdrom tinos.iso");
+    /* Graphics is optional: preserve the text console if no adapter or
+     * sufficient contiguous RAM is available for a back buffer. */
+    for (;;) {
+        vga_text_set_color(VGA_YELLOW, VGA_BLACK);
+        vga_text_write("\n  Starting the graphical desktop ...\n");
+        vga_text_set_color(VGA_LGRAY, VGA_BLACK);
+        pause_ms(BOOT_HOLD_MS);
+
+        bool graphics = false;
+        for (size_t i = 0; i < ARRAY_SIZE(screen_modes); i++) {
+            size_t bytes = (size_t)screen_modes[i].width *
+                           (size_t)screen_modes[i].height * 4;
+            if (pmm_free_bytes() < bytes + 1024 * 1024)
+                continue;
+            if (gfx_init(screen_modes[i].width, screen_modes[i].height)) {
+                graphics = true;
+                break;
+            }
+        }
+        if (graphics)
+            break;
+
+        boot_fail("no supported framebuffer mode or insufficient RAM");
+        tty_run();
     }
     vga_text_disable(); /* text console memory is no longer displayed */
     klog("[boot] graphics mode active, entering desktop\n");

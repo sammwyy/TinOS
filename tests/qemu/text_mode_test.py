@@ -11,15 +11,19 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--iso", default="build/tinos.iso")
     parser.add_argument("--mem", type=int, default=256)
+    parser.add_argument("--vga", default="std")
+    parser.add_argument("--boot-default", action="store_true")
     parser.add_argument("--no-desktop", action="store_true")
+    parser.add_argument("--retry-desktop", action="store_true")
     args = parser.parse_args()
 
-    vm = Tinos(args.iso, mem=args.mem, verbose=False)
+    vm = Tinos(args.iso, mem=args.mem, vga=args.vga, verbose=False)
     try:
         vm.start()
-        vm.key("down")
-        vm.key("down")
-        vm.key("ret")
+        if not args.boot_default:
+            vm.key("down")
+            vm.key("down")
+            vm.key("ret")
         assert vm.wait_for_serial("[tty] text console ready", timeout=30), vm.serial()
         assert "graphics mode active" not in vm.serial()
         assert "KERNEL PANIC" not in vm.serial()
@@ -33,6 +37,15 @@ def main():
         if not args.no_desktop:
             vm.line("desktop")
             assert vm.wait_for_serial("desktop starting", timeout=30), vm.serial()
+        if args.retry_desktop:
+            vm.line("desktop")
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                if vm.serial().count("[tty] text console ready") >= 2:
+                    break
+                time.sleep(0.25)
+            assert vm.serial().count("[tty] text console ready") >= 2, vm.serial()
+            assert "desktop starting" not in vm.serial()
         assert "KERNEL PANIC" not in vm.serial()
         print("%d MiB text boot and shell%s: OK" % (
             args.mem, "" if args.no_desktop else " to desktop"))

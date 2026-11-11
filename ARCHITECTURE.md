@@ -51,8 +51,9 @@ GRUB2 (multiboot2 /boot/tinos.elf + module2 /boot/ramfs.tar)
        load_native_apps(): untar ramfs into /apps, ELF-load and call each app_main()
        PCI scan, driver binding (e1000, virtio-blk, AC'97), UHCI, network + DHCP
        if tinos.mode=text: tty_run() on VGA; desktop command resumes kmain
-       gfx_init(1024x768), VGA text disabled
-       desktop_run()   <- never returns
+       try gfx_init(1024x768, 800x600, 640x480)
+       if no supported mode or not enough RAM: tty_run() on VGA
+       otherwise: VGA text disabled; desktop_run() <- never returns
 ```
 
 The text console runs the existing in-kernel shell without the graphics
@@ -98,7 +99,7 @@ first.
 - `libraries/image` and `libraries/audio` (stb_image, simplewebp, stb_vorbis
   wrappers) are also linked into the kernel, with per-directory SSE2 flags.
 - `apps/<name>/` each build to a separate `ET_EXEC` ELF32 linked at a fixed
-  128 KiB slot starting at `0x00800000` (`apps/Makefile`,
+  128 KiB slot starting at `0x00600000` (`apps/Makefile`,
   `kernel/include/tinos/native_app.h`), at most 12 slots.
 - The apps are packed into `ramfs.tar`, unpacked into `/apps` at boot, copied
   to their link address by `kernel/proc/elf.c`, and their `app_main()` is

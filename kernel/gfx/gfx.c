@@ -50,20 +50,24 @@ bool gfx_init(int width, int height)
 
     if (!vbe_probe(&mode))
         return false;
-    if (!vbe_set_mode((uint16_t)width, (uint16_t)height, 32))
-        return false;
 
+    size_t bytes = (size_t)width * (size_t)height * 4;
+    uint32_t *back = kmalloc(bytes);
+    if (!back) {
+        klog("[gfx ] out of memory for the %dx%d back buffer\n", width, height);
+        return false;
+    }
+    if (!vbe_set_mode((uint16_t)width, (uint16_t)height, 32)) {
+        vbe_disable();
+        kfree(back);
+        return false;
+    }
     fb.phys   = mode.lfb_phys;
     fb.width  = width;
     fb.height = height;
     fb.bpp    = 32;
     fb.pitch  = width * 4;
-    fb.back   = kmalloc((size_t)width * (size_t)height * 4);
-    if (!fb.back) {
-        klog("[gfx ] out of memory for the %dx%d back buffer\n", width, height);
-        vbe_disable();
-        return false;
-    }
+    fb.back   = back;
     fb.active = true;
 
     gfx_clip_reset();

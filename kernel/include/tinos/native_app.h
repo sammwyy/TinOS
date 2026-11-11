@@ -12,7 +12,7 @@
 
 #include <tinos/types.h>
 
-#define NATIVE_APP_BASE       0x00800000u /* 8 MiB */
+#define NATIVE_APP_BASE       0x00600000u /* 6 MiB */
 #define NATIVE_APP_SLOT_SIZE  0x00020000u /* 128 KiB per app */
 #define NATIVE_APP_MAX_COUNT  12u /* 9 in use, 3 free slots */
 #define NATIVE_APP_ARENA_SIZE (NATIVE_APP_SLOT_SIZE * NATIVE_APP_MAX_COUNT)

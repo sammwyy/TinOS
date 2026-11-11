@@ -44,9 +44,12 @@ console currently runs in the kernel address space; the desktop is not yet a
 separate process and cannot return to the console after it starts.
 
 With 16 MiB of QEMU RAM the text console and the graphical desktop load the
-bundled apps. An 8 MiB text boot is also tested, but app slots start at 8 MiB
-and cannot be loaded there. A 4 MiB boot is not supported yet: GRUB2 runs out
-of memory before it transfers control, even without the ramfs module.
+bundled apps. An 8 MiB text boot also works, but GRUB2 may omit the app
+module when memory is tight; graphics falls back to the console when there
+is not enough RAM for a framebuffer. An unsupported video adapter also
+leaves the text console usable. A 4 MiB boot is not supported
+yet: GRUB2 runs out of memory before it transfers control, even without the
+ramfs module.
 
 ## Requirements
 

@@ -104,9 +104,12 @@ graphics; this is not yet a claim of support for arbitrary PCs.
 - [x] Keep app slots inside physical RAM: check each slot against the
       Multiboot2 memory map before writing executable pages, and reject a
       slot overlapping the initrd module.
-- [x] Relink nine bundled apps to 128 KiB slots at 8 MiB (previously 1 MiB
+- [x] Relink nine bundled apps to 128 KiB slots at 6 MiB (previously 1 MiB
       slots starting at 16 MiB); enforce slot size at link time. This is a
       transitional fixed-address scheme pending per-process relocation.
+- [ ] At 8 MiB, GRUB2 sometimes omits the ramfs module, depending on its
+      memory placement. Make the shell usable without bundled apps (already
+      true), then provide a smaller app package or another load path.
 - [x] Grow heap in 256 KiB minimum arenas rather than reserving 4 MiB at
       initialization; allow a 16 MiB machine to boot the full desktop.
 - [ ] 4 MiB: GRUB2 `multiboot2` fails with
@@ -118,16 +121,24 @@ graphics; this is not yet a claim of support for arbitrary PCs.
 - [ ] Decide a minimum usable GUI resolution and memory budget. Current
       desktop back buffer alone needs 3 MiB at 1024x768x32, before any
       window cache or decoded image.
-- [ ] Detect graphics allocation or driver failure and remain in text
-      mode instead of panicking; text mode must work without DISPI.
-- [ ] Choose display mode from reported memory and adapter capabilities,
-      with a tested small-screen layout rather than hard-coded 1024x768.
+- [x] Detect graphics allocation or driver failure and remain in text
+      mode instead of panicking; text mode works without DISPI.
+- [x] Try 1024x768, 800x600, then 640x480 when memory permits, preserving
+      at least 1 MiB of free frames for other work. Buffer allocation happens
+      before changing the video mode.
+- [ ] Choose display modes from adapter capabilities and use a tested
+      small-screen desktop layout, rather than fixed fallback dimensions.
+- [ ] An 8 MiB boot with nine apps has about 616 KiB free before graphics:
+      1024x768 needs 3 MiB just for the back buffer, and 640x480 needs
+      1.2 MiB. Remove duplication of initrd files in ramfs and reduce
+      compositor/window cache consumption before claiming an 8 MiB GUI.
 - [ ] Remove the SSE2 boot requirement or provide a scalar codec build for
       older i386 processors. Test on representative pre-SSE2 hardware.
 - [ ] Ensure FAT/ramfs and the app loader degrade gracefully under OOM;
       track kernel, ramfs, app slots, heap and framebuffer usage separately.
-- [ ] Add emulator acceptance tests for 4, 8 and 16 MiB, including text
-      commands, app launch and a low-memory graphics session.
+- [x] Add QEMU tests for 8 and 16 MiB, and for a non-DISPI VGA adapter.
+- [ ] Add a 4 MiB boot test after replacing the boot path; add low-memory
+      app interaction and desktop layout checks beyond the 16 MiB boot.
 
 ### Build
 
