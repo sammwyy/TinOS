@@ -9,6 +9,60 @@
 
 extern NORETURN void arch_leave_user(int status);
 
+static bool copy_user_path(uintptr_t address, size_t length,
+                           char path[FS_PATH_MAX])
+{
+    if (!length || length >= FS_PATH_MAX ||
+        !process_user_buffer(address, length, false))
+        return false;
+    memcpy(path, (const void *)address, length);
+    for (size_t i = 0; i < length; i++)
+        if (path[i] == '\0')
+            return false;
+    path[length] = '\0';
+    return true;
+}
+
+static int spawn_user_process(const regs_t *frame)
+{
+    if (frame->edx == 0 || frame->edx > 16 ||
+        !process_user_buffer(frame->esi, frame->edx * sizeof(uint32_t),
+                             false))
+        return -1;
+
+    char path[FS_PATH_MAX];
+    if (!copy_user_path(frame->ebx, frame->ecx, path) || path[0] != '/')
+        return -1;
+
+    uint32_t addresses[16];
+    memcpy(addresses, (const void *)(uintptr_t)frame->esi,
+           frame->edx * sizeof(uint32_t));
+    char args[16][256];
+    const char *argv[16];
+    for (size_t i = 0; i < frame->edx; i++) {
+        size_t j = 0;
+        for (; j < sizeof(args[i]); j++) {
+            uintptr_t address = addresses[i] + j;
+            if (address < addresses[i] ||
+                !process_user_buffer(address, 1, false))
+                return -1;
+            args[i][j] = *(const char *)address;
+            if (!args[i][j])
+                break;
+        }
+        if (j == sizeof(args[i]))
+            return -1;
+        argv[i] = args[i];
+    }
+
+    fs_node_t *file;
+    if (fs_resolve(fs_root(), path, &file) != FS_OK ||
+        file->type != FS_FILE || !file->data ||
+        fs_size(file) > 256 * 1024)
+        return -1;
+    return process_spawn(file->data, fs_size(file), frame->edx, argv);
+}
+
 void syscall_dispatch(regs_t *frame)
 {
     if ((frame->cs & 3) != 3 || !process_active()) {
@@ -19,22 +73,30 @@ void syscall_dispatch(regs_t *frame)
     switch (frame->eax) {
     case TINOS_SYS_EXIT:
         arch_leave_user((int)frame->ebx);
+    case TINOS_SYS_GETPID:
+        frame->eax = process_current_pid();
+        return;
+    case TINOS_SYS_SPAWN:
+        frame->eax = (uint32_t)spawn_user_process(frame);
+        return;
+    case TINOS_SYS_WAIT:
+        if (frame->ecx &&
+            !process_user_buffer(frame->ecx, sizeof(int), true)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        frame->eax = (uint32_t)process_wait(frame->ebx, frame->ecx, frame);
+        return;
     case TINOS_SYS_OPEN: {
-        if (frame->edx != 0 || frame->ecx == 0 ||
-            frame->ecx >= FS_PATH_MAX ||
-            !process_user_buffer(frame->ebx, frame->ecx, false)) {
+        if (frame->edx != 0) {
             frame->eax = (uint32_t)-1;
             return;
         }
         char path[FS_PATH_MAX];
-        memcpy(path, (const void *)(uintptr_t)frame->ebx, frame->ecx);
-        for (size_t i = 0; i < frame->ecx; i++) {
-            if (path[i] == '\0') {
-                frame->eax = (uint32_t)-1;
-                return;
-            }
+        if (!copy_user_path(frame->ebx, frame->ecx, path)) {
+            frame->eax = (uint32_t)-1;
+            return;
         }
-        path[frame->ecx] = '\0';
         frame->eax = (uint32_t)process_file_open(path);
         return;
     }

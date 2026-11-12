@@ -22,6 +22,8 @@ share one ring-0 address space. Separately linked programs under
 resident on the boot processor; PIT preemption lets the console run even
 when a user program loops. They have console I/O and read-only access to
 memory-backed files through private integer descriptors.
+User programs can create child processes with `spawn` and wait for their
+exit without blocking the boot processor.
 
 | Property            | Today                                                        |
 |---------------------|--------------------------------------------------------------|
@@ -34,7 +36,7 @@ memory-backed files through private integer descriptors.
 | Threads             | Kernel threads, `THREAD_MAX` = 32, 16 KiB stacks             |
 | SMP                 | APs brought up via ACPI MADT + LAPIC INIT/SIPI               |
 | Interrupts          | 8259 PIC, PIT timer                                          |
-| Syscalls            | `int 0x80`: console I/O, read-only open/read/close, exit      |
+| Syscalls            | `int 0x80`: console I/O, read-only files, getpid/spawn/wait/exit |
 | Filesystem          | In-memory node tree; FAT16/FAT32 imported read-only          |
 | Network             | Polling Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS in the kernel |
 | Graphics            | Bochs/QEMU DISPI only, software framebuffer in the kernel    |
@@ -69,9 +71,12 @@ From the VGA text console, `run` loads a validated ELF32 into a fresh
 address space, copies arguments onto the user stack, assigns a PID and
 returns to the prompt. Each process has a 16 KiB kernel stack for its
 BSP TSS transitions. Its mapped pages and open-file snapshots are freed on
-exit; `jobs` can inspect its status until `reap` collects it or a full table
-reuses an exited slot. User faults
-terminate only the affected process. `int 0x80` validates mapped user
+exit; `jobs` can inspect a root job's status until `reap` collects it or a
+full table reuses an exited slot. Child exit statuses stay available to
+their parent until `wait` collects them. A waiting parent is BLOCKED and
+wakes when the child exits or is killed. Parent exit orphans its children
+to the kernel job table. User faults terminate only the affected process.
+`int 0x80` validates mapped user
 buffers, copies pathnames into the kernel and reads file data through a
 kernel bounce buffer. A keyboard read parks the calling process in BLOCKED
 state and saves its syscall frame. A key wakes the process and completes

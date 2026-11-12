@@ -538,9 +538,12 @@ Testing:
 - [ ] Move scheduling and idle handling out of the TTY/desktop event loops.
       Both currently call `process_schedule()`; user jobs do not yet have a
       kernel-owned run queue, wait queue, or scheduling on an AP.
-- [ ] Add parent-child relationships, blocking `wait`, and userspace
-      `spawn`/`kill` syscalls. The current PID and job control live in the
-      kernel shell only; exited slots are reused if all four are occupied.
+- [x] Add parent-child relationships and `getpid`, `spawn`, `wait` syscalls.
+      Parents wait without blocking the kernel, child statuses are retained
+      until wait, and exiting parents orphan their children to the kernel.
+- [ ] Add userspace `kill`/signal handling and process groups. Job control
+      (`jobs`, `kill`, `reap`) is currently exposed only in the kernel shell;
+      root jobs may be evicted if all four slots are occupied.
 - [ ] Route process standard streams through terminal/TTY file descriptors
       so `run` works from the graphical terminal too. It currently starts
       only from VGA text; jobs that persist into desktop mode write to serial.
@@ -548,13 +551,14 @@ Testing:
       status and 16-slot read-only descriptor tables with independent offsets.
       Mutable ramfs files are copied on open so unlinking a file cannot
       leave a process descriptor pointing to freed memory.
-- [ ] Expand process state with threads, working directory and parent.
+- [ ] Expand process state with threads and working directory.
 - [x] `exec` loads an ELF into a fresh address space with a user stack,
       `argc`/`argv` and an entry point; the booting shell owns the initial
       arguments.
 - [ ] Supply an environment, relocatable executables and dynamic linking.
-- [ ] Process creation (`spawn` or `fork`+`exec`) **(decision)**, `exit`,
-      `wait`.
+- [x] Use `spawn` plus `exit` and `wait` as the initial process lifecycle,
+      rather than requiring `fork`/copy-on-write. The current `spawn` accepts
+      only memory-backed ELF32 files from the root filesystem.
 - [x] Validate mapped user pages in console `read`/`write` and reject bad
       pointers without a kernel fault.
 - [x] Copy validated user pathnames into the kernel; transfer file reads
@@ -581,8 +585,8 @@ Testing:
 ### Syscall interface
 
 - [x] `int 0x80` ring-3 syscall gate with `exit`, process-blocking keyboard `read`,
-      console `write`, and read-only `open`/`read`/`close` for memory-backed
-      VFS files.
+      console `write`, read-only `open`/`read`/`close` for memory-backed VFS
+      files, `getpid`, `spawn` and `wait`.
 - [ ] Add a fast syscall entry if useful after the ABI stabilizes.
 - [x] Place the current syscall numbers under `kernel/include/uapi/tinos/`;
       the sample userspace binaries include only this public header.
@@ -614,7 +618,8 @@ Testing:
 - [ ] `fs_node_t` is simultaneously the directory entry, the inode and the
       file contents buffer. Split into vnode operations, a mount table, and
       open-file objects with an offset.
-- [ ] File descriptors and per-process descriptor tables.
+- [ ] Replace the existing per-process read-only snapshot descriptors with
+      general VFS descriptor objects and per-process offset/flags tables.
 - [ ] `fs_read_all_async()` reads whole files into memory; add ranged reads
       and a page/buffer cache.
 - [ ] Writable persistent filesystem. FAT volumes are read-only and the base

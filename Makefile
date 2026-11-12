@@ -198,6 +198,9 @@ $(RAMFS): native-apps userland-apps
 	@cp $(BUILD)/userland/cat.elf $(NATIVE_BUILD)/cat.elf
 	@cp $(BUILD)/userland/fdtest.elf $(NATIVE_BUILD)/fdtest.elf
 	@cp $(BUILD)/userland/spin.elf $(NATIVE_BUILD)/spin.elf
+	@cp $(BUILD)/userland/spawn.elf $(NATIVE_BUILD)/spawn.elf
+	@cp $(BUILD)/userland/spawn_badarg.elf $(NATIVE_BUILD)/spawn_badarg.elf
+	@cp $(BUILD)/userland/multi.elf $(NATIVE_BUILD)/multi.elf
 	@cd $(NATIVE_BUILD) && tar --format=ustar --sort=name --mtime=@0 \
 		--owner=0 --group=0 --numeric-owner -cf $(abspath $@) \
 		$$(ls | grep -v '^obj$$')
@@ -257,6 +260,8 @@ check: test $(ISO)
 	python3 tests/qemu/user_process_test.py --iso $(ISO)
 	python3 tests/qemu/process_preemption_test.py --iso $(ISO)
 	python3 tests/qemu/process_preemption_test.py --iso $(ISO) --mem 8
+	python3 tests/qemu/user_spawn_test.py --iso $(ISO)
+	python3 tests/qemu/user_spawn_test.py --iso $(ISO) --mem 8
 
 # Build the kernel and ISO twice from a clean tree and compare the results.
 verify-reproducible:

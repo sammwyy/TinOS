@@ -35,6 +35,12 @@ typedef struct {
     void *kernel_stack;
     uintptr_t entry, user_sp;
     uint32_t pid;
+    uint32_t parent_pid;
+    uint32_t waiting_pid;
+    uintptr_t waiting_status_address;
+    uint32_t waited_pid;
+    int waited_status;
+    bool wait_ready;
     process_state_t state;
     int status;
     bool started;
@@ -50,9 +56,22 @@ static process_t processes[PROCESS_MAX];
 static uint32_t next_pid = 1;
 static size_t next_slot;
 
+static bool pid_in_use(uint32_t pid)
+{
+    for (size_t i = 0; i < PROCESS_MAX; i++)
+        if (processes[i].state != PROCESS_UNUSED && processes[i].pid == pid)
+            return true;
+    return false;
+}
+
 bool process_active(void)
 {
     return running != NULL;
+}
+
+uint32_t process_current_pid(void)
+{
+    return running ? running->pid : 0;
 }
 
 bool process_user_buffer(uintptr_t address, size_t length, bool writable)
@@ -75,7 +94,8 @@ bool process_wants_input(void)
     for (size_t i = 0; i < PROCESS_MAX; i++)
         if ((processes[i].state == PROCESS_READY ||
              processes[i].state == PROCESS_BLOCKED) &&
-            processes[i].wants_input)
+            processes[i].wants_input && !processes[i].waiting_pid &&
+            !processes[i].wait_ready)
             return true;
     return false;
 }
@@ -85,7 +105,7 @@ bool process_feed_key(const key_event_t *key)
     for (size_t i = 0; i < PROCESS_MAX; i++) {
         process_t *p = &processes[i];
         if ((p->state != PROCESS_READY && p->state != PROCESS_BLOCKED) ||
-            !p->wants_input)
+            !p->wants_input || p->waiting_pid || p->wait_ready)
             continue;
         char ch = key->code == KEY_ENTER ? '\n' : key->ch;
         if (ch) {
@@ -132,7 +152,9 @@ size_t process_list(process_info_t *out, size_t capacity)
         if (p->state == PROCESS_UNUSED)
             continue;
         if (count < capacity)
-            out[count] = (process_info_t){ p->pid, p->state, p->status };
+            out[count] = (process_info_t){
+                p->pid, p->parent_pid, p->state, p->status
+            };
         count++;
     }
     return count;
@@ -249,14 +271,37 @@ static void release_process(process_t *p)
     p->kernel_stack = NULL;
 }
 
+static void complete_process(process_t *p)
+{
+    for (size_t i = 0; i < PROCESS_MAX; i++)
+        if (processes[i].parent_pid == p->pid)
+            processes[i].parent_pid = 0;
+
+    for (size_t i = 0; i < PROCESS_MAX; i++) {
+        process_t *parent = &processes[i];
+        if (parent->pid != p->parent_pid ||
+            parent->state != PROCESS_BLOCKED ||
+            parent->waiting_pid != p->pid)
+            continue;
+        parent->waited_pid = p->pid;
+        parent->waited_status = p->status;
+        parent->waiting_pid = 0;
+        parent->wait_ready = true;
+        parent->state = PROCESS_READY;
+        memset(p, 0, sizeof(*p));
+        return;
+    }
+}
+
 int process_spawn(const void *image, size_t length, int argc,
                   const char *const argv[])
 {
-    if (!image || !length || length > 256 * 1024 || running ||
+    if (!image || !length || length > 256 * 1024 ||
         argc < 1 || argc > 16 || !argv || thread_current() ||
         lapic_id() != smp_bsp_apic_id())
         return -1;
 
+    process_t *parent = running;
     process_t *p = NULL;
     for (size_t i = 0; i < PROCESS_MAX; i++)
         if (processes[i].state == PROCESS_UNUSED) {
@@ -265,7 +310,8 @@ int process_spawn(const void *image, size_t length, int argc,
         }
     if (!p)
         for (size_t i = 0; i < PROCESS_MAX; i++)
-            if (processes[i].state == PROCESS_EXITED) {
+            if (processes[i].state == PROCESS_EXITED &&
+                processes[i].parent_pid == 0) {
                 p = &processes[i];
                 break;
             }
@@ -289,19 +335,48 @@ int process_spawn(const void *image, size_t length, int argc,
                                 protect_image_page, &entry);
     if (loaded)
         loaded = prepare_user_stack(argc, argv, &p->user_sp);
-    user_space_kernel();
+    if (parent)
+        user_space_activate(&parent->space);
+    else
+        user_space_kernel();
     irq_restore(interrupts);
     if (!loaded) {
         release_process(p);
         return -1;
     }
     p->entry = (uintptr_t)entry;
-    p->pid = next_pid++;
-    if (!next_pid)
-        next_pid = 1;
+    p->parent_pid = parent ? parent->pid : 0;
+    do {
+        p->pid = next_pid;
+        next_pid = next_pid == INT32_MAX ? 1 : next_pid + 1;
+    } while (pid_in_use(p->pid));
     p->state = PROCESS_READY;
     klog("[proc] spawned pid %u\n", p->pid);
     return (int)p->pid;
+}
+
+int process_wait(uint32_t pid, uintptr_t status_address, regs_t *frame)
+{
+    if (!running || !pid)
+        return -1;
+    for (size_t i = 0; i < PROCESS_MAX; i++) {
+        process_t *child = &processes[i];
+        if (child->state == PROCESS_UNUSED || child->pid != pid ||
+            child->parent_pid != running->pid)
+            continue;
+        if (child->state == PROCESS_EXITED) {
+            if (status_address)
+                *(int *)status_address = child->status;
+            memset(child, 0, sizeof(*child));
+            return (int)pid;
+        }
+        running->waiting_pid = pid;
+        running->waiting_status_address = status_address;
+        memcpy(&running->frame, frame, sizeof(*frame));
+        running->state = PROCESS_BLOCKED;
+        arch_leave_user(0);
+    }
+    return -1;
 }
 
 void process_maybe_preempt(regs_t *frame)
@@ -346,6 +421,13 @@ void process_schedule(void)
         p->frame.eax = 1;
         p->blocked_address = 0;
     }
+    if (p->wait_ready) {
+        if (p->waiting_status_address)
+            *(int *)p->waiting_status_address = p->waited_status;
+        p->frame.eax = p->waited_pid;
+        p->waiting_status_address = 0;
+        p->wait_ready = false;
+    }
     gdt_set_kernel_stack((uintptr_t)p->kernel_stack +
                          PROCESS_KERNEL_STACK_FRAMES * 4096);
     arch_user_fpu_disable();
@@ -365,6 +447,7 @@ void process_schedule(void)
         p->state = PROCESS_EXITED;
         klog("[proc] ring 3 exit status %d\n", status);
         release_process(p);
+        complete_process(p);
     }
     irq_restore(interrupts);
 }
@@ -380,6 +463,7 @@ bool process_kill(uint32_t pid)
         p->state = PROCESS_EXITED;
         release_process(p);
         klog("[proc] killed pid %u\n", pid);
+        complete_process(p);
         return true;
     }
     return false;
@@ -390,7 +474,8 @@ bool process_cancel_input(void)
     for (size_t i = 0; i < PROCESS_MAX; i++)
         if ((processes[i].state == PROCESS_READY ||
              processes[i].state == PROCESS_BLOCKED) &&
-            processes[i].wants_input)
+            processes[i].wants_input && !processes[i].waiting_pid &&
+            !processes[i].wait_ready)
             return process_kill(processes[i].pid);
     return false;
 }
@@ -399,7 +484,8 @@ bool process_reap(uint32_t pid, int *status)
 {
     for (size_t i = 0; i < PROCESS_MAX; i++) {
         process_t *p = &processes[i];
-        if (p->pid != pid || p->state != PROCESS_EXITED)
+        if (p->pid != pid || p->state != PROCESS_EXITED ||
+            p->parent_pid != 0)
             continue;
         if (status)
             *status = p->status;
