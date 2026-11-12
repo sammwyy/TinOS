@@ -269,9 +269,9 @@ void kmain(uint32_t magic, uint32_t info_addr)
     pause_ms(BOOT_STEP_DELAY_MS);
 
     /* Executables remain data until launched through the ring-3 loader. */
-    size_t executables = import_userland(info);
-    if (executables)
-        boot_step("userland: imported %u ELF32 file(s)", (uint32_t)executables);
+    size_t files = import_userland(info);
+    if (files)
+        boot_step("userland: imported %u file(s)", (uint32_t)files);
     else
         boot_note("userland: no executable archive loaded");
     pause_ms(BOOT_STEP_DELAY_MS);

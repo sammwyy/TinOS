@@ -205,6 +205,21 @@ void syscall_dispatch(regs_t *frame)
         frame->eax = (uint32_t)desktop_user_window_close(process_current_pid(),
                                                           frame->ebx);
         return;
+    case TINOS_SYS_GUI_BLIT: {
+        if (!frame->edx || !frame->esi ||
+            frame->edx > TINOS_GUI_IMAGE_WIDTH ||
+            frame->esi > TINOS_GUI_IMAGE_HEIGHT ||
+            !process_user_buffer(frame->ecx,
+                                 frame->edx * frame->esi * sizeof(uint32_t),
+                                 false)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        frame->eax = (uint32_t)desktop_user_window_blit(
+            process_current_pid(), frame->ebx,
+            (const uint32_t *)(uintptr_t)frame->ecx, frame->edx, frame->esi);
+        return;
+    }
     case TINOS_SYS_GUI_CONSOLE_ATTACH:
         frame->eax = (uint32_t)desktop_user_window_console_attach(
             process_current_pid(), frame->ebx);

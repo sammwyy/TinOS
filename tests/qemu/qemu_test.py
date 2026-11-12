@@ -811,6 +811,21 @@ def run_scenario(iso, shots_dir):
                     "keyboard setting can be restored")
             vm.key("alt", "f4")
         vm.key("ctrl", "esc")
+        menu = shot("menu-image")
+        hits = menu.find("image_viewer.elf")
+        if c.check(bool(hits), "image viewer listed in the menu"):
+            x, y = hits[0]
+            vm.mouse_click(x + 20, y + 6)
+            c.check(vm.wait_for_serial("opened window 7 'Image Viewer'",
+                                       timeout=15), "image viewer runs in ring 3")
+            viewer = shot("image-viewer")
+            c.check(viewer.has("BMP 24/32-bit"),
+                    "userspace decoder loads the BMP resource")
+            c.check(viewer.image.getpixel((100, 120)) !=
+                    viewer.image.getpixel((52, 120)),
+                    "copied pixel surface composites into the window")
+            vm.key("alt", "f4")
+        vm.key("ctrl", "esc")
         after = shot("desktop-after-process")
         c.check(after.has("Programs"), "desktop accepts input after client exits")
         c.check("KERNEL PANIC" not in vm.serial(), "no kernel panic")

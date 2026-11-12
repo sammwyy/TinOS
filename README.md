@@ -61,8 +61,9 @@ kernel; Ctrl+C stops that reader. The desktop and text shell remain kernel
 services, but application ELF files can execute only in ring 3.
 
 At 8 MiB of QEMU RAM the graphical desktop can launch Terminal, File
-Explorer, Text Editor, Calculator, System Information, Control Panel and
-About as separate ring-3 ELF programs with their own windows. Terminal
+Explorer, Text Editor, Image Viewer, Calculator, System Information,
+Control Panel and About as separate ring-3 ELF programs with their own
+windows. Terminal
 connects its child processes to a bounded stdin/stdout channel, so `run`
 shows their output and forwards keyboard input; `Ctrl+C` stops a running
 child. Programs without a Terminal parent still write stdout to serial.
@@ -111,10 +112,12 @@ shell atlas.  The legacy `icon_t` values remain as compatibility handles, but
 `widget_icon()` resolves them exclusively to those named bitmap resources;
 custom code can use `widget_icon_name(x, y, size, "name")` directly.
 
-The current File Explorer browses directories and previews text through
-userspace filesystem calls. The former Image Viewer still needs a safe
-pixel-buffer protocol and a userspace decoder; its source remains under
-`apps/` as a porting reference.
+The current File Explorer browses directories, previews text and launches
+Image Viewer for `.bmp` files. Image Viewer decodes uncompressed 24/32-bit
+BMPs (up to 320x192) in ring 3 and submits copied pixels to its own window;
+`/apps/media/demo.bmp` is a sample. The former multi-format Image Viewer
+remains under `apps/` as a porting reference; PNG/JPEG/WebP decoders have
+not been migrated to userspace.
 
 For temporary artwork, create a numbered placeholder with:
 
@@ -193,8 +196,9 @@ The start menu lists `/apps/gui/*.elf` under *Programs* and launches each
 through the process loader. Applications use `int 0x80` to open a window,
 submit bounded text-cell frames and block while awaiting keyboard/mouse
 events. Terminal supports `ls`, `cd`, `pwd`, `cat`, `echo`, `touch`, `mkdir`,
-`rm`, `edit`, `run`, `clear` and `exit`. Explorer browses directories,
-previews files and opens them in the editor with `E`; the editor saves
+`rm`, `edit`, `view`, `run`, `clear` and `exit`. Explorer browses directories,
+previews text, opens `.bmp` in Image Viewer and opens files in the editor
+with `E`; the editor saves
 ramfs files with `Ctrl+S`. These are new userspace implementations, not
 the old kernel-callback GUI apps; their advanced controls are not yet ported.
 `run /apps/echo.elf` demonstrates interactive child I/O in the GUI;
@@ -642,8 +646,9 @@ an API that can later absorb virtual-to-physical mappings. The e1000 driver
 backs the current Ethernet stack; networking is intentionally a small
 polling-oriented kernel service rather than a userspace socket subsystem.
 
-**Application isolation.** Only the ELF32 files from `userland/bin/` are
-packed into the initrd. `kernel/proc/process.c` checks each executable,
+**Application isolation.** Only ELF32 programs from `userland/bin/` and
+explicit media resources are packed into the initrd. `kernel/proc/process.c`
+checks each executable,
 allocates a private address space and enters ring 3; the desktop start menu
 stores paths, not function pointers, and starts programs through that same
 process loader. The old fixed-address loader and function-pointer ABI are
@@ -651,8 +656,9 @@ not linked into the kernel, and the fixed-slot arena is no longer reserved.
 The former GUI app sources remain under `apps/` for porting, but are
 neither installed nor executable in this build. `make native-apps` fails
 intentionally. The current GUI extension uses process-scoped integer
-window handles, copied text cells and blocking event delivery; filesystem
-calls use file descriptors and path-based metadata. Writes are limited to
+window handles, copied text cells and blocking event delivery; GUI calls can
+also submit bounded, copied RGBA pixel buffers. Filesystem calls use file
+descriptors and path-based metadata. Writes are limited to
 64 KiB per file, the installed `/apps` tree is read-only to userspace,
 and persistent disk writes, pipes and PTYs are not yet implemented.
 

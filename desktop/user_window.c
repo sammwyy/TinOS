@@ -1,4 +1,5 @@
 #include <tinos/gfx.h>
+#include <tinos/heap.h>
 #include <tinos/process.h>
 #include <tinos/string.h>
 #include <tinos/ui.h>
@@ -17,6 +18,8 @@ typedef struct {
     char console[GUI_CONSOLE_BUFFER];
     unsigned console_head, console_tail;
     bool console_attached;
+    uint32_t *pixels;
+    uint32_t pixel_width, pixel_height;
 } gui_client_t;
 
 static gui_client_t clients[PROCESS_MAX];
@@ -48,6 +51,10 @@ static void user_draw(window_t *window, rect_t area)
 {
     gui_client_t *client = window->priv;
     gfx_fill_rect(area.x, area.y, area.w, area.h, COLOR_TERMINAL_BG);
+    if (client->pixels)
+        gfx_blit_image(rect_make(area.x + 8, area.y + 2 * FONT_H,
+                                client->pixel_width, client->pixel_height),
+                       client->pixels, client->pixel_width, client->pixel_height);
     for (size_t row = 0; row < client->rows && (int)(row + 1) * FONT_H <= area.h;
          row++) {
         char line[TINOS_GUI_COLS + 1];
@@ -94,6 +101,8 @@ static void user_close(window_t *window)
     client->window = NULL;
     client->console_attached = false;
     process_wake_console_output(client->pid);
+    kfree(client->pixels);
+    client->pixels = NULL;
     client->head = client->tail = 0;
     enqueue(client, (tinos_gui_event_t){ .type = TINOS_GUI_CLOSE });
 }
@@ -180,7 +189,29 @@ void desktop_user_window_release(uint32_t pid)
         return;
     if (client->window)
         wm_close(client->window);
+    kfree(client->pixels);
     memset(client, 0, sizeof(*client));
+}
+
+int desktop_user_window_blit(uint32_t pid, int handle, const uint32_t *pixels,
+                             uint32_t width, uint32_t height)
+{
+    gui_client_t *client = client_for(pid);
+    if (handle != 1 || !client || !client->window || !width || !height ||
+        width > TINOS_GUI_IMAGE_WIDTH || height > TINOS_GUI_IMAGE_HEIGHT)
+        return -1;
+    if (width != client->pixel_width || height != client->pixel_height) {
+        uint32_t *replacement = kmalloc((size_t)width * height * sizeof(uint32_t));
+        if (!replacement)
+            return -1;
+        kfree(client->pixels);
+        client->pixels = replacement;
+        client->pixel_width = width;
+        client->pixel_height = height;
+    }
+    memcpy(client->pixels, pixels, (size_t)width * height * sizeof(uint32_t));
+    wm_invalidate(client->window);
+    return 0;
 }
 
 int desktop_user_window_console_attach(uint32_t pid, int handle)

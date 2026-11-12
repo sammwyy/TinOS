@@ -24,6 +24,8 @@ int tinos_gui_present(int handle, const char *cells, unsigned columns,
                       unsigned rows);
 int tinos_gui_event(int handle, tinos_gui_event_t *event);
 int tinos_gui_close(int handle);
+int tinos_gui_blit(int handle, const uint32_t *pixels,
+                   unsigned width, unsigned height);
 int tinos_gui_console_attach(int handle);
 int tinos_gui_console_read(int handle, char *buffer, unsigned length);
 int tinos_tty_send(int child_pid, char ch);

@@ -147,6 +147,13 @@ int tinos_gui_close(int handle)
     return invoke(TINOS_SYS_GUI_CLOSE, (unsigned)handle, 0, 0);
 }
 
+int tinos_gui_blit(int handle, const uint32_t *pixels,
+                   unsigned width, unsigned height)
+{
+    return invoke4(TINOS_SYS_GUI_BLIT, (unsigned)handle, (unsigned)pixels,
+                   width, height);
+}
+
 int tinos_gui_console_attach(int handle)
 {
     return invoke(TINOS_SYS_GUI_CONSOLE_ATTACH, (unsigned)handle, 0, 0);

@@ -20,6 +20,7 @@ int main(void)
              tinos_ioctl(0, TINOS_IOCTL_KBD_SET_LAYOUT, 99) == -1 &&
              tinos_gui_console_attach(1) == -1 &&
              tinos_gui_console_read(1, (char *)0x00100000u, 1) == -1 &&
+             tinos_gui_blit(1, (const uint32_t *)0x00100000u, 32, 16) == -1 &&
              tinos_tty_send(1, 'x') == -1 &&
              tinos_kill(1) == -1;
     const char *message = ok ? "ring3: GUI handles and files isolated\n" :

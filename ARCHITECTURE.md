@@ -138,7 +138,8 @@ can still stall this loop.
 - `libraries/image` and `libraries/audio` (stb_image, simplewebp, stb_vorbis
   wrappers) are also linked into the kernel, with per-directory SSE2 flags.
 - `userland/bin/` produces freestanding ELF32 programs against
-  `libraries/libc/`; the boot image packages only these binaries.
+  `libraries/libc/`; the boot image packages these binaries and a sample
+  BMP resource. The older ring-0 native app ABI is never packed.
 - The initrd is imported as read-only backing for files in `/apps`. A
   write detaches the file into private heap storage. The module stays
   reserved while borrowed data exists.
@@ -152,8 +153,10 @@ can still stall this loop.
 - The trusted compositor offers one window handle per process, text-cell
   frame submission (bounded copy-in) and blocking keyboard/mouse/resize/close
   events. The process table wakes only the blocked owner of a window.
-  Terminal, Explorer, Editor, Calculator, System Information, Control Panel
-  and About are ring-3 programs using this ABI.
+  Terminal, Explorer, Editor, Image Viewer, Calculator, System Information,
+  Control Panel and About are ring-3 programs using this ABI. Image Viewer
+  decodes BMP in its own address space and submits a validated, copied pixel
+  surface (at most 320x192); the compositor owns the resulting buffer.
   The terminal handles simple commands itself and bridges its children's
   fd 0/1/2 to a bounded parent-owned byte stream and input queue. Full
   streams block child writers; the compositor wakes them when the terminal

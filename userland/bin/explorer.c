@@ -103,6 +103,12 @@ static void enter_selected(void)
         selected = first_visible = 0;
         refresh();
     } else {
+        size_t length = strlen(path);
+        if (length >= 4 && strcmp(path + length - 4, ".bmp") == 0) {
+            const char *args[] = { "/apps/gui/image_viewer.elf", path };
+            tinos_spawn(args[0], 2, args);
+            return;
+        }
         tinos_strlcpy(preview_path, path, sizeof(preview_path));
         preview = 1;
     }

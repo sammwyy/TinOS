@@ -100,7 +100,7 @@ static int execute(char *command)
         return 0;
     char path[PATH_CAP];
     if (strcmp(args[0], "help") == 0)
-        print("help ls cd pwd cat echo touch mkdir rm edit run clear exit\n");
+        print("help ls cd pwd cat echo touch mkdir rm edit view run clear exit\n");
     else if (strcmp(args[0], "pwd") == 0) {
         print(cwd);
         print("\n");
@@ -169,6 +169,11 @@ static int execute(char *command)
         const char *argv[] = { "/apps/gui/editor.elf", path };
         if (tinos_spawn(argv[0], 2, argv) < 0)
             print("edit: cannot start editor\n");
+    } else if (strcmp(args[0], "view") == 0 && argc > 1) {
+        path_join(args[1], path);
+        const char *argv[] = { "/apps/gui/image_viewer.elf", path };
+        if (tinos_spawn(argv[0], 2, argv) < 0)
+            print("view: cannot start image viewer\n");
     } else if (strcmp(args[0], "clear") == 0) {
         tinos_ui_clear(&ui);
     } else if (strcmp(args[0], "run") == 0 && argc > 1) {

@@ -18,5 +18,7 @@ int desktop_user_window_console_write(uint32_t pid, const char *data,
 int desktop_user_window_console_read(uint32_t pid, int handle,
                                      char *buffer, size_t length);
 void desktop_user_window_child_exit(uint32_t pid, uint32_t child, int status);
+int desktop_user_window_blit(uint32_t pid, int handle, const uint32_t *pixels,
+                             uint32_t width, uint32_t height);
 
 #endif

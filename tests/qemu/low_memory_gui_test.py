@@ -44,6 +44,20 @@ def main():
         time.sleep(0.4)
         vm.screenshot(path)
         assert Screen(path).has("ring3 echo: eight megabytes"), "child input failed"
+        vm.key("alt", "f4")
+        assert vm.wait_for_serial("closed window 1 'Terminal'", timeout=15)
+        vm.key("ctrl", "esc")
+        time.sleep(0.4)
+        vm.screenshot(path)
+        matches = Screen(path).find("image_viewer.elf")
+        assert matches, "image viewer missing at 8 MiB"
+        x, y = matches[0]
+        vm.mouse_click(x + 20, y + 6)
+        assert vm.wait_for_serial("opened window 2 'Image Viewer'",
+                                  timeout=15), vm.serial()
+        time.sleep(0.4)
+        vm.screenshot(path)
+        assert Screen(path).has("BMP 24/32-bit"), "image viewer failed at 8 MiB"
         assert "KERNEL PANIC" not in vm.serial()
         print("8 MiB desktop and ring-3 menu launch: OK")
     finally:

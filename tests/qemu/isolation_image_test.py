@@ -15,13 +15,16 @@ def main():
     with tarfile.open(args.initrd) as archive:
         names = archive.getnames()
         assert names and "hello.elf" in names, names
-        assert all(member.isfile() and
-                   ("/" not in member.name or member.name.startswith("gui/")) and
-                   member.name.endswith(".elf") for member in archive), names
+        assert "media/demo.bmp" in names, names
+        assert archive.extractfile("media/demo.bmp").read(2) == b"BM"
+        assert all(member.isfile() and (
+            member.name == "media/demo.bmp" or
+            ("/" not in member.name or member.name.startswith("gui/")) and
+            member.name.endswith(".elf")) for member in archive), names
     symbols = subprocess.check_output(["nm", "-g", args.kernel], text=True)
     for forbidden in ("tinos_abi_build", "load_native_apps", "apps_register"):
         assert forbidden not in symbols, forbidden
-    print("boot image contains only ring-3 ELF programs and no native ABI: OK")
+    print("boot image contains only ring-3 ELF programs, media and no native ABI: OK")
 
 
 if __name__ == "__main__":
