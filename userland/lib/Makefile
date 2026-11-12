@@ -6,7 +6,8 @@ CFLAGS := -m32 -std=gnu11 -O2 -ffreestanding -fno-builtin \
           -fno-stack-protector -fPIC -fno-asynchronous-unwind-tables \
           -mno-sse -mno-sse2 -Wall -Wextra -Iinclude
 LIBS := $(BUILD)/libtinosbmp.so $(BUILD)/libtinoswav.so \
-        $(BUILD)/libtinostate.so $(BUILD)/libtinoschain.so
+        $(BUILD)/libtinostate.so $(BUILD)/libtinoschain.so \
+        $(BUILD)/libtinostls.so
 
 .PHONY: all
 all: $(LIBS)
@@ -34,3 +35,12 @@ $(BUILD)/libtinoschain.so: $(BUILD)/chain.o $(BUILD)/libtinostate.so Makefile
 	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
 		--hash-style=sysv --build-id=none -soname libtinoschain.so \
 		-o $@ $(BUILD)/chain.o -L$(BUILD) -ltinostate
+
+$(BUILD)/tls.o: tls.c Makefile
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -ftls-model=initial-exec -c $< -o $@
+
+$(BUILD)/libtinostls.so: $(BUILD)/tls.o Makefile
+	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
+		--hash-style=gnu --build-id=none -soname libtinostls.so \
+		-o $@ $<

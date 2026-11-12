@@ -161,8 +161,13 @@ can still stall this loop.
   are unmapped and freed; global read-only frames remain cached.
   `DT_FINI` and `DT_FINI_ARRAY` callbacks are validated and invoked by the
   libc in ring 3, in reverse dependency order on clean exit or before
-  `dlclose` unmaps a library. Faults and kills skip destructors. TLS,
-  symbol versions and lazy binding remain unsupported.
+  `dlclose` unmaps a library. Faults and kills skip destructors.
+  Initial-exec i386 TLS uses a private process page, a `%gs` segment
+  whose base points to a thread control word, and bounded `PT_TLS`
+  templates. The loader handles local `R_386_TLS_TPOFF` and returns
+  process-local pointers for TLS `dlsym`. Global-dynamic TLS, multiple
+  user threads per process, symbol versions and lazy binding remain
+  unsupported.
 - The initrd is imported as read-only backing for files in `/apps`. A
   write detaches the file into private heap storage. The module stays
   reserved while borrowed data exists.

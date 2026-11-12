@@ -7,6 +7,9 @@
 #define USER_BASE       0x40000000u
 #define USER_REGION_END 0x40400000u
 #define USER_STACK_TOP  USER_REGION_END
+#define USER_TLS_BASE   (USER_STACK_TOP - 3 * 4096u)
+#define USER_TLS_TOP    (USER_TLS_BASE + 4096u - sizeof(uint32_t))
+#define USER_TLS_LIMIT  (USER_TLS_TOP - USER_TLS_BASE)
 
 typedef struct {
     uint32_t *directory;

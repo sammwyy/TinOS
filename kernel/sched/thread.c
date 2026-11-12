@@ -572,6 +572,7 @@ static void prepare_cooperative_frame(kernel_thread_t *thread)
 {
     memset(&thread->irq_frame, 0, sizeof(thread->irq_frame));
     thread->irq_frame.ds = GDT_KERNEL_DATA;
+    thread->irq_frame.gs = GDT_KERNEL_DATA;
     thread->irq_frame.int_no = 32;
     thread->irq_frame.eip = (uint32_t)(uintptr_t)arch_resume_context;
     thread->irq_frame.cs = GDT_KERNEL_CODE;

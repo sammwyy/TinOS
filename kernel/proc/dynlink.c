@@ -49,6 +49,8 @@
 #define R_386_GLOB_DAT 6u
 #define R_386_JUMP_SLOT 7u
 #define R_386_RELATIVE 8u
+#define R_386_TLS_TPOFF 14u
+#define STT_TLS 6u
 
 typedef struct PACKED {
     uint8_t ident[16];
@@ -132,9 +134,21 @@ static bool shared_segments_valid(const void *image, size_t size,
 {
     const program_header_t *ph = programs(image, header);
     unsigned pages = 0;
+    unsigned tls_count = 0;
     for (unsigned i = 0; i < header->phnum; i++) {
-        if (ph[i].type == ELF_INTERP || ph[i].type == ELF_TLS)
+        if (ph[i].type == ELF_INTERP)
             return false;
+        if (ph[i].type == ELF_TLS) {
+            uint32_t alignment = ph[i].align;
+            if (++tls_count > 1 || !ph[i].memsz ||
+                ph[i].memsz > PAGE_SIZE ||
+                ph[i].filesz > ph[i].memsz ||
+                ph[i].offset > size ||
+                ph[i].filesz > size - ph[i].offset ||
+                !alignment || alignment > PAGE_SIZE ||
+                (alignment & (alignment - 1)))
+                return false;
+        }
         if (ph[i].type != ELF_LOAD || !ph[i].memsz)
             continue;
         if (ph[i].filesz > ph[i].memsz ||
@@ -156,6 +170,47 @@ static bool shared_segments_valid(const void *image, size_t size,
                 return false;
     }
     return pages && pages <= LIB_PAGES;
+}
+
+static bool load_tls(const void *image, const elf_header_t *header,
+                     const user_space_t *space, unsigned slot,
+                     dynlink_state_t *state)
+{
+    const program_header_t *ph = programs(image, header);
+    for (unsigned i = 0; i < header->phnum; i++) {
+        if (ph[i].type != ELF_TLS)
+            continue;
+        bool template_loaded = false;
+        for (unsigned j = 0; j < header->phnum; j++)
+            if (ph[j].type == ELF_LOAD && (ph[j].flags & ELF_WRITE) &&
+                ph[i].vaddr >= ph[j].vaddr &&
+                ph[i].filesz <= ph[j].filesz &&
+                ph[i].vaddr - ph[j].vaddr <=
+                    ph[j].filesz - ph[i].filesz)
+                template_loaded = true;
+        if (!template_loaded)
+            return false;
+        uint32_t alignment = ph[i].align;
+        uint32_t end = state->tls_end[slot];
+        if (end && state->tls_size[slot] != ph[i].memsz)
+            return false;
+        if (!end)
+            end = (state->tls_used + ph[i].memsz +
+                   alignment - 1) & ~(alignment - 1);
+        if (end > USER_TLS_LIMIT ||
+            !mapped(space, USER_TLS_TOP - end, ph[i].memsz, true))
+            return false;
+        uintptr_t block = USER_TLS_TOP - end;
+        memset((void *)block, 0, ph[i].memsz);
+        memcpy((void *)block, (const uint8_t *)image + ph[i].offset,
+               ph[i].filesz);
+        if (end > state->tls_used)
+            state->tls_used = end;
+        state->tls_end[slot] = end;
+        state->tls_size[slot] = ph[i].memsz;
+        return true;
+    }
+    return true;
 }
 
 static void discard_frames(shared_library_t *library)
@@ -592,7 +647,8 @@ static bool dynamic_symbol_count(const user_space_t *space, uintptr_t base,
 
 static bool export_symbol(const shared_library_t *library,
                           const user_space_t *space, const char *name,
-                          uintptr_t *address)
+                          uintptr_t *address,
+                          const dynlink_state_t *state, unsigned slot)
 {
     fs_node_t *file;
     char path[FS_PATH_MAX];
@@ -630,11 +686,23 @@ static bool export_symbol(const shared_library_t *library,
         const symbol_t *table = (const symbol_t *)(library->base + info.symtab);
         for (uint32_t n = 1; n < symbols; n++) {
             const char *candidate;
-            if (table[n].section && (table[n].info >> 4) == 1 &&
-                ((table[n].info & 15) == 2 ||
+            if (!table[n].section || (table[n].info >> 4) != 1 ||
+                !string_at(strings, info.strsz, table[n].name, &candidate) ||
+                strcmp(candidate, name))
+                continue;
+            if ((table[n].info & 15) == STT_TLS) {
+                if (!state || !state->tls_size[slot] ||
+                    table[n].value >= state->tls_size[slot] ||
+                    table[n].size >
+                        state->tls_size[slot] - table[n].value)
+                    return false;
+                *address = USER_TLS_TOP - state->tls_end[slot] +
+                           table[n].value;
+                return mapped(space, *address, table[n].size ?
+                              table[n].size : 1, true);
+            }
+            if (((table[n].info & 15) == 2 ||
                  (table[n].info & 15) == 1) &&
-                string_at(strings, info.strsz, table[n].name, &candidate) &&
-                !strcmp(candidate, name) &&
                 table[n].value < LIB_REGION_SIZE &&
                 mapped(space, library->base + table[n].value, 1, false) &&
                 ((table[n].info & 15) != 2 ||
@@ -673,7 +741,8 @@ static bool library_range(uint32_t offset, size_t length)
 
 static bool link_relocations(const program_header_t *ph, unsigned phnum,
                              const user_space_t *space, uintptr_t base,
-                             const dynamic_info_t *info, uint32_t mask)
+                             const dynamic_info_t *info,
+                             const dynlink_state_t *state, unsigned slot)
 {
     if (info->relsz > 128 * sizeof(relocation_t) ||
         info->pltrelsz > 128 * sizeof(relocation_t) ||
@@ -720,6 +789,20 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
                 *target += (uint32_t)base;
                 continue;
             }
+            if (type == R_386_TLS_TPOFF) {
+                if (index >= symbols || !state->tls_size[slot] ||
+                    (index && ((table[index].info & 15u) != STT_TLS ||
+                               !table[index].section ||
+                               table[index].value >
+                                   state->tls_size[slot] - 1)) ||
+                    *target >= state->tls_size[slot] ||
+                    (index && table[index].value >
+                     state->tls_size[slot] - 1 - *target))
+                    return false;
+                *target += (index ? table[index].value : 0) -
+                           state->tls_end[slot];
+                continue;
+            }
             if ((type != R_386_GLOB_DAT && type != R_386_JUMP_SLOT &&
                  type != R_386_32) || !index || index >= symbols)
                 return false;
@@ -734,8 +817,9 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
                 if (!string_at(strings, info->strsz, table[index].name, &name))
                     return false;
                 for (unsigned j = 0; j < LIB_LIMIT; j++)
-                    if ((mask & (1u << j)) &&
-                        export_symbol(&libraries[j], space, name, &symbol))
+                    if ((state->mask & (1u << j)) &&
+                        export_symbol(&libraries[j], space, name, &symbol,
+                                      NULL, 0))
                         break;
             }
             if (!symbol)
@@ -855,6 +939,8 @@ static bool link_library(unsigned slot, user_space_t *space,
         !valid_image(file->data, file->size, ELF_DYN, &header))
         return false;
     const program_header_t *ph = programs(file->data, header);
+    if (!load_tls(file->data, header, space, slot, state))
+        return false;
     const program_header_t *dynamic = NULL;
     for (unsigned i = 0; i < header->phnum; i++)
         if (ph[i].type == ELF_DYNAMIC) {
@@ -886,7 +972,7 @@ static bool link_library(unsigned slot, user_space_t *space,
         dependencies |= 1u << dependency;
     }
     if (!link_relocations(ph, header->phnum, space, library->base,
-                          &info, state->mask) ||
+                          &info, state, slot) ||
         !append_initializers(ph, header->phnum, space, library->base,
                              &info, state) ||
         !append_finalizers(ph, header->phnum, space, library->base,
@@ -967,7 +1053,7 @@ bool dynlink_load(const void *image, size_t size, user_space_t *space,
         uintptr_t target = 0;
         for (unsigned j = 0; j < ARRAY_SIZE(libraries); j++)
             if ((loaded & (1u << j)) &&
-                export_symbol(&libraries[j], space, name, &target))
+                export_symbol(&libraries[j], space, name, &target, NULL, 0))
                 break;
         if (!target)
             return false;
@@ -1006,7 +1092,8 @@ uintptr_t dynlink_symbol(int handle, const char *name,
         !state->opens[handle - 1])
         return 0;
     uintptr_t address = 0;
-    if (!export_symbol(&libraries[handle - 1], space, name, &address))
+    if (!export_symbol(&libraries[handle - 1], space, name, &address,
+                       state, (unsigned)(handle - 1)))
         return 0;
     return address;
 }

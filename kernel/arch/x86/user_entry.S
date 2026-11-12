@@ -24,6 +24,7 @@ arch_enter_user:
     movw %cx, %ds
     movw %cx, %es
     movw %cx, %fs
+    movw $0x33, %cx
     movw %cx, %gs
     xorl %eax, %eax
     xorl %ebx, %ebx
@@ -48,6 +49,7 @@ arch_resume_user:
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %fs
+    popl %eax
     movw %ax, %gs
     popa
     addl $8, %esp

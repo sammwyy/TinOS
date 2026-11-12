@@ -30,7 +30,7 @@ typedef struct PACKED {
     uint32_t ldt, trap_iomap;
 } tss_t;
 
-static gdt_entry_t gdt[6];
+static gdt_entry_t gdt[7];
 static gdt_ptr_t   gdt_ptr;
 static tss_t       bsp_tss;
 
@@ -61,6 +61,7 @@ void gdt_init(void)
     bsp_tss.trap_iomap = sizeof(bsp_tss) << 16;
     gdt_set(5, (uint32_t)(uintptr_t)&bsp_tss, sizeof(bsp_tss) - 1,
             0x89, 0);
+    gdt_set(6, 0, 0x000FFFFF, 0xF2, 0xC0);
 
     gdt_ptr.limit = (uint16_t)(sizeof(gdt) - 1);
     gdt_ptr.base  = (uint32_t)(uintptr_t)&gdt;
@@ -83,6 +84,11 @@ void gdt_init(void)
 void gdt_set_kernel_stack(uintptr_t top)
 {
     bsp_tss.esp0 = (uint32_t)top;
+}
+
+void gdt_set_user_tls(uintptr_t top)
+{
+    gdt_set(6, (uint32_t)top, 0x000FFFFF, 0xF2, 0xC0);
 }
 
 /* The flat model is identical for every core, so an SMP application

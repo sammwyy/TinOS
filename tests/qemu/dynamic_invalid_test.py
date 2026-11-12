@@ -60,6 +60,16 @@ def invalid_gnu_hash(image):
     struct.pack_into("<I", image, offset, 0xffffffff)
     return image
 
+def invalid_tls(image):
+    phoff = struct.unpack_from("<I", image, 28)[0]
+    phsize, count = struct.unpack_from("<HH", image, 42)
+    for i in range(count):
+        entry = phoff + i * phsize
+        if struct.unpack_from("<I", image, entry)[0] == 7:
+            struct.pack_into("<I", image, entry + 20, 4097)
+            return image
+    raise AssertionError("library has no PT_TLS")
+
 
 def boot_variant(source, kernel, loader, mode, temp):
     archive_path = temp / "ramfs.tar"
@@ -69,7 +79,10 @@ def boot_variant(source, kernel, loader, mode, temp):
             data = archive.extractfile(member).read()
             if member.name == "lib/libtinostate.so" and mode == "hash":
                 data = invalid_gnu_hash(bytearray(data))
-            elif member.name == "lib/libtinoschain.so" and mode != "hash":
+            elif member.name == "lib/libtinostls.so" and mode == "tls":
+                data = invalid_tls(bytearray(data))
+            elif member.name == "lib/libtinoschain.so" and mode in (
+                    "relocation", "dependency", "initializer"):
                 modified = bytearray(data)
                 if mode == "relocation":
                     data = invalid_relocation(modified)
@@ -100,11 +113,18 @@ def boot_variant(source, kernel, loader, mode, temp):
         vm.key("down")
         vm.key("ret")
         assert vm.wait_for_serial("[tty] text console ready", timeout=30), vm.serial()
-        vm.line("run /apps/chainprobe.elf")
-        assert vm.wait_for_serial("[ld  ] rejected libtinoschain.so",
-                                  timeout=15), vm.serial()
-        assert "ring3: chained libraries keep private state" not in vm.serial()
-        assert "[proc] spawned pid" not in vm.serial()
+        if mode == "tls":
+            vm.line("run /apps/tlsprobe.elf")
+            assert vm.wait_for_serial("[ld  ] rejected libtinostls.so",
+                                      timeout=15), vm.serial()
+            assert vm.wait_for_serial("[proc] ring 3 exit status 1",
+                                      timeout=15), vm.serial()
+        else:
+            vm.line("run /apps/chainprobe.elf")
+            assert vm.wait_for_serial("[ld  ] rejected libtinoschain.so",
+                                      timeout=15), vm.serial()
+            assert "ring3: chained libraries keep private state" not in vm.serial()
+            assert "[proc] spawned pid" not in vm.serial()
         vm.line("run /apps/hello.elf")
         assert vm.wait_for_serial("ring3: hello from an isolated ELF",
                                   timeout=15), vm.serial()
@@ -120,12 +140,12 @@ def main():
     parser.add_argument("--initrd", default="build/ramfs.tar")
     parser.add_argument("--loader", default="boot/x86/loader.asm")
     args = parser.parse_args()
-    for mode in ("relocation", "dependency", "initializer", "hash"):
+    for mode in ("relocation", "dependency", "initializer", "hash", "tls"):
         with tempfile.TemporaryDirectory(prefix="tinos-invalid-so-") as path:
             boot_variant(args.initrd, pathlib.Path(args.kernel),
                          pathlib.Path(args.loader), mode, pathlib.Path(path))
-    print("invalid library relocation, dependency, initializer and "
-          "GNU hash rejected: OK")
+    print("invalid library relocation, dependency, initializer, GNU hash "
+          "and TLS rejected: OK")
 
 
 if __name__ == "__main__":

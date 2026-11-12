@@ -714,10 +714,15 @@ remains pinned globally for reuse. `DT_FINI` and `DT_FINI_ARRAY` destructors
 run in reverse dependency order in ring 3 on a clean return from `main`,
 `tinos_exit()` or `tinos_dlclose()`. A kill or fault releases resources
 without running untrusted cleanup code.
+Initial-exec i386 TLS in a shared object has a private, bounded process
+block addressed through `%gs`; local `R_386_TLS_TPOFF` and `dlsym` on
+exported TLS variables work. Reopening a library resets its TLS template
+without moving other loaded modules.
 
 This is an initial ELF dynamic-linking subset, not a Linux/glibc loader:
 shared libraries can import symbols from supported `.so` dependencies, but
-not from the executable or host libc. TLS, symbol versioning,
+not from the executable or host libc. Global-dynamic TLS and its
+`___tls_get_addr` runtime, multiple user threads, symbol versioning,
 text relocations and lazy binding remain unsupported; their ELF
 requirements are rejected instead of running them incorrectly. Executables
 still use a fixed load address and TinOS startup code; the small shared-object

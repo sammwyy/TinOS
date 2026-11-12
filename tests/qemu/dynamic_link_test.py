@@ -64,6 +64,15 @@ def main():
         assert vm.serial().count("reused libtinoschain.so read-only pages") == 4
         assert vm.serial().count("reused libtinostate.so read-only pages") == 4
 
+        tls_marker = "ring3: private initial-exec TLS survives preemption"
+        for count in (1, 2):
+            before = len(vm.serial())
+            vm.line("run /apps/tlsprobe.elf")
+            wait_new(vm, before, tls_marker)
+            assert vm.serial().count(tls_marker) == count, vm.serial()
+        assert vm.serial().count("cached libtinostls.so read-only pages") == 1
+        assert vm.serial().count("reused libtinostls.so read-only pages") == 3
+
         before = len(vm.serial())
         vm.line("run /apps/libtamper.elf")
         wait_new(vm, before, "[proc] user exception 14")

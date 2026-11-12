@@ -7,7 +7,7 @@
 
 /* Register frame pushed by the interrupt stubs (see arch/x86/isr.S). */
 typedef struct {
-    uint32_t ds;
+    uint32_t ds, gs;
     uint32_t edi, esi, ebp, esp_dummy, ebx, edx, ecx, eax; /* pusha */
     uint32_t int_no, err_code;
     uint32_t eip, cs, eflags, useresp, ss; /* pushed by the CPU */
@@ -18,10 +18,12 @@ typedef struct {
 #define GDT_KERNEL_DATA 0x10
 #define GDT_USER_CODE   0x1B
 #define GDT_USER_DATA   0x23
+#define GDT_USER_TLS    0x33
 
 void gdt_init(void);
 const void *gdt_pointer(void); /* the 6-byte GDTR image, for AP bring-up */
 void gdt_set_kernel_stack(uintptr_t top);
+void gdt_set_user_tls(uintptr_t top);
 
 /* Interrupt descriptor table */
 typedef void (*irq_handler_t)(regs_t *regs);

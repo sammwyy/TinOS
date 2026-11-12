@@ -576,10 +576,19 @@ int process_spawn(const void *image, size_t length, int argc,
     if (!p->kernel_stack)
         return -1;
     if (!user_space_init(&p->space) ||
-        !user_space_map(&p->space, USER_STACK_TOP - 4096)) {
+        !user_space_map(&p->space, USER_STACK_TOP - 4096) ||
+        !user_space_map(&p->space, USER_TLS_BASE)) {
         release_process(p);
         return -1;
     }
+    bool tls_interrupts = irq_save();
+    user_space_activate(&p->space);
+    *(uint32_t *)USER_TLS_TOP = USER_TLS_TOP;
+    if (parent)
+        user_space_activate(&parent->space);
+    else
+        user_space_kernel();
+    irq_restore(tls_interrupts);
 
     bool interrupts = irq_save();
     user_space_activate(&p->space);
@@ -696,6 +705,7 @@ void process_schedule(void)
     }
     gdt_set_kernel_stack((uintptr_t)p->kernel_stack +
                          PROCESS_KERNEL_STACK_FRAMES * 4096);
+    gdt_set_user_tls(USER_TLS_TOP);
     arch_user_fpu_disable();
     int status;
     if (!p->started) {

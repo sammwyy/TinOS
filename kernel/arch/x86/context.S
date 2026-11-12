@@ -54,6 +54,7 @@ arch_resume_irq:
     movw  %ax, %ds
     movw  %ax, %es
     movw  %ax, %fs
+    popl  %eax
     movw  %ax, %gs
     popa
     /* Drop the synthetic vector and error-code words before iret. */

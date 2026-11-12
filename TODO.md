@@ -95,7 +95,11 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
 - [x] Run validated `DT_FINI`/`DT_FINI_ARRAY` callbacks in ring 3 on clean
       exit or before `dlclose` unmaps a library. Skip unsafe cleanup after
       faults or kill; test library cleanup at 8/16 MiB.
-- [ ] Extend the dynamic ABI with TLS,
+- [x] Allocate bounded i386 initial-exec `PT_TLS` per process, preserve `%gs`
+      through traps and preemption, apply local `R_386_TLS_TPOFF`, and return
+      process-local addresses through `dlsym`; test 8/16 MiB and malformed
+      TLS rejection.
+- [ ] Extend the dynamic ABI with global-dynamic TLS, multiple user threads,
       symbol versions, eviction of globally cached read-only pages and more
       flexible address-space allocation. Reject unsupported ELF metadata
       instead of skipping it.

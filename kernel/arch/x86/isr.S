@@ -99,6 +99,8 @@ irq\num:
 .type isr_common, @function
 isr_common:
     pusha                       /* eax ecx edx ebx esp ebp esi edi */
+    movl    %gs, %eax
+    pushl   %eax                /* saved TLS segment */
     movl    %ds, %eax
     pushl   %eax                /* saved data segment */
     cld                         /* user code may set DF before a trap */
@@ -124,6 +126,7 @@ isr_common:
     movw    %ax, %ds
     movw    %ax, %es
     movw    %ax, %fs
+    popl    %eax
     movw    %ax, %gs
 
     popa

@@ -18,6 +18,9 @@ typedef struct {
     uint32_t needed_roots;
     uint32_t dependencies[DYNLINK_LIBRARY_LIMIT];
     uint8_t opens[DYNLINK_LIBRARY_LIMIT];
+    uint32_t tls_used;
+    uint32_t tls_end[DYNLINK_LIBRARY_LIMIT];
+    uint32_t tls_size[DYNLINK_LIBRARY_LIMIT];
     uintptr_t initializers[DYNLINK_INIT_LIMIT];
     unsigned next_initializer;
     unsigned initializer_count;
