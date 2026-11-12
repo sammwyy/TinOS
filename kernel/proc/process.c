@@ -99,6 +99,11 @@ int process_library_close(int handle)
     return dynlink_close(handle, &running->space, &running->libraries);
 }
 
+int process_library_prepare_close(int handle)
+{
+    return running ? dynlink_prepare_close(handle, &running->libraries) : -1;
+}
+
 uintptr_t process_library_symbol(int handle, const char *name)
 {
     if (!running)
@@ -109,6 +114,16 @@ uintptr_t process_library_symbol(int handle, const char *name)
 uintptr_t process_library_initializer(void)
 {
     return running ? dynlink_next_initializer(&running->libraries) : 0;
+}
+
+uintptr_t process_library_finalizer(void)
+{
+    return running ? dynlink_next_finalizer(&running->libraries) : 0;
+}
+
+uintptr_t process_library_close_finalizer(void)
+{
+    return running ? dynlink_close_next_finalizer(&running->libraries) : 0;
 }
 
 bool process_user_buffer(uintptr_t address, size_t length, bool writable)

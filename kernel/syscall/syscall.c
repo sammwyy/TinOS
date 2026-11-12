@@ -289,8 +289,17 @@ void syscall_dispatch(regs_t *frame)
     case TINOS_SYS_DLCLOSE:
         frame->eax = (uint32_t)process_library_close((int)frame->ebx);
         return;
+    case TINOS_SYS_DL_CLOSE_PREPARE:
+        frame->eax = (uint32_t)process_library_prepare_close((int)frame->ebx);
+        return;
+    case TINOS_SYS_DL_CLOSE_FINI_NEXT:
+        frame->eax = (uint32_t)process_library_close_finalizer();
+        return;
     case TINOS_SYS_DL_INIT_NEXT:
         frame->eax = (uint32_t)process_library_initializer();
+        return;
+    case TINOS_SYS_DL_FINI_NEXT:
+        frame->eax = (uint32_t)process_library_finalizer();
         return;
     case TINOS_SYS_GUI_CONSOLE_ATTACH:
         frame->eax = (uint32_t)desktop_user_window_console_attach(

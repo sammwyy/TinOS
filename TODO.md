@@ -92,7 +92,10 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
       reachability. Free private library pages after the last reference;
       keep executable `DT_NEEDED` roots mapped and allow reopening with
       fresh writable state and ring-3 constructors.
-- [ ] Extend the dynamic ABI with ring-3 destructors, TLS,
+- [x] Run validated `DT_FINI`/`DT_FINI_ARRAY` callbacks in ring 3 on clean
+      exit or before `dlclose` unmaps a library. Skip unsafe cleanup after
+      faults or kill; test library cleanup at 8/16 MiB.
+- [ ] Extend the dynamic ABI with TLS,
       symbol versions, eviction of globally cached read-only pages and more
       flexible address-space allocation. Reject unsupported ELF metadata
       instead of skipping it.

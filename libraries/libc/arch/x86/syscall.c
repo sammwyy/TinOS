@@ -212,6 +212,17 @@ int tinos_dlopen(const char *name)
 
 int tinos_dlclose(int handle)
 {
+    int pending = invoke(TINOS_SYS_DL_CLOSE_PREPARE, (unsigned)handle, 0, 0);
+    if (pending < 0)
+        return -1;
+    if (pending)
+        for (;;) {
+            void (*finalizer)(void) = (void (*)(void))(unsigned)
+                invoke(TINOS_SYS_DL_CLOSE_FINI_NEXT, 0, 0, 0);
+            if (!finalizer)
+                break;
+            finalizer();
+        }
     return invoke(TINOS_SYS_DLCLOSE, (unsigned)handle, 0, 0);
 }
 
@@ -246,6 +257,13 @@ int tinos_kill(int child_pid)
 
 __attribute__((noreturn)) void tinos_exit(int status)
 {
+    for (;;) {
+        void (*finalizer)(void) = (void (*)(void))(unsigned)
+            invoke(TINOS_SYS_DL_FINI_NEXT, 0, 0, 0);
+        if (!finalizer)
+            break;
+        finalizer();
+    }
     invoke(TINOS_SYS_EXIT, (unsigned)status, 0, 0);
     for (;;)
         ;

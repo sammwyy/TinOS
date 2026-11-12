@@ -158,8 +158,11 @@ can still stall this loop.
   after relocation and dependency initialization. `dlclose` counts direct
   opens and retains the dependency closure of all active handles and
   executable `DT_NEEDED` roots. Once unreachable, a library's private pages
-  are unmapped and freed; global read-only frames remain cached. TLS,
-  destructors, symbol versions and lazy binding remain unsupported.
+  are unmapped and freed; global read-only frames remain cached.
+  `DT_FINI` and `DT_FINI_ARRAY` callbacks are validated and invoked by the
+  libc in ring 3, in reverse dependency order on clean exit or before
+  `dlclose` unmaps a library. Faults and kills skip destructors. TLS,
+  symbol versions and lazy binding remain unsupported.
 - The initrd is imported as read-only backing for files in `/apps`. A
   write detaches the file into private heap storage. The module stays
   reserved while borrowed data exists.

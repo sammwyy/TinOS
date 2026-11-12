@@ -710,11 +710,14 @@ userspace startup or `tinos_dlopen()` wrapper, never inside the kernel.
 an open handle nor a dependency needs them; reopening the library creates
 fresh writable state and runs its constructors again. Outstanding function
 pointers must not be called after the final close. The read-only code cache
-remains pinned globally for reuse.
+remains pinned globally for reuse. `DT_FINI` and `DT_FINI_ARRAY` destructors
+run in reverse dependency order in ring 3 on a clean return from `main`,
+`tinos_exit()` or `tinos_dlclose()`. A kill or fault releases resources
+without running untrusted cleanup code.
 
 This is an initial ELF dynamic-linking subset, not a Linux/glibc loader:
 shared libraries can import symbols from supported `.so` dependencies, but
-not from the executable or host libc. TLS, destructors, symbol versioning,
+not from the executable or host libc. TLS, symbol versioning,
 text relocations and lazy binding remain unsupported; their ELF
 requirements are rejected instead of running them incorrectly. Executables
 still use a fixed load address and TinOS startup code; the small shared-object

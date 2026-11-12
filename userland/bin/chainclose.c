@@ -8,14 +8,15 @@ int main(void)
     int second = tinos_dlopen("libtinoschain.so");
     int state = tinos_dlopen("libtinostate.so");
     next_fn next = (next_fn)tinos_dlsym(chain, "tinos_chain_next");
+    unsigned *object = tinos_dlsym(state, "tinos_state_shared_symbol");
     tinos_system_info_t before, after;
     if (tinos_sysinfo(&before) < 0)
         return 1;
-    if (chain <= 0 || second != chain || state <= 0 || !next ||
+    if (chain <= 0 || second != chain || state <= 0 || !next || !object ||
         next() != 9 || tinos_dlclose(chain) != 0 ||
-        next() != 10 || tinos_dlclose(state) != 0 ||
+        next() != 10 || tinos_dlclose(second) != 0 ||
+        *object != 33 || tinos_dlclose(state) != 0 ||
         tinos_dlsym(state, "tinos_state_pointer") ||
-        next() != 11 || tinos_dlclose(second) != 0 ||
         tinos_dlsym(chain, "tinos_chain_next") ||
         tinos_dlclose(chain) != -1)
         return 1;

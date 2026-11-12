@@ -8,6 +8,11 @@ __attribute__((constructor)) static void initialize_chain(void)
     chain_initial_value = tinos_state_next();
 }
 
+__attribute__((destructor)) static void finalize_chain(void)
+{
+    tinos_state_shared_symbol = 33;
+}
+
 unsigned tinos_chain_initial_value(void)
 {
     return chain_initial_value;

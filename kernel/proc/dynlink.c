@@ -322,7 +322,7 @@ static bool open_recursive(const char *name, user_space_t *space,
 
 int dynlink_open(const char *name, user_space_t *space, dynlink_state_t *state)
 {
-    if (!name || !space || !state)
+    if (!name || !space || !state || state->close_mask)
         return -1;
     dynlink_state_t transaction = *state;
     if (transaction.next_initializer == transaction.initializer_count)
@@ -345,15 +345,11 @@ int dynlink_open(const char *name, user_space_t *space, dynlink_state_t *state)
     return slot + 1;
 }
 
-int dynlink_close(int handle, user_space_t *space, dynlink_state_t *state)
+static uint32_t reachable_after_close(const dynlink_state_t *state, int handle)
 {
-    if (!space || !state || handle < 1 || handle > (int)LIB_LIMIT ||
-        !state->opens[handle - 1])
-        return -1;
-    state->opens[handle - 1]--;
     uint32_t reachable = state->needed_roots;
     for (unsigned i = 0; i < LIB_LIMIT; i++)
-        if (state->opens[i])
+        if (state->opens[i] > (handle == (int)i + 1 ? 1u : 0u))
             reachable |= 1u << i;
     for (;;) {
         uint32_t previous = reachable;
@@ -361,8 +357,62 @@ int dynlink_close(int handle, user_space_t *space, dynlink_state_t *state)
             if (reachable & (1u << i))
                 reachable |= state->dependencies[i];
         if (previous == reachable)
-            break;
+            return reachable;
     }
+}
+
+int dynlink_prepare_close(int handle, dynlink_state_t *state)
+{
+    if (!state || state->close_mask || handle < 1 ||
+        handle > (int)LIB_LIMIT || !state->opens[handle - 1])
+        return -1;
+    uint32_t removed = state->mask & ~reachable_after_close(state, handle);
+    for (unsigned i = 0; i < state->finalizer_count; i++)
+        if ((removed & (1u << state->finalizers[i].slot)) &&
+            state->finalizers[i].address) {
+            state->close_mask = removed;
+            state->close_cursor = state->finalizer_count;
+            state->close_handle = handle;
+            return 1;
+        }
+    return 0;
+}
+
+uintptr_t dynlink_close_next_finalizer(dynlink_state_t *state)
+{
+    if (!state || !state->close_mask)
+        return 0;
+    while (state->close_cursor) {
+        dynlink_finalizer_t *entry =
+            &state->finalizers[--state->close_cursor];
+        if (!(state->close_mask & (1u << entry->slot)) || !entry->address)
+            continue;
+        uintptr_t callback = entry->address;
+        entry->address = 0;
+        return callback;
+    }
+    return 0;
+}
+
+int dynlink_close(int handle, user_space_t *space, dynlink_state_t *state)
+{
+    if (!space || !state || handle < 1 || handle > (int)LIB_LIMIT ||
+        !state->opens[handle - 1] ||
+        (state->close_mask &&
+         (state->close_handle != handle || state->close_cursor)))
+        return -1;
+    if (!state->close_mask) {
+        uint32_t removed =
+            state->mask & ~reachable_after_close(state, handle);
+        for (unsigned i = 0; i < state->finalizer_count; i++)
+            if ((removed & (1u << state->finalizers[i].slot)) &&
+                state->finalizers[i].address)
+                return -1;
+    }
+    state->close_mask = 0;
+    state->close_handle = 0;
+    state->opens[handle - 1]--;
+    uint32_t reachable = reachable_after_close(state, 0);
     uint32_t removed = state->mask & ~reachable;
     for (unsigned i = 0; i < LIB_LIMIT; i++) {
         if (!(removed & (1u << i)))
@@ -385,6 +435,12 @@ int dynlink_close(int handle, user_space_t *space, dynlink_state_t *state)
             state->initializers[remaining++] = callback;
     }
     state->initializer_count = remaining;
+    remaining = 0;
+    for (unsigned i = 0; i < state->finalizer_count; i++)
+        if (!(removed & (1u << state->finalizers[i].slot)) &&
+            state->finalizers[i].address)
+            state->finalizers[remaining++] = state->finalizers[i];
+    state->finalizer_count = remaining;
     return 0;
 }
 
@@ -393,6 +449,7 @@ typedef struct {
     uint32_t jmprel, pltrelsz;
     uint32_t pltrel;
     uint32_t init, init_array, init_array_size;
+    uint32_t fini, fini_array, fini_array_size;
     uint32_t needed[LIB_LIMIT];
     unsigned needed_count;
 } dynamic_info_t;
@@ -427,11 +484,11 @@ static bool read_dynamic(uintptr_t address, size_t bytes, dynamic_info_t *info)
         case DT_INIT: info->init = entries[i].value; break;
         case DT_INIT_ARRAY: info->init_array = entries[i].value; break;
         case DT_INIT_ARRAYSZ: info->init_array_size = entries[i].value; break;
+        case DT_FINI: info->fini = entries[i].value; break;
+        case DT_FINI_ARRAY: info->fini_array = entries[i].value; break;
+        case DT_FINI_ARRAYSZ: info->fini_array_size = entries[i].value; break;
         case DT_RELA:
         case DT_TEXTREL:
-        case DT_FINI:
-        case DT_FINI_ARRAY:
-        case DT_FINI_ARRAYSZ:
         case DT_PREINIT_ARRAY:
         case DT_PREINIT_ARRAYSZ:
         case DT_VERSYM:
@@ -748,6 +805,43 @@ static bool append_initializers(const program_header_t *ph, unsigned count,
     return true;
 }
 
+static bool append_finalizers(const program_header_t *ph, unsigned count,
+                              const user_space_t *space, uintptr_t base,
+                              const dynamic_info_t *info, unsigned slot,
+                              dynlink_state_t *state)
+{
+    if (info->fini_array_size % sizeof(uint32_t) ||
+        info->fini_array_size > DYNLINK_FINI_LIMIT * sizeof(uint32_t) ||
+        (info->fini_array_size && !info->fini_array) ||
+        (info->fini_array && !info->fini_array_size))
+        return false;
+    if (info->fini) {
+        uintptr_t address = base + info->fini;
+        if (!executable_library_address(ph, count, space, base, address) ||
+            state->finalizer_count == DYNLINK_FINI_LIMIT)
+            return false;
+        state->finalizers[state->finalizer_count++] =
+            (dynlink_finalizer_t){ address, (uint8_t)slot };
+    }
+    if (!info->fini_array_size)
+        return true;
+    if (!library_range(info->fini_array, info->fini_array_size) ||
+        !mapped(space, base + info->fini_array, info->fini_array_size, false))
+        return false;
+    const uint32_t *array = (const uint32_t *)(base + info->fini_array);
+    for (unsigned i = 0; i < info->fini_array_size / sizeof(*array); i++) {
+        uintptr_t address = array[i];
+        if (!address || address == UINT32_MAX)
+            continue;
+        if (!executable_library_address(ph, count, space, base, address) ||
+            state->finalizer_count == DYNLINK_FINI_LIMIT)
+            return false;
+        state->finalizers[state->finalizer_count++] =
+            (dynlink_finalizer_t){ address, (uint8_t)slot };
+    }
+    return true;
+}
+
 static bool link_library(unsigned slot, user_space_t *space,
                          dynlink_state_t *state, uint32_t visiting)
 {
@@ -794,7 +888,9 @@ static bool link_library(unsigned slot, user_space_t *space,
     if (!link_relocations(ph, header->phnum, space, library->base,
                           &info, state->mask) ||
         !append_initializers(ph, header->phnum, space, library->base,
-                             &info, state))
+                             &info, state) ||
+        !append_finalizers(ph, header->phnum, space, library->base,
+                           &info, slot, state))
         return false;
     state->dependencies[slot] = dependencies;
     return true;
@@ -849,6 +945,7 @@ bool dynlink_load(const void *image, size_t size, user_space_t *space,
         loaded |= 1u << (handle - 1);
     }
     if (info.init || info.init_array || info.init_array_size ||
+        info.fini || info.fini_array || info.fini_array_size ||
         info.rel || info.relsz ||
         (info.pltrelsz && (info.pltrel != DT_REL || !info.jmprel)) ||
         info.pltrelsz > 128 * sizeof(relocation_t) ||
@@ -884,6 +981,19 @@ uintptr_t dynlink_next_initializer(dynlink_state_t *state)
     if (!state || state->next_initializer >= state->initializer_count)
         return 0;
     return state->initializers[state->next_initializer++];
+}
+
+uintptr_t dynlink_next_finalizer(dynlink_state_t *state)
+{
+    if (!state)
+        return 0;
+    while (state->finalizer_count) {
+        dynlink_finalizer_t entry =
+            state->finalizers[--state->finalizer_count];
+        if (entry.address && (state->mask & (1u << entry.slot)))
+            return entry.address;
+    }
+    return 0;
 }
 
 uintptr_t dynlink_symbol(int handle, const char *name,

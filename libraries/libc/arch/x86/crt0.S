@@ -19,7 +19,14 @@ _start:
     pushl %ebx
     pushl %eax
     call main
-    movl %eax, %ebx
+    pushl %eax
+3:  movl $TINOS_SYS_DL_FINI_NEXT, %eax
+    int $0x80
+    testl %eax, %eax
+    jz 4f
+    call *%eax
+    jmp 3b
+4:  popl %ebx
     movl $TINOS_SYS_EXIT, %eax
     int $0x80
 1:  jmp 1b
