@@ -6,7 +6,7 @@ LIBC_BUILD := $(ROOT)/build/libc
 LIB_BUILD := $(ROOT)/build/userland/lib
 LIBC_APPS := cat fdtest spin spawn spawn_badarg multi gui_security stream \
              libprobe libtamper pcm_demo chainopen chainclose tlsprobe gdprobe \
-             gd_consumer_probe versionopen
+             gd_consumer_probe versionopen largeprobe
 LIBC_ELFS := $(addprefix $(BUILD)/,$(addsuffix .elf,$(LIBC_APPS)))
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
             image_viewer media_player
@@ -36,7 +36,8 @@ $(LIB_BUILD)/libtinosbmp.so $(LIB_BUILD)/libtinoswav.so \
 $(LIB_BUILD)/libtinostate.so $(LIB_BUILD)/libtinoschain.so \
 $(LIB_BUILD)/libtinostls.so $(LIB_BUILD)/libtinosrt.so \
 $(LIB_BUILD)/libtinosgd.so $(LIB_BUILD)/libtinosconsumer.so \
-$(LIB_BUILD)/libtinosversioned.so $(LIB_BUILD)/libtinosversionconsumer.so &: \
+$(LIB_BUILD)/libtinosversioned.so $(LIB_BUILD)/libtinosversionconsumer.so \
+$(LIB_BUILD)/libtinoslarge.so &: \
     $(ROOT)/userland/lib/Makefile $(wildcard $(ROOT)/userland/lib/*.c) \
     $(wildcard $(ROOT)/userland/lib/*.map) \
     $(wildcard $(ROOT)/userland/lib/include/tinos/*.h)

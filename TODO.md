@@ -106,6 +106,10 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
 - [x] Validate bounded `DT_VERSYM`, `DT_VERDEF` and `DT_VERNEED` tables.
       Resolve executable and library imports by required version, expose
       `dlvsym`, and reject missing versions or malformed records in QEMU.
+- [x] Replace 64 KiB shared-object regions with page-aligned virtual
+      allocations sized to ELF load segments. Share read-only pages and
+      keep private data while rejecting layouts that exceed user space;
+      exercise a library larger than 64 KiB at 8/16 MiB.
 - [ ] Extend the dynamic ABI with multiple user threads per process,
       weak-version fallbacks, eviction of globally cached read-only pages
       and more flexible address-space allocation. Reject unsupported ELF
@@ -124,9 +128,9 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
       signals, per-thread TLS, `clone`/`futex` equivalents, and errno.
       Test an actual glibc-built program before claiming compatibility.
 - [ ] Measure a real glibc image against the 4–16 MiB boot targets.
-      Replace fixed 64 KiB shared-object slots and the pinned code cache
-      with bounded virtual-space allocation and reclaim before enabling
-      libraries that cannot fit in the current low-memory profile.
+      Replace the pinned code cache with file-backed paging and reclaim,
+      and allocate more than twelve libraries where memory allows. The
+      current loader still holds the initrd and cached code in RAM.
 - [x] Bridge a Terminal's child stdin/stdout through bounded queues and
       process-scoped events. Block full writers, wake them when drained,
       report child exit, and allow a parent to kill its own child with Ctrl+C.

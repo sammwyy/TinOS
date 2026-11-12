@@ -1,11 +1,13 @@
 #include <tinos/dynlink.h>
 #include <tinos/fs.h>
+#include <tinos/heap.h>
 #include <tinos/kernel.h>
 #include <tinos/mm.h>
 #include <tinos/string.h>
 
-#define LIB_REGION_SIZE 0x10000u
-#define LIB_PAGES (LIB_REGION_SIZE / PAGE_SIZE)
+#define LIB_START (USER_BASE + 0x100000u)
+#define LIB_END USER_TLS_BASE
+#define LIB_MAX_SPAN (LIB_END - LIB_START)
 #define LIB_LIMIT DYNLINK_LIBRARY_LIMIT
 #define ELF_LOAD 1u
 #define ELF_DYNAMIC 2u
@@ -103,11 +105,20 @@ typedef struct PACKED {
 typedef struct {
     char name[FS_NAME_MAX];
     uintptr_t base;
-    void *frames[LIB_PAGES];
+    uint32_t span;
+    void **frames;
     bool ready;
 } shared_library_t;
 
 static shared_library_t libraries[LIB_LIMIT];
+
+static uint32_t library_span(uintptr_t base)
+{
+    for (unsigned i = 0; i < LIB_LIMIT; i++)
+        if (libraries[i].name[0] && libraries[i].base == base)
+            return libraries[i].span;
+    return 0;
+}
 
 static bool valid_image(const void *image, size_t size, uint16_t type,
                         const elf_header_t **header_out)
@@ -152,11 +163,13 @@ static bool mapped(const user_space_t *space, uintptr_t address,
 }
 
 static bool shared_segments_valid(const void *image, size_t size,
-                                  const elf_header_t *header)
+                                  const elf_header_t *header,
+                                  uint32_t *span_out)
 {
     const program_header_t *ph = programs(image, header);
     unsigned pages = 0;
     unsigned tls_count = 0;
+    uint32_t end = 0;
     for (unsigned i = 0; i < header->phnum; i++) {
         if (ph[i].type == ELF_INTERP)
             return false;
@@ -175,8 +188,8 @@ static bool shared_segments_valid(const void *image, size_t size,
             continue;
         if (ph[i].filesz > ph[i].memsz ||
             ph[i].offset > size || ph[i].filesz > size - ph[i].offset ||
-            ph[i].vaddr >= LIB_REGION_SIZE ||
-            ph[i].memsz > LIB_REGION_SIZE - ph[i].vaddr ||
+            ph[i].vaddr >= LIB_MAX_SPAN ||
+            ph[i].memsz > LIB_MAX_SPAN - ph[i].vaddr ||
             (ph[i].flags & (ELF_WRITE | ELF_EXECUTE)) ==
                 (ELF_WRITE | ELF_EXECUTE) ||
             (ph[i].offset & (PAGE_SIZE - 1)) !=
@@ -184,6 +197,8 @@ static bool shared_segments_valid(const void *image, size_t size,
             return false;
         uintptr_t first = ph[i].vaddr / PAGE_SIZE;
         uintptr_t last = (ph[i].vaddr + ph[i].memsz - 1) / PAGE_SIZE;
+        if (last + 1 > end)
+            end = last + 1;
         pages += (unsigned)(last - first + 1);
         for (unsigned j = 0; j < i; j++)
             if (ph[j].type == ELF_LOAD && ph[j].memsz &&
@@ -191,7 +206,8 @@ static bool shared_segments_valid(const void *image, size_t size,
                 ph[j].vaddr / PAGE_SIZE <= last)
                 return false;
     }
-    return pages && pages <= LIB_PAGES;
+    *span_out = end * PAGE_SIZE;
+    return pages != 0;
 }
 
 static bool load_tls(const void *image, const elf_header_t *header,
@@ -239,11 +255,13 @@ static bool load_tls(const void *image, const elf_header_t *header,
 
 static void discard_frames(shared_library_t *library)
 {
-    for (unsigned i = 0; i < LIB_PAGES; i++) {
+    for (unsigned i = 0; library->frames &&
+                         i < library->span / PAGE_SIZE; i++) {
         if (library->frames[i])
             pmm_free_frame(library->frames[i]);
-        library->frames[i] = NULL;
     }
+    kfree(library->frames);
+    library->frames = NULL;
 }
 
 static bool cache_readonly(const void *image, size_t size,
@@ -251,8 +269,13 @@ static bool cache_readonly(const void *image, size_t size,
                            const elf_header_t **header_out)
 {
     const elf_header_t *header;
+    uint32_t span;
     if (!valid_image(image, size, ELF_DYN, &header) ||
-        !shared_segments_valid(image, size, header))
+        !shared_segments_valid(image, size, header, &span) ||
+        span != library->span)
+        return false;
+    library->frames = kcalloc(span / PAGE_SIZE, sizeof(*library->frames));
+    if (!library->frames)
         return false;
     const program_header_t *ph = programs(image, header);
     for (unsigned i = 0; i < header->phnum; i++) {
@@ -293,17 +316,19 @@ static bool load_library(shared_library_t *library, user_space_t *space)
     fs_node_t *file;
     if (fs_resolve(fs_root(), path, &file) != FS_OK ||
         file->type != FS_FILE || !file->data_borrowed ||
-        !file->data || file->size > 65536)
+        !file->data)
         return false;
     const elf_header_t *header;
     if (!library->ready) {
         if (!cache_readonly(file->data, file->size, library, &header))
             return false;
         klog("[ld  ] cached %s read-only pages\n", library->name);
-    } else if (!valid_image(file->data, file->size, ELF_DYN, &header) ||
-               !shared_segments_valid(file->data, file->size, header)) {
-        return false;
     } else {
+        uint32_t span;
+        if (!valid_image(file->data, file->size, ELF_DYN, &header) ||
+            !shared_segments_valid(file->data, file->size, header, &span) ||
+            span != library->span)
+            return false;
         klog("[ld  ] reused %s read-only pages\n", library->name);
     }
     const program_header_t *ph = programs(file->data, header);
@@ -360,13 +385,33 @@ static int library_slot(const char *name)
     fs_node_t *file;
     if (fs_resolve(fs_root(), path, &file) != FS_OK ||
         file->type != FS_FILE || !file->data_borrowed ||
-        !file->data || file->size > 65536)
+        !file->data)
+        return -1;
+    const elf_header_t *header;
+    uint32_t span;
+    if (!valid_image(file->data, file->size, ELF_DYN, &header) ||
+        !shared_segments_valid(file->data, file->size, header, &span))
         return -1;
     for (unsigned i = 0; i < LIB_LIMIT; i++)
         if (!libraries[i].name[0]) {
+            uintptr_t base = LIB_START;
+            bool conflict;
+            do {
+                conflict = false;
+                if (span > LIB_END - base)
+                    return -1;
+                for (unsigned j = 0; j < LIB_LIMIT; j++)
+                    if (libraries[j].name[0] &&
+                        base < libraries[j].base + libraries[j].span &&
+                        libraries[j].base < base + span) {
+                        base = libraries[j].base + libraries[j].span;
+                        conflict = true;
+                        break;
+                    }
+            } while (conflict);
             strlcpy(libraries[i].name, name, sizeof(libraries[i].name));
-            libraries[i].base = USER_BASE + 0x100000u +
-                                i * LIB_REGION_SIZE;
+            libraries[i].base = base;
+            libraries[i].span = span;
             return (int)i;
         }
     return -1;
@@ -414,7 +459,7 @@ int dynlink_open(const char *name, user_space_t *space, dynlink_state_t *state)
         for (unsigned i = 0; i < LIB_LIMIT; i++) {
             if (!(transaction.mask & (1u << i)) || (original & (1u << i)))
                 continue;
-            for (unsigned p = 0; p < LIB_PAGES; p++)
+            for (unsigned p = 0; p < libraries[i].span / PAGE_SIZE; p++)
                 user_space_unmap(space, libraries[i].base + p * PAGE_SIZE);
         }
         return -1;
@@ -496,7 +541,7 @@ int dynlink_close(int handle, user_space_t *space, dynlink_state_t *state)
     for (unsigned i = 0; i < LIB_LIMIT; i++) {
         if (!(removed & (1u << i)))
             continue;
-        for (unsigned p = 0; p < LIB_PAGES; p++)
+        for (unsigned p = 0; p < libraries[i].span / PAGE_SIZE; p++)
             user_space_unmap(space, libraries[i].base + p * PAGE_SIZE);
         state->dependencies[i] = 0;
         ((uint32_t *)USER_TLS_TOP)[TINOS_TLS_BASE_WORD(i)] = 0;
@@ -510,7 +555,7 @@ int dynlink_close(int handle, user_space_t *space, dynlink_state_t *state)
         for (unsigned j = 0; j < LIB_LIMIT; j++)
             if ((removed & (1u << j)) &&
                 callback >= libraries[j].base &&
-                callback - libraries[j].base < LIB_REGION_SIZE)
+                callback - libraries[j].base < libraries[j].span)
                 unloaded = true;
         if (!unloaded)
             state->initializers[remaining++] = callback;
@@ -601,9 +646,10 @@ static bool string_at(const char *strings, uint32_t size, uint32_t offset,
 
 static bool dynamic_range(uintptr_t base, uint32_t offset, size_t length)
 {
-    if (base)
-        return offset < LIB_REGION_SIZE &&
-               length <= LIB_REGION_SIZE - offset;
+    if (base) {
+        uint32_t span = library_span(base);
+        return offset < span && length <= span - offset;
+    }
     return offset >= USER_BASE && offset < USER_BASE + 0x100000u &&
            length <= USER_BASE + 0x100000u - offset;
 }
@@ -886,8 +932,8 @@ static bool export_symbol(const shared_library_t *library,
     const program_header_t *ph = programs(file->data, header);
     for (unsigned i = 0; i < header->phnum; i++) {
         if (ph[i].type != ELF_DYNAMIC || ph[i].filesz > ph[i].memsz ||
-            ph[i].vaddr >= LIB_REGION_SIZE ||
-            ph[i].filesz > LIB_REGION_SIZE - ph[i].vaddr)
+            ph[i].vaddr >= library->span ||
+            ph[i].filesz > library->span - ph[i].vaddr)
             continue;
         uintptr_t dyn = library->base + ph[i].vaddr;
         if (!mapped(space, dyn, ph[i].filesz, false))
@@ -897,8 +943,8 @@ static bool export_symbol(const shared_library_t *library,
             (!info.hash && !info.gnu_hash) || !info.strtab || !info.symtab ||
             !info.strsz || info.strsz > 4096 ||
             info.syment != sizeof(symbol_t) ||
-            info.strtab > LIB_REGION_SIZE - info.strsz ||
-            info.symtab >= LIB_REGION_SIZE)
+            !dynamic_range(library->base, info.strtab, info.strsz) ||
+            !dynamic_range(library->base, info.symtab, sizeof(symbol_t)))
             return false;
         uint32_t symbols = 0;
         if (!dynamic_symbol_count(space, library->base, &info, &symbols) ||
@@ -932,7 +978,7 @@ static bool export_symbol(const shared_library_t *library,
             }
             if (((table[n].info & 15) == 2 ||
                  (table[n].info & 15) == 1) &&
-                table[n].value < LIB_REGION_SIZE &&
+                table[n].value < library->span &&
                 mapped(space, library->base + table[n].value, 1, false) &&
                 ((table[n].info & 15) != 2 ||
                  !((space->table[(library->base + table[n].value - USER_BASE) /
@@ -963,9 +1009,9 @@ static bool write_target(const program_header_t *ph, unsigned count,
     return false;
 }
 
-static bool library_range(uint32_t offset, size_t length)
+static bool library_range(uintptr_t base, uint32_t offset, size_t length)
 {
-    return offset < LIB_REGION_SIZE && length <= LIB_REGION_SIZE - offset;
+    return dynamic_range(base, offset, length);
 }
 
 static bool resolve_tls_symbol(const symbol_t *table, uint32_t index,
@@ -1020,15 +1066,16 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
                          info->relent != sizeof(relocation_t))) ||
         (info->pltrelsz && (!info->jmprel || info->pltrel != DT_REL)))
         return false;
-    if (!library_range(info->strtab, info->strsz) ||
-        !library_range(info->symtab, sizeof(symbol_t)) ||
-        (info->relsz && !library_range(info->rel, info->relsz)) ||
-        (info->pltrelsz && !library_range(info->jmprel, info->pltrelsz)) ||
+    if (!library_range(base, info->strtab, info->strsz) ||
+        !library_range(base, info->symtab, sizeof(symbol_t)) ||
+        (info->relsz && !library_range(base, info->rel, info->relsz)) ||
+        (info->pltrelsz &&
+         !library_range(base, info->jmprel, info->pltrelsz)) ||
         !mapped(space, base + info->strtab, info->strsz, false))
         return false;
     uint32_t symbols = 0;
     if (!dynamic_symbol_count(space, base, info, &symbols) ||
-        !library_range(info->symtab, symbols * sizeof(symbol_t)) ||
+        !library_range(base, info->symtab, symbols * sizeof(symbol_t)) ||
         !mapped(space, base + info->symtab, symbols * sizeof(symbol_t),
                 false))
         return false;
@@ -1048,7 +1095,7 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
         for (unsigned n = 0; n < sizes[group] / sizeof(*rel); n++) {
             uint32_t index = rel[n].info >> 8;
             uint32_t type = rel[n].info & 255u;
-            if (!library_range(rel[n].offset, sizeof(uint32_t)) ||
+            if (!library_range(base, rel[n].offset, sizeof(uint32_t)) ||
                 !write_target(ph, phnum, space, base,
                               base + rel[n].offset))
                 return false;
@@ -1058,7 +1105,7 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
             if (index && index < symbols && !table[index].section)
                 version = required_version(&versions, index, &filename);
             if (type == R_386_RELATIVE) {
-                if (index || !library_range(*target, 1) ||
+                if (index || !library_range(base, *target, 1) ||
                     !mapped(space, base + *target, 1, false))
                     return false;
                 *target += (uint32_t)base;
@@ -1103,7 +1150,7 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
                 return false;
             uintptr_t symbol = 0;
             if (table[index].section) {
-                if (!library_range(table[index].value, 1) ||
+                if (!library_range(base, table[index].value, 1) ||
                     !mapped(space, base + table[index].value, 1, false))
                     return false;
                 symbol = base + table[index].value;
@@ -1137,7 +1184,7 @@ static bool executable_library_address(const program_header_t *ph,
                                        const user_space_t *space,
                                        uintptr_t base, uintptr_t address)
 {
-    if (address < base || !library_range(address - base, 1) ||
+    if (address < base || !library_range(base, address - base, 1) ||
         !mapped(space, address, 1, false) ||
         (space->table[(address - USER_BASE) / PAGE_SIZE] & 2u))
         return false;
@@ -1168,7 +1215,7 @@ static bool append_initializers(const program_header_t *ph, unsigned count,
     }
     if (!info->init_array_size)
         return true;
-    if (!library_range(info->init_array, info->init_array_size) ||
+    if (!library_range(base, info->init_array, info->init_array_size) ||
         !mapped(space, base + info->init_array, info->init_array_size, false))
         return false;
     const uint32_t *array = (const uint32_t *)(base + info->init_array);
@@ -1204,7 +1251,7 @@ static bool append_finalizers(const program_header_t *ph, unsigned count,
     }
     if (!info->fini_array_size)
         return true;
-    if (!library_range(info->fini_array, info->fini_array_size) ||
+    if (!library_range(base, info->fini_array, info->fini_array_size) ||
         !mapped(space, base + info->fini_array, info->fini_array_size, false))
         return false;
     const uint32_t *array = (const uint32_t *)(base + info->fini_array);
@@ -1243,7 +1290,8 @@ static bool link_library(unsigned slot, user_space_t *space,
                 return false;
             dynamic = &ph[i];
         }
-    if (!dynamic || !library_range(dynamic->vaddr, dynamic->filesz) ||
+    if (!dynamic || !library_range(library->base, dynamic->vaddr,
+                                   dynamic->filesz) ||
         !mapped(space, library->base + dynamic->vaddr,
                 dynamic->filesz, false))
         return false;
@@ -1253,7 +1301,7 @@ static bool link_library(unsigned slot, user_space_t *space,
         (!info.hash && !info.gnu_hash) || !info.strtab || !info.symtab ||
         !info.strsz || info.strsz > 4096 ||
         info.syment != sizeof(symbol_t) ||
-        !library_range(info.strtab, info.strsz) ||
+        !library_range(library->base, info.strtab, info.strsz) ||
         !mapped(space, library->base + info.strtab, info.strsz, false))
         return false;
     const char *strings = (const char *)(library->base + info.strtab);

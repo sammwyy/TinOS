@@ -10,7 +10,8 @@ LIBS := $(BUILD)/libtinosbmp.so $(BUILD)/libtinoswav.so \
         $(BUILD)/libtinostate.so $(BUILD)/libtinoschain.so \
         $(BUILD)/libtinostls.so $(BUILD)/libtinosrt.so \
         $(BUILD)/libtinosgd.so $(BUILD)/libtinosconsumer.so \
-        $(BUILD)/libtinosversioned.so $(BUILD)/libtinosversionconsumer.so
+        $(BUILD)/libtinosversioned.so $(BUILD)/libtinosversionconsumer.so \
+        $(BUILD)/libtinoslarge.so
 
 .PHONY: all
 all: $(LIBS)
@@ -75,3 +76,8 @@ $(BUILD)/libtinosversionconsumer.so: $(BUILD)/version_consumer.o \
 		--hash-style=gnu --build-id=none \
 		-soname libtinosversionconsumer.so -o $@ \
 		$(BUILD)/version_consumer.o -L$(BUILD) -ltinosversioned
+
+$(BUILD)/libtinoslarge.so: $(BUILD)/large.o Makefile
+	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
+		--hash-style=gnu --build-id=none -soname libtinoslarge.so \
+		-o $@ $<

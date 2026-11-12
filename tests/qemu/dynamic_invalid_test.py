@@ -84,6 +84,16 @@ def invalid_tls_import(image):
     struct.pack_into("<I", image, offset + 4, 128 << 8 | 35)
     return image
 
+def invalid_large_segment(image):
+    phoff = struct.unpack_from("<I", image, 28)[0]
+    phsize, count = struct.unpack_from("<HH", image, 42)
+    for i in range(count):
+        offset = phoff + i * phsize
+        if struct.unpack_from("<I", image, offset)[0] == 1:
+            struct.pack_into("<I", image, offset + 20, 0x300000)
+            return image
+    raise AssertionError("library has no PT_LOAD")
+
 def version_definition(image, missing):
     headers = list(program_headers(image))
     dynamic = next(ph for ph in headers if ph[0] == 2)
@@ -134,6 +144,9 @@ def boot_variant(source, kernel, loader, mode, temp):
                 data = invalid_gnu_hash(bytearray(data))
             elif member.name == "lib/libtinostls.so" and mode == "tls":
                 data = invalid_tls(bytearray(data))
+            elif (member.name == "lib/libtinoslarge.so" and
+                  mode == "large_segment"):
+                data = invalid_large_segment(bytearray(data))
             elif (member.name == "lib/libtinosconsumer.so" and
                   mode == "tls_import"):
                 data = invalid_tls_import(bytearray(data))
@@ -189,11 +202,15 @@ def boot_variant(source, kernel, loader, mode, temp):
                 time.sleep(1)
             assert "ring3: versioned ELF imports resolve correctly" not in vm.serial()
             assert "[proc] spawned pid" not in vm.serial()
-        elif mode in ("tls", "tls_import"):
-            library = ("libtinostls.so" if mode == "tls" else
-                       "libtinosconsumer.so")
-            program = ("tlsprobe.elf" if mode == "tls" else
-                       "gd_consumer_probe.elf")
+        elif mode in ("tls", "tls_import", "large_segment"):
+            libraries = {"tls": "libtinostls.so",
+                         "tls_import": "libtinosconsumer.so",
+                         "large_segment": "libtinoslarge.so"}
+            programs = {"tls": "tlsprobe.elf",
+                        "tls_import": "gd_consumer_probe.elf",
+                        "large_segment": "largeprobe.elf"}
+            library = libraries[mode]
+            program = programs[mode]
             vm.line("run /apps/" + program)
             assert vm.wait_for_serial("[ld  ] rejected " + library,
                                       timeout=15), vm.serial()
@@ -221,12 +238,13 @@ def main():
     parser.add_argument("--loader", default="boot/x86/loader.asm")
     args = parser.parse_args()
     for mode in ("relocation", "dependency", "initializer", "hash", "tls",
-                 "tls_import", "version", "version_missing", "version_need"):
+                 "tls_import", "version", "version_missing", "version_need",
+                 "large_segment"):
         with tempfile.TemporaryDirectory(prefix="tinos-invalid-so-") as path:
             boot_variant(args.initrd, pathlib.Path(args.kernel),
                          pathlib.Path(args.loader), mode, pathlib.Path(path))
     print("invalid library relocation, dependency, initializer, GNU hash, "
-          "TLS and version metadata rejected: OK")
+          "TLS, version metadata and oversized segments rejected: OK")
 
 
 if __name__ == "__main__":

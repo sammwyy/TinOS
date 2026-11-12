@@ -148,7 +148,10 @@ can still stall this loop.
   `dlopen`/`dlsym`/`dlvsym`. SysV `DT_HASH` and bounded GNU `DT_GNU_HASH` tables
   support eager symbol lookup. Cyclic dependencies, invalid hash tables
   and invalid relocation targets fail
-  loading. At most twelve 64 KiB ET_DYN objects occupy distinct user regions.
+  loading. At most twelve ET_DYN objects occupy distinct page-aligned
+  regions sized to their load segments. The first-fit allocator confines
+  them to the space between the executable and TLS/stack, rejecting
+  overlaps or objects that cannot fit; there is no per-object 64 KiB cap.
   `kernel/arch/x86/paging.c` maps their cached read-only physical frames
   into each process and gives each process private writable pages. Code
   cache frames remain pinned until reboot; user processes cannot modify

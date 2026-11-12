@@ -695,14 +695,17 @@ mutable state.
 Image Viewer and Media Player use `libtinosbmp.so` and `libtinoswav.so`
 for their userspace decoders. Programs can also call `tinos_dlopen()` and
 `tinos_dlsym()` with a library basename from `/apps/lib`. Up to twelve
-64 KiB shared objects have fixed slots inside the 4 MiB i386 user address
-space. The kernel caches their read-only pages once, maps those physical
-frames into each process as read-only, and allocates writable data pages
-privately. The bounded cache remains in RAM until reboot; on a system
-without an initrd, no objects are loaded. QEMU tests cover reusing a
-library at 8 and 16 MiB, private state across processes, dependency
-resolution, rejection of malformed relocation targets and missing
-dependencies, invalid GNU hash tables, and a ring-3 write to shared code.
+shared objects receive page-aligned regions sized to their ELF load
+segments inside the 4 MiB i386 user address space. There is no 64 KiB
+per-library limit; the shared objects together must fit between the
+executable and user stack/TLS. The kernel caches their read-only pages
+once, maps those physical frames into each process as read-only, and
+allocates writable data pages privately. The bounded cache remains in
+RAM until reboot; on a system without an initrd, no objects are loaded.
+QEMU tests cover reusing a library larger than 64 KiB at 8 and 16 MiB,
+private state across processes, dependency resolution, rejection of
+malformed relocation targets and missing dependencies, invalid GNU hash
+tables, and a ring-3 write to shared code.
 `DT_INIT` and
 `DT_INIT_ARRAY` constructors run in dependency order through the TinOS
 userspace startup or `tinos_dlopen()` wrapper, never inside the kernel.

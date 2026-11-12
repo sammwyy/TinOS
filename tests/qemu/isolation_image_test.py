@@ -23,7 +23,8 @@ def main():
                      "lib/libtinostls.so", "lib/libtinosrt.so",
                      "lib/libtinosgd.so", "lib/libtinosconsumer.so",
                      "lib/libtinosversioned.so",
-                     "lib/libtinosversionconsumer.so")
+                     "lib/libtinosversionconsumer.so",
+                     "lib/libtinoslarge.so")
         for library in libraries:
             assert library in names, names
             header = archive.extractfile(library).read(20)

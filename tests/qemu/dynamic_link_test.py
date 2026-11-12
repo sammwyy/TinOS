@@ -96,6 +96,15 @@ def main():
         vm.line("run /apps/versionopen.elf")
         wait_new(vm, before, "ring3: versioned library dependency works")
 
+        large_marker = "ring3: large library keeps private data"
+        for count in (1, 2):
+            before = len(vm.serial())
+            vm.line("run /apps/largeprobe.elf")
+            wait_new(vm, before, large_marker)
+            assert vm.serial().count(large_marker) == count, vm.serial()
+        assert vm.serial().count("cached libtinoslarge.so read-only pages") == 1
+        assert vm.serial().count("reused libtinoslarge.so read-only pages") == 3
+
         before = len(vm.serial())
         vm.line("run /apps/libtamper.elf")
         wait_new(vm, before, "[proc] user exception 14")
