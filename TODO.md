@@ -77,9 +77,14 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
       bounded `DT_NEEDED`/eager relocation or `dlopen`/`dlsym`, share
       read-only physical code pages and keep per-process writable data.
       Verify 8/16 MiB boots, page protection and fault recovery.
-- [ ] Expand the dynamic linker beyond self-contained libraries: shared
-      object relocations/dependencies, TLS, constructors, symbol versions,
-      optional unload and more flexible address-space allocation.
+- [x] Follow bounded library `DT_NEEDED` chains and apply
+      `R_386_RELATIVE`, `R_386_32`, `R_386_GLOB_DAT` and `R_386_JUMP_SLOT`
+      to private writable pages. Verify a PIC library with initialized
+      pointers and another library importing both code and mutable data;
+      reject invalid relocation targets and missing dependencies in QEMU.
+- [ ] Extend the dynamic ABI with ring-3 constructors/destructors, TLS,
+      symbol versions, optional unload and more flexible address-space
+      allocation. Reject unsupported ELF metadata instead of skipping it.
 - [x] Bridge a Terminal's child stdin/stdout through bounded queues and
       process-scoped events. Block full writers, wake them when drained,
       report child exit, and allow a parent to kill its own child with Ctrl+C.

@@ -41,6 +41,23 @@ def main():
         assert vm.serial().count("reused libtinosbmp.so read-only pages") == 1
         assert vm.serial().count("reused libtinoswav.so read-only pages") == 1
 
+        chain_marker = "ring3: chained libraries keep private state"
+        for count in (1, 2):
+            before = len(vm.serial())
+            vm.line("run /apps/chainprobe.elf")
+            wait_new(vm, before, chain_marker)
+            assert vm.serial().count(chain_marker) == count, vm.serial()
+        assert vm.serial().count("cached libtinoschain.so read-only pages") == 1
+        assert vm.serial().count("cached libtinostate.so read-only pages") == 1
+        assert vm.serial().count("reused libtinoschain.so read-only pages") == 1
+        assert vm.serial().count("reused libtinostate.so read-only pages") == 1
+
+        before = len(vm.serial())
+        vm.line("run /apps/chainopen.elf")
+        wait_new(vm, before, "ring3: dlopen resolved a library dependency")
+        assert vm.serial().count("reused libtinoschain.so read-only pages") == 2
+        assert vm.serial().count("reused libtinostate.so read-only pages") == 2
+
         before = len(vm.serial())
         vm.line("run /apps/libtamper.elf")
         wait_new(vm, before, "[proc] user exception 14")

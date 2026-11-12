@@ -166,10 +166,11 @@ kernel: $(KERNEL)
 RAMFS := $(BUILD)/ramfs.tar
 USERLAND_APPS := hello fault badptr echo fpu io df textwrite cat fdtest \
                  spin spawn spawn_badarg multi gui_security stream \
-                 libprobe libtamper pcm_demo
+                 libprobe libtamper pcm_demo chainprobe chainopen
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
             image_viewer media_player
-USERLAND_LIBS := libtinosbmp.so libtinoswav.so
+USERLAND_LIBS := libtinosbmp.so libtinoswav.so \
+                 libtinostate.so libtinoschain.so
 SAMPLE_BMP := $(BUILD)/userland/media/demo.bmp
 SAMPLE_WAV := $(BUILD)/userland/media/demo.wav
 
@@ -265,6 +266,8 @@ check: test $(ISO)
 	python3 tests/qemu/user_spawn_test.py --iso $(ISO) --mem 8
 	python3 tests/qemu/dynamic_link_test.py --iso $(ISO) --mem 8
 	python3 tests/qemu/dynamic_link_test.py --iso $(ISO) --mem 16
+	python3 tests/qemu/dynamic_invalid_test.py --kernel $(KERNEL) \
+		--initrd $(RAMFS) --loader boot/x86/loader.asm
 	python3 tests/qemu/pcm_test.py --iso $(ISO) --mem 8
 	python3 tests/qemu/pcm_test.py --iso $(ISO) --mem 16
 

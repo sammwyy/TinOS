@@ -18,7 +18,8 @@ def main():
         assert names and "hello.elf" in names, names
         assert "media/demo.bmp" in names, names
         assert "media/demo.wav" in names, names
-        libraries = ("lib/libtinosbmp.so", "lib/libtinoswav.so")
+        libraries = ("lib/libtinosbmp.so", "lib/libtinoswav.so",
+                     "lib/libtinostate.so", "lib/libtinoschain.so")
         for library in libraries:
             assert library in names, names
             header = archive.extractfile(library).read(20)

@@ -685,22 +685,28 @@ descriptors and path-based metadata. Writes are limited to
 64 KiB per file, the installed `/apps` tree is read-only to userspace,
 and persistent disk writes, pipes and PTYs are not yet implemented.
 
-**Shared libraries.** The ELF32 loader reads `DT_NEEDED` and resolves
-`R_386_JUMP_SLOT`/`R_386_GLOB_DAT` symbols before starting a process.
+**Shared libraries.** The ELF32 loader follows bounded `DT_NEEDED` chains
+and resolves `R_386_RELATIVE`, `R_386_32`, `R_386_GLOB_DAT` and
+`R_386_JUMP_SLOT` relocations in writable library pages before starting
+a process. Library code can call into another `.so` and use its own private
+mutable state.
 Image Viewer and Media Player use `libtinosbmp.so` and `libtinoswav.so`
 for their userspace decoders. Programs can also call `tinos_dlopen()` and
-`tinos_dlsym()` with a library basename from `/apps/lib`. Up to four
+`tinos_dlsym()` with a library basename from `/apps/lib`. Up to eight
 64 KiB shared objects have fixed slots inside the 4 MiB i386 user address
 space. The kernel caches their read-only pages once, maps those physical
 frames into each process as read-only, and allocates writable data pages
 privately. The bounded cache remains in RAM until reboot; on a system
 without an initrd, no objects are loaded. QEMU tests cover reusing a
-library at 8 and 16 MiB and rejecting a ring-3 write to its code.
+library at 8 and 16 MiB, private state across processes, dependency
+resolution, rejection of malformed relocation targets and missing
+dependencies, and a ring-3 write to shared code.
 
 This is an initial ELF dynamic-linking subset, not a Linux/glibc loader:
-shared objects must be self-contained, with no relocations or dependencies
-of their own. There is no TLS, constructors, symbol versioning, lazy binding
-or `dlclose`, and executables still use a fixed load address.
+TLS, constructors, symbol versioning, text relocations, lazy binding and
+`dlclose` are not supported; their ELF requirements are rejected instead of
+running them incorrectly. Executables still use a fixed load address, and
+the small shared-object cache is pinned until reboot.
 
 ## Error handling
 

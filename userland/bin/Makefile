@@ -5,11 +5,12 @@ BUILD := $(ROOT)/build/userland
 LIBC_BUILD := $(ROOT)/build/libc
 LIB_BUILD := $(ROOT)/build/userland/lib
 LIBC_APPS := cat fdtest spin spawn spawn_badarg multi gui_security stream \
-             libprobe libtamper pcm_demo
+             libprobe libtamper pcm_demo chainopen
 LIBC_ELFS := $(addprefix $(BUILD)/,$(addsuffix .elf,$(LIBC_APPS)))
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
             image_viewer media_player
 GUI_ELFS := $(addprefix $(BUILD)/gui/,$(addsuffix .elf,$(GUI_APPS)))
+DYNAMIC_ELFS := $(BUILD)/chainprobe.elf
 DYNAMIC_APPS := image_viewer media_player
 STATIC_GUI_APPS := $(filter-out $(DYNAMIC_APPS),$(GUI_APPS))
 STATIC_GUI_ELFS := $(addprefix $(BUILD)/gui/,$(addsuffix .elf,$(STATIC_GUI_APPS)))
@@ -22,14 +23,16 @@ CFLAGS := -m32 -std=gnu11 -O2 -ffreestanding -fno-builtin \
 .PHONY: all
 all: $(BUILD)/hello.elf $(BUILD)/fault.elf $(BUILD)/badptr.elf \
      $(BUILD)/echo.elf $(BUILD)/fpu.elf $(BUILD)/io.elf \
-     $(BUILD)/df.elf $(BUILD)/textwrite.elf $(LIBC_ELFS) $(GUI_ELFS)
+     $(BUILD)/df.elf $(BUILD)/textwrite.elf $(LIBC_ELFS) $(GUI_ELFS) \
+     $(DYNAMIC_ELFS)
 
 $(LIBC_BUILD)/libtinos.a $(LIBC_BUILD)/crt0.o &: \
     $(ROOT)/libraries/libc/Makefile \
     $(wildcard $(ROOT)/libraries/libc/arch/x86/*)
 	$(MAKE) -C $(ROOT)/libraries/libc
 
-$(LIB_BUILD)/libtinosbmp.so $(LIB_BUILD)/libtinoswav.so &: \
+$(LIB_BUILD)/libtinosbmp.so $(LIB_BUILD)/libtinoswav.so \
+$(LIB_BUILD)/libtinostate.so $(LIB_BUILD)/libtinoschain.so &: \
     $(ROOT)/userland/lib/Makefile $(wildcard $(ROOT)/userland/lib/*.c) \
     $(wildcard $(ROOT)/userland/lib/include/tinos/*.h)
 	$(MAKE) -C $(ROOT)/userland/lib
@@ -72,5 +75,13 @@ $(BUILD)/gui/media_player.elf: $(BUILD)/media_player.o \
 		--no-dynamic-linker --hash-style=sysv -T link.ld -o $@ \
 		$(LIBC_BUILD)/crt0.o $(BUILD)/media_player.o \
 		$(LIBC_BUILD)/libtinos.a -L$(LIB_BUILD) -ltinoswav
+
+$(BUILD)/chainprobe.elf: $(BUILD)/chainprobe.o $(LIBC_BUILD)/crt0.o \
+    $(LIBC_BUILD)/libtinos.a $(LIB_BUILD)/libtinoschain.so link.ld
+	$(LD) -m elf_i386 -nostdlib -z noexecstack -z now --build-id=none \
+		--no-dynamic-linker --hash-style=sysv -rpath-link $(LIB_BUILD) \
+		-T link.ld -o $@ \
+		$(LIBC_BUILD)/crt0.o $(BUILD)/chainprobe.o \
+		$(LIBC_BUILD)/libtinos.a -L$(LIB_BUILD) -ltinoschain
 
 -include $(wildcard $(BUILD)/*.d)

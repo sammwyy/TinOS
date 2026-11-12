@@ -142,14 +142,16 @@ can still stall this loop.
   objects with the reusable BMP/WAV decoders. The boot image packages
   these binaries and sample BMP/WAV resources. The older ring-0 native
   app ABI is never packed.
-- `kernel/proc/dynlink.c` handles bounded ELF32 `DT_NEEDED` dependencies
-  and eager PLT symbol resolution, plus `dlopen`/`dlsym`. At most four
-  self-contained, 64 KiB ET_DYN objects occupy distinct user regions.
+- `kernel/proc/dynlink.c` follows bounded ELF32 `DT_NEEDED` chains,
+  applies `R_386_RELATIVE`, `R_386_32`, `R_386_GLOB_DAT` and
+  `R_386_JUMP_SLOT` only to private writable pages, and offers
+  `dlopen`/`dlsym`. Cyclic dependencies and invalid relocation targets fail
+  loading. At most eight 64 KiB ET_DYN objects occupy distinct user regions.
   `kernel/arch/x86/paging.c` maps their cached read-only physical frames
   into each process and gives each process private writable pages. Code
   cache frames remain pinned until reboot; user processes cannot modify
-  `/apps/lib` or write to the shared code pages. This subset does not
-  support recursive dependencies, library relocations, TLS or constructors.
+  `/apps/lib` or write to the shared code pages. TLS, constructors,
+  symbol versions, lazy binding and unload remain unsupported.
 - The initrd is imported as read-only backing for files in `/apps`. A
   write detaches the file into private heap storage. The module stays
   reserved while borrowed data exists.

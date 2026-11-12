@@ -103,6 +103,21 @@ bool user_space_map_shared(user_space_t *space, uintptr_t address, void *frame)
     return true;
 }
 
+void user_space_unmap(user_space_t *space, uintptr_t address)
+{
+    if (address < USER_BASE || address >= USER_REGION_END ||
+        (address & (PAGE_SIZE - 1)))
+        return;
+    size_t index = (address - USER_BASE) / PAGE_SIZE;
+    uint32_t entry = space->table[index];
+    if (!(entry & PDE_PRESENT))
+        return;
+    space->table[index] = 0;
+    __asm__ volatile("invlpg (%0)" : : "r"(address) : "memory");
+    if (!(entry & PTE_SHARED))
+        pmm_free_frame((void *)(uintptr_t)(entry & ~0xfffu));
+}
+
 void user_space_readonly(user_space_t *space, uintptr_t address)
 {
     size_t index = (address - USER_BASE) / PAGE_SIZE;
