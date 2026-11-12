@@ -70,9 +70,17 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
       selectable lists, buttons, action callbacks and subscribed signals.
       Port Calculator, About and Explorer and verify rendering, resize,
       invalid pointers and low RAM in QEMU at 8/16 MiB.
-- [ ] Port Editor, System Information, Control Panel and the media
-      apps from text-cell interfaces to the userland widget API; add
-      multiline editing, accessible focus, Unicode and scalable rendering.
+- [x] Restore the former visual layouts in userspace: generated bitmap icons,
+      Explorer's toolbar/path/tree/details, Calculator's display/keypad,
+      Editor's toolbar/document/status, About's gradient, System Information's
+      metrics, Control Panel's sidebar/cards, Image Viewer's fitted canvas
+      and Media Player's visualizer/transport. Scale initial surfaces to the
+      8/16 MiB budget without enabling old ring-0 callbacks.
+- [ ] Complete the former apps' missing interactions behind userland APIs:
+      Explorer rename/clipboard/drag, Editor selection/undo/redo,
+      Control Panel's network/audio configuration and Media Player's
+      playlists and format support. Do not show unsupported controls as
+      working settings. Add accessible focus, Unicode and scalable rendering.
       Add a trusted theme-setting service and notify views of palette changes;
       only the default palette and per-view overrides exist today.
 - [x] Add copied pixel surfaces (320x192 maximum, allocated per client)

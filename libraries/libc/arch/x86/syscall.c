@@ -177,7 +177,7 @@ int tinos_gui_surface_tile(int handle, unsigned x, unsigned y,
 
 int tinos_gui_theme(tinos_gui_theme_t *theme)
 {
-    return invoke(TINOS_SYS_GUI_THEME, (unsigned)theme, 0, 0);
+    return invoke(TINOS_SYS_GUI_THEME, (unsigned)theme, sizeof(*theme), 0);
 }
 
 int tinos_gui_timer(int handle, unsigned interval_ms)

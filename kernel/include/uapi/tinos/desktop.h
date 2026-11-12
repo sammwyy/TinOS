@@ -5,16 +5,19 @@
 
 /* Version 1: process-owned window handles and copied text-cell frames.
  * Version 2: bounded tiled XRGB8888 surfaces and the system color theme.
+ * The theme syscall accepts the caller's struct size; zero selects the
+ * original 40-byte palette for binaries built against the earlier ABI.
  * All fields have fixed widths; no kernel pointers cross this ABI. */
 #define TINOS_GUI_COLS 80u
 #define TINOS_GUI_ROWS 32u
 #define TINOS_GUI_TEXT_SIZE (TINOS_GUI_COLS * TINOS_GUI_ROWS)
 #define TINOS_GUI_IMAGE_WIDTH 320u
 #define TINOS_GUI_IMAGE_HEIGHT 192u
-#define TINOS_GUI_SURFACE_MAX_WIDTH 512u
-#define TINOS_GUI_SURFACE_MAX_HEIGHT 320u
+#define TINOS_GUI_SURFACE_MAX_WIDTH 800u
+#define TINOS_GUI_SURFACE_MAX_HEIGHT 600u
 #define TINOS_GUI_TILE_MAX_WIDTH 64u
 #define TINOS_GUI_TILE_MAX_HEIGHT 64u
+#define TINOS_GUI_THEME_V1_SIZE 40u
 
 #define TINOS_GUI_KEY    1u
 #define TINOS_GUI_CLOSE  2u
@@ -63,6 +66,8 @@ typedef struct {
     uint32_t revision;
     uint32_t background, surface, foreground, muted;
     uint32_t accent, accent_text, border, selection, danger;
+    uint32_t panel, panel_light, terminal_bg, terminal_text;
+    uint32_t folder, file, accent_light;
 } tinos_gui_theme_t;
 
 #define TINOS_DIRENT_FILE 1u

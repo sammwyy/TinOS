@@ -191,14 +191,19 @@ can still stall this loop.
   events. The process table wakes only the blocked owner of a window.
   It also accepts one bounded XRGB8888 surface per window, configured against
   the current client rectangle and updated with validated, copied 64x64
-  tiles. The 512x320 surface cap bounds per-window kernel memory to 640 KiB;
-  resizing preserves the previous surface when allocation fails. The
-  compositor supplies a versioned semantic palette, while
-  `libraries/libc/widgets.c` lays out, rasterizes and dispatches buttons,
-  fields, scrollable lists and signal notifications in ring 3. Calculator,
-  About and Explorer use this library; the remaining text-cell clients can
-  migrate without changing the compositor. No app-supplied callbacks cross
-  into the compositor.
+  tiles. The 800x600 surface cap bounds per-window kernel memory to about
+  1.83 MiB; 8 MiB clients choose smaller initial windows, and resizing
+  preserves the previous surface when allocation fails. The widget library
+  retries initial window creation at smaller sizes if a first surface cannot
+  be allocated. The compositor
+  supplies a size-negotiated semantic palette (old 40-byte callers only
+  receive that many bytes). `libraries/libc/widgets.c` handles layout,
+  reusable controls, signals and a ring-3 canvas painter. Its icon set is
+  downsampled from `resources/icons/` during the userspace build instead of
+  linking the large kernel atlas into every app. Explorer, Calculator,
+  Editor, About, System Information, Control Panel, Image Viewer and Media
+  Player paint old-style views through it; Terminal keeps the text-cell
+  console. No app-supplied callbacks cross into the compositor.
   Terminal, Explorer, Editor, Image Viewer, Media Player, Calculator,
   System Information, Control Panel and About are ring-3 programs using
   this ABI. Image Viewer

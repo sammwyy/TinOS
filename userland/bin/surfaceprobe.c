@@ -1,6 +1,22 @@
 #include <tinos/libc.h>
 #include <tinos/string.h>
 
+static int old_palette_is_bounded(void)
+{
+    struct {
+        uint32_t colors[TINOS_GUI_THEME_V1_SIZE / sizeof(uint32_t)];
+        uint32_t guard;
+    } old = { .guard = 0x13579bdfu };
+    int result;
+    __asm__ volatile ("int $0x80"
+                      : "=a"(result)
+                      : "a"(TINOS_SYS_GUI_THEME), "b"((uint32_t)&old),
+                        "c"(0u), "d"(0u)
+                      : "memory");
+    return result == 0 && old.colors[0] == 1 &&
+           old.guard == 0x13579bdfu;
+}
+
 int main(void)
 {
     int handle = tinos_gui_open("Surface test", 240, 180);
@@ -11,7 +27,8 @@ int main(void)
     uint32_t pixel = 0x00335577;
     int ok = tinos_gui_surface_size(handle, &size) == 0 &&
              size.width > 32 && size.height > 32 &&
-             tinos_gui_theme(&theme) == 0 && theme.revision == 1 &&
+             tinos_gui_theme(&theme) == 0 && theme.revision == 2 &&
+             old_palette_is_bounded() &&
              tinos_gui_surface_size(handle,
                     (tinos_gui_size_t *)0x00100000u) == -1 &&
              tinos_gui_surface_config(handle, 0, 32) == -1 &&

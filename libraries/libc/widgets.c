@@ -173,6 +173,113 @@ static void paint(tinos_widget_view_t *view, int tx, int ty, int tw, int th)
             break;
         }
     }
+    if (view->on_paint) {
+        tinos_canvas_t canvas = { view, tx, ty, tw, th };
+        view->on_paint(view, &canvas, view->context);
+    }
+}
+
+void tinos_canvas_fill(tinos_canvas_t *canvas, int x, int y, int width,
+                       int height, uint32_t color)
+{
+    if (canvas && width > 0 && height > 0)
+        fill(canvas->view, canvas->tx, canvas->ty, canvas->width,
+             canvas->height, x, y, width, height, color);
+}
+
+void tinos_canvas_frame(tinos_canvas_t *canvas, int x, int y, int width,
+                        int height, uint32_t color)
+{
+    tinos_canvas_fill(canvas, x, y, width, 1, color);
+    tinos_canvas_fill(canvas, x, y + height - 1, width, 1, color);
+    tinos_canvas_fill(canvas, x, y, 1, height, color);
+    tinos_canvas_fill(canvas, x + width - 1, y, 1, height, color);
+}
+
+void tinos_canvas_text(tinos_canvas_t *canvas, int x, int y, int max_width,
+                       const char *value, uint32_t color)
+{
+    if (canvas)
+        text(canvas->view, canvas->tx, canvas->ty, canvas->width,
+             canvas->height, x, y, max_width, value, color);
+}
+
+void tinos_canvas_gradient(tinos_canvas_t *canvas, int x, int y, int width,
+                           int height, uint32_t top, uint32_t bottom)
+{
+    if (!canvas || height <= 0)
+        return;
+    int start = maximum(y, canvas->ty);
+    int end = minimum(y + height, canvas->ty + canvas->height);
+    for (int py = start; py < end; py++) {
+        int t = py - y, d = maximum(1, height - 1);
+        uint32_t color = 0;
+        for (int shift = 0; shift <= 16; shift += 8) {
+            uint32_t a = (top >> shift) & 255u;
+            uint32_t b = (bottom >> shift) & 255u;
+            color |= ((a * (d - t) + b * t) / (uint32_t)d) << shift;
+        }
+        tinos_canvas_fill(canvas, x, py, width, 1, color);
+    }
+}
+
+void tinos_canvas_button(tinos_canvas_t *canvas, int x, int y, int width,
+                         int height, const char *label, bool active)
+{
+    if (!canvas || width < 4 || height < 4)
+        return;
+    const tinos_gui_theme_t *theme = &canvas->view->theme;
+    tinos_canvas_fill(canvas, x, y, width, height,
+                      active ? theme->panel_light : theme->panel);
+    tinos_canvas_fill(canvas, x, y, width, 1, theme->panel_light);
+    tinos_canvas_fill(canvas, x, y, 1, height, theme->panel_light);
+    tinos_canvas_fill(canvas, x, y + height - 1, width, 1, theme->border);
+    tinos_canvas_fill(canvas, x + width - 1, y, 1, height, theme->border);
+    tinos_canvas_frame(canvas, x, y, width, height,
+                       active ? theme->accent_light : theme->border);
+    if (label) {
+        int length = minimum((int)strlen(label), (width - 8) / 8);
+        int left = x + (width - length * 8) / 2;
+        tinos_canvas_text(canvas, left, y + (height - 16) / 2,
+                          width - (left - x), label, theme->foreground);
+    }
+}
+
+void tinos_canvas_image(tinos_canvas_t *canvas, int x, int y, int width,
+                        int height, const uint32_t *pixels,
+                        unsigned source_width, unsigned source_height)
+{
+    if (!canvas || !pixels || width <= 0 || height <= 0 ||
+        !source_width || !source_height)
+        return;
+    int left = maximum(maximum(x, canvas->tx), 0);
+    int top = maximum(maximum(y, canvas->ty), 0);
+    int right = minimum(minimum(x + width, canvas->tx + canvas->width),
+                        (int)canvas->view->width);
+    int bottom = minimum(minimum(y + height, canvas->ty + canvas->height),
+                         (int)canvas->view->height);
+    for (int py = top; py < bottom; py++)
+        for (int px = left; px < right; px++) {
+            unsigned sx = (unsigned)(px - x) * source_width / (unsigned)width;
+            unsigned sy = (unsigned)(py - y) * source_height / (unsigned)height;
+            uint32_t color = pixels[sy * source_width + sx];
+            unsigned alpha = color >> 24;
+            if (!alpha)
+                continue;
+            uint32_t *target = &canvas->view->tile[(py - canvas->ty) *
+                                                   canvas->width + px - canvas->tx];
+            if (alpha == 255) {
+                *target = color & 0x00ffffffu;
+            } else {
+                uint32_t previous = *target, blended = 0;
+                for (unsigned shift = 0; shift <= 16; shift += 8) {
+                    unsigned a = (color >> shift) & 255u;
+                    unsigned b = (previous >> shift) & 255u;
+                    blended |= ((a * alpha + b * (255 - alpha)) / 255u) << shift;
+                }
+                *target = blended;
+            }
+        }
 }
 
 int tinos_widget_open(tinos_widget_view_t *view, const char *title,
@@ -180,7 +287,23 @@ int tinos_widget_open(tinos_widget_view_t *view, const char *title,
 {
     if (!view || tinos_gui_theme(&view->theme) < 0)
         return -1;
-    view->handle = tinos_gui_open(title, width, height);
+    view->handle = -1;
+    for (unsigned attempt = 0; attempt < 3; attempt++) {
+        int handle = tinos_gui_open(title, width, height);
+        if (handle >= 0) {
+            tinos_gui_size_t size;
+            if (tinos_gui_surface_size(handle, &size) == 0 &&
+                tinos_gui_surface_config(handle,
+                    minimum(size.width, TINOS_GUI_SURFACE_MAX_WIDTH),
+                    minimum(size.height, TINOS_GUI_SURFACE_MAX_HEIGHT)) == 0) {
+                view->handle = handle;
+                break;
+            }
+            tinos_gui_close(handle);
+        }
+        width = maximum(200, width * 3 / 4);
+        height = maximum(160, height * 3 / 4);
+    }
     if (view->handle < 0)
         return -1;
     view->width = view->height = 0;

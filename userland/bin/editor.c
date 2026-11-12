@@ -1,9 +1,9 @@
 #include <tinos/string.h>
-#include <tinos/ui.h>
+#include <tinos/widgets.h>
 
 #define DOCUMENT_CAP 2048
 
-static tinos_ui_t ui;
+static tinos_widget_view_t ui;
 static char document[DOCUMENT_CAP];
 static char path[256] = "/users/sammy/note.txt";
 static unsigned length, cursor;
@@ -42,37 +42,109 @@ static void move_vertical(int down)
     cursor = next + (column < end - next ? column : end - next);
 }
 
-static void render(void)
+static const char *const toolbar_icons[] = {
+    "save", "new", "undo", "redo", "file", "editor", "file",
+};
+static const char *const toolbar_labels[] = {
+    "Save", "New", "Undo", "Redo", "Cut", "Copy", "Paste",
+};
+
+static void append(char *target, size_t cap, const char *part)
 {
-    tinos_ui_clear(&ui);
-    tinos_ui_text(&ui, 0, 0, path);
-    tinos_ui_text(&ui, 0, 1, "Ctrl+S Save   Esc Close");
+    size_t used = strlen(target);
+    if (used < cap)
+        tinos_strlcpy(target + used, part, cap - used);
+}
+
+static void paint(tinos_widget_view_t *view, tinos_canvas_t *canvas,
+                  void *context)
+{
+    (void)context;
+    const tinos_gui_theme_t *theme = &view->theme;
+    int w = (int)view->width, h = (int)view->height;
+    tinos_canvas_fill(canvas, 0, 0, w, h, 0xf0eff4u);
+    tinos_canvas_fill(canvas, 0, 0, w, 28, theme->panel);
+    tinos_canvas_fill(canvas, 0, 27, w, 1, theme->border);
+    int button_x = 4;
+    for (unsigned i = 0; i < 7; i++) {
+        int button_w = i ? 52 : 56;
+        if (button_x + button_w > w - 4)
+            break;
+        tinos_canvas_button(canvas, button_x, 3, button_w, 22, NULL, false);
+        tinos_canvas_icon(canvas, toolbar_icons[i], button_x + 3, 6, 16);
+        tinos_canvas_text(canvas, button_x + 22, 6, button_w - 24,
+                          toolbar_labels[i], theme->foreground);
+        button_x += button_w + 3;
+    }
     unsigned cursor_line = 0;
     for (unsigned i = 0; i < cursor; i++)
         if (document[i] == '\n')
             cursor_line++;
-    unsigned visible = ui.rows - 4;
+    unsigned visible = h > 66 ? (h - 28 - 22 - 16) / 16 : 1;
+    unsigned columns = w > 16 ? (w - 16) / 8 : 1;
     unsigned first = cursor_line >= visible ? cursor_line - visible + 1 : 0;
-    unsigned x = 0, y = 0;
-    unsigned cursor_x = cursor - line_start(cursor);
-    for (unsigned i = 0; i < length; i++) {
-        if (document[i] == '\n') {
-            x = 0;
-            y++;
-        } else {
-            if (y >= first && y < first + visible && x < ui.columns)
-                ui.cells[(2 + y - first) * ui.columns + x] =
-                    document[i] >= 32 && document[i] < 127 ?
-                    document[i] : ' ';
-            x++;
-        }
+    unsigned row = 0, start = 0;
+    while (row < first && start < length) {
+        if (document[start++] == '\n')
+            row++;
     }
+    char line[96];
+    for (unsigned y = 0; y < visible && 28 + 8 + (int)y * 16 + 16 <= h - 22; y++) {
+        unsigned end = line_end(start);
+        unsigned n = end - start;
+        if (n > columns)
+            n = columns;
+        if (n >= sizeof(line))
+            n = sizeof(line) - 1;
+        for (unsigned x = 0; x < n; x++)
+            line[x] = document[start + x] >= 32 && document[start + x] < 127 ?
+                      document[start + x] : ' ';
+        line[n] = '\0';
+        tinos_canvas_text(canvas, 8, 36 + (int)y * 16, w - 16,
+                          line, theme->foreground);
+        if (end == length)
+            break;
+        start = end + 1;
+    }
+    unsigned cursor_x = cursor - line_start(cursor);
     if (cursor_line >= first && cursor_line < first + visible &&
-        cursor_x < ui.columns)
-        ui.cells[(2 + cursor_line - first) * ui.columns + cursor_x] = '_';
-    tinos_ui_text(&ui, 0, ui.rows - 1,
-                  modified ? "Modified" : "Saved");
-    tinos_ui_present(&ui);
+        cursor_x < columns)
+        tinos_canvas_fill(canvas, 8 + (int)cursor_x * 8,
+                          36 + (int)(cursor_line - first) * 16,
+                          2, 16, theme->accent_light);
+
+    tinos_canvas_fill(canvas, 0, h - 22, w, 22, theme->panel);
+    tinos_canvas_fill(canvas, 0, h - 22, w, 1, theme->border);
+    unsigned total_lines = 1;
+    for (unsigned i = 0; i < length; i++)
+        if (document[i] == '\n')
+            total_lines++;
+    char status[320] = "";
+    char number[11];
+    append(status, sizeof(status), modified ? "*" : " ");
+    append(status, sizeof(status), path);
+    append(status, sizeof(status), "  line ");
+    tinos_u32(number, cursor_line + 1);
+    append(status, sizeof(status), number);
+    append(status, sizeof(status), "/");
+    tinos_u32(number, total_lines);
+    append(status, sizeof(status), number);
+    append(status, sizeof(status), "  col ");
+    tinos_u32(number, cursor_x + 1);
+    append(status, sizeof(status), number);
+    append(status, sizeof(status), "  ");
+    tinos_u32(number, length);
+    append(status, sizeof(status), number);
+    append(status, sizeof(status), " bytes");
+    tinos_canvas_text(canvas, 6, h - 19, w - 116, status, theme->muted);
+    tinos_canvas_text(canvas, w - 104, h - 19, 100,
+                      "Ctrl+S save", theme->muted);
+}
+
+static void render(void)
+{
+    ui.dirty = true;
+    tinos_widget_flush(&ui);
 }
 
 static void save(void)
@@ -110,13 +182,29 @@ int main(int argc, char **argv)
     }
     document[length] = '\0';
     cursor = length;
-    if (tinos_ui_open(&ui, "Text Editor", 500, 320) < 0)
+    tinos_system_info_t info;
+    bool roomy = tinos_sysinfo(&info) == 0 &&
+                 info.memory_total_kib >= 12288;
+    if (tinos_widget_open(&ui, "Text Editor",
+                          roomy ? 660 : 500, roomy ? 400 : 320) < 0)
         return 1;
+    ui.on_paint = paint;
     render();
     tinos_gui_event_t event;
     while (tinos_gui_event(ui.handle, &event) == 1) {
         if (event.type == TINOS_GUI_CLOSE)
             break;
+        if (event.type == TINOS_GUI_RESIZE) {
+            render();
+            continue;
+        }
+        if (event.type == TINOS_GUI_MOUSE && event.code == 1 &&
+            event.y >= 3 && event.y < 25 && event.x >= 4 &&
+            event.x < 60) {
+            save();
+            render();
+            continue;
+        }
         if (event.type != TINOS_GUI_KEY)
             continue;
         if (event.code == TINOS_KEY_ESCAPE)
@@ -150,6 +238,6 @@ int main(int argc, char **argv)
         }
         render();
     }
-    tinos_gui_close(ui.handle);
+    tinos_widget_close(&ui);
     return 0;
 }

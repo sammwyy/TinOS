@@ -686,11 +686,15 @@ def run_scenario(iso, shots_dir):
     vm = Tinos(iso, serial=os.path.join(shots_dir, "serial.log"), verbose=False)
     c = Checker()
 
-    def shot(name):
-        time.sleep(0.4)
+    def shot(name, contains=None):
         path = os.path.join(shots_dir, name + ".png")
-        vm.screenshot(path)
-        return Screen(path)
+        for _ in range(8 if contains else 1):
+            time.sleep(0.55)
+            vm.screenshot(path)
+            screen = Screen(path)
+            if contains is None or screen.has(contains):
+                return screen
+        return screen
 
     try:
         vm.start()
@@ -748,13 +752,18 @@ def run_scenario(iso, shots_dir):
                                        timeout=15), "editor is another process")
             c.check(shot("editor").has("orange"), "editor reads the file")
             vm.type("blue")
+            c.check(shot("editor-typed", contains="blue").has("blue"),
+                    "editor processes typed input")
             vm.key("ctrl", "s")
-            c.check(shot("editor-save").has("Saved"), "editor saves through libc")
+            editor_save = shot("editor-save")
+            c.check(editor_save.has("note.txt") and editor_save.has("bytes"),
+                    "editor updates its file status after saving")
             vm.key("alt", "f4")
             c.check(vm.wait_for_serial("closed window 2 'Text Editor'",
                                        timeout=15), "window close reaches the process")
             vm.line("cat /users/sammy/note.txt")
-            c.check(shot("terminal-readback").has("blue"), "saved data is visible")
+            c.check(shot("terminal-readback", contains="blue").has("blue"),
+                    "saved data is visible")
             vm.key("alt", "f4")
             c.check(vm.wait_for_serial("closed window 1 'Terminal'",
                                        timeout=15), "terminal exits after close")
@@ -767,7 +776,10 @@ def run_scenario(iso, shots_dir):
             vm.mouse_click(x + 20, y + 6)
             c.check(vm.wait_for_serial("opened window 3 'File Explorer'",
                                        timeout=15), "explorer opens in ring 3")
-            c.check(shot("explorer").has("README.txt"), "explorer lists files")
+            explorer = shot("explorer")
+            c.check(explorer.has("/users/sammy") and
+                    explorer.has("Home Folder"),
+                    "explorer opens in the original home-folder layout")
             vm.key("alt", "f4")
         vm.key("ctrl", "esc")
         menu = shot("menu-calculator")
@@ -780,7 +792,8 @@ def run_scenario(iso, shots_dir):
             vm.type("2+3*4")
             vm.key("ret")
             calc = shot("calculator")
-            c.check(calc.has("Result") and calc.has("14"),
+            c.check(any(62 <= x <= 334 and 72 <= y <= 110
+                        for x, y in calc.find("14")),
                     "calculator evaluates arithmetic in userspace")
             vm.key("alt", "f4")
         vm.key("ctrl", "esc")
@@ -804,10 +817,10 @@ def run_scenario(iso, shots_dir):
             c.check(vm.wait_for_serial("opened window 6 'Control Panel'",
                                        timeout=15), "settings app opens in ring 3")
             vm.type("2")
-            c.check(shot("keyboard-es").has("Spanish"),
+            c.check(shot("keyboard-es", contains="Spanish").has("Spanish"),
                     "userspace can configure keyboard through ioctl")
             vm.type("1")
-            c.check(shot("keyboard-us").has("English"),
+            c.check(shot("keyboard-us", contains="English").has("English"),
                     "keyboard setting can be restored")
             vm.key("alt", "f4")
         vm.key("ctrl", "esc")
@@ -818,11 +831,11 @@ def run_scenario(iso, shots_dir):
             vm.mouse_click(x + 20, y + 6)
             c.check(vm.wait_for_serial("opened window 7 'Image Viewer'",
                                        timeout=15), "image viewer runs in ring 3")
-            viewer = shot("image-viewer")
+            viewer = shot("image-viewer", contains="BMP 24/32-bit")
             c.check(viewer.has("BMP 24/32-bit"),
                     "userspace decoder loads the BMP resource")
-            c.check(viewer.image.getpixel((100, 120)) !=
-                    viewer.image.getpixel((52, 120)),
+            c.check(viewer.image.getpixel((180, 120)) !=
+                    viewer.image.getpixel((60, 120)),
                     "copied pixel surface composites into the window")
             vm.key("alt", "f4")
         vm.key("ctrl", "esc")
@@ -840,7 +853,7 @@ def run_scenario(iso, shots_dir):
                     "userspace WAV decoder streams to the audio driver")
             vm.key("r")
             vm.key("spc")
-            c.check(shot("media-pause").has("Paused"),
+            c.check(shot("media-pause", contains="Paused").has("Paused"),
                     "player can pause PCM playback through its handle")
             vm.key("alt", "f4")
         vm.key("ctrl", "esc")

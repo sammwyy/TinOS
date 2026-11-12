@@ -22,7 +22,8 @@ def launch(vm, path, name, number):
     x, y = matches[0]
     vm.mouse_click(x + 20, y + 6)
     title = {"calculator": "Calculator", "about": "About TinOS",
-             "explorer": "File Explorer"}[name]
+             "explorer": "File Explorer",
+             "control_panel": "Control Panel"}[name]
     assert vm.wait_for_serial(f"opened window {number} '{title}'",
                               timeout=15), vm.serial()
 
@@ -57,41 +58,49 @@ def main():
         vm.type("6*7")
         vm.key("ret")
         screen = capture(vm, path)
-        assert screen.has("Result") and screen.has("42")
-        clear = screen.find("Clear")
-        assert clear
-        vm.mouse_click(clear[0][0] + 10, clear[0][1] + 5)
-        assert capture(vm, path).has("Result: 0"), "button did not update signal"
-        vm.mouse_click(100, 180)
+        assert any(300 <= x <= 334 and 72 <= y <= 110
+                   for x, y in screen.find("42")), "calculator display is wrong"
+        assert screen.has("BS") and screen.has("C")
+        assert sum(screen.image.getpixel((66, 82))) + 150 < \
+               sum(screen.image.getpixel((66, 128))), \
+               "calculator lost its dark display and raised keypad"
+        vm.mouse_click(92, 135)
+        screen = capture(vm, path)
+        assert any(300 <= x <= 334 and 72 <= y <= 110
+                   for x, y in screen.find("0")), "C key did not clear display"
         vm.type("10+7")
         vm.key("ret")
-        assert capture(vm, path).has("17")
-        vm.mouse_drag(440, 285, 500, 318)
         screen = capture(vm, path)
-        assert screen.has("Result") and screen.has("17"), \
+        assert any(300 <= x <= 334 and 72 <= y <= 110
+                   for x, y in screen.find("17")), "calculator lost keyboard input"
+        vm.mouse_drag(340, 332, 410, 375)
+        screen = capture(vm, path)
+        assert screen.has("17"), \
             "layout lost data on resize"
         vm.key("alt", "f4")
         assert vm.wait_for_serial("closed window 3 'Calculator'", timeout=15)
 
         launch(vm, path, "about", 4)
         screen = capture(vm, path)
-        assert screen.has("SYSTEM") and screen.has("ring 3")
-        close = screen.find("Close")
-        assert close
-        vm.mouse_click(close[0][0] + 8, close[0][1] + 5)
+        assert screen.has("TinOS") and screen.has("desktop")
+        assert screen.image.getpixel((63, 75)) != \
+               screen.image.getpixel((63, 125)), "old gradient is missing"
+        vm.key("alt", "f4")
         assert vm.wait_for_serial("closed window 4 'About TinOS'",
                                   timeout=15), vm.serial()
 
         launch(vm, path, "explorer", 5)
         screen = capture(vm, path)
-        assert screen.has("FILES") and screen.has("README.txt")
-        banner = screen.image.getpixel((63, 75))
-        panel = screen.image.getpixel((63, 110))
-        assert sum(panel) > sum(banner) + 200, \
-            "themed pixels were not copied into the client surface"
-        open_button = screen.find("Open")
-        assert open_button
-        vm.mouse_click(open_button[0][0] + 10, open_button[0][1] + 5)
+        assert screen.has("Home Folder") and screen.has("Location:") \
+               and screen.has("/users/sammy"), \
+               "original explorer HUD is missing"
+        assert screen.image.getpixel((62, 210)) != \
+               screen.image.getpixel((240, 210)), \
+               "explorer lost its sidebar and file pane"
+        vm.key("backspace")
+        vm.key("backspace")
+        assert capture(vm, path).has("README.txt"), "cannot reach filesystem root"
+        vm.key("ret")
         assert capture(vm, path).has("/README.txt"), "file preview did not open"
         vm.key("esc")
         assert capture(vm, path).has("README.txt"), "preview did not close"
@@ -99,10 +108,22 @@ def main():
         vm.key("ret")
         screen = capture(vm, path)
         assert screen.has("/apps"), "directory navigation failed"
-        vm.mouse_drag(520, 347, 568, 367)
+        if args.mem >= 16:
+            vm.mouse_drag(740, 464, 785, 494)
+        else:
+            vm.mouse_drag(520, 347, 568, 367)
         assert capture(vm, path).has("/apps"), "directory lost after resize"
         vm.key("alt", "f4")
         assert vm.wait_for_serial("closed window 5 'File Explorer'",
+                                  timeout=15), vm.serial()
+        launch(vm, path, "control_panel", 6)
+        vm.type("2")
+        screen = capture(vm, path)
+        assert screen.has("Keyboard") and screen.has("Layout") and \
+               screen.has("Spanish"), "settings sidebar collapsed at low memory"
+        number = 7 if "opened window 7 'Control Panel'" in vm.serial() else 6
+        vm.key("alt", "f4")
+        assert vm.wait_for_serial(f"closed window {number} 'Control Panel'",
                                   timeout=15), vm.serial()
         assert "KERNEL PANIC" not in vm.serial()
         print(f"{args.mem} MiB ring-3 surfaces, widgets and resize: OK")

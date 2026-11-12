@@ -1,44 +1,62 @@
 #include <tinos/widgets.h>
 
 static tinos_widget_view_t ui;
-static bool closing;
+static const char *const about_lines[] = {
+    "TinOS 1.0.0",
+    "A tiny graphical operating system for your computer.",
+    "",
+    "It includes a desktop with a start menu, a command",
+    "line, a file manager, a text editor and more.",
+    "",
+    "Everything here runs from memory, so the system feels",
+    "fast and responsive, just like a real desktop.",
+    "",
+    "Shortcuts: Win/Ctrl+Esc start menu, Alt+Tab switch windows,",
+    "Alt+F4 close the current window.",
+};
 
-static void on_action(tinos_widget_view_t *view, unsigned id, void *context)
+static void paint(tinos_widget_view_t *view, tinos_canvas_t *canvas,
+                  void *context)
 {
-    (void)view;
     (void)context;
-    if (id == 1)
-        closing = true;
+    const tinos_gui_theme_t *theme = &view->theme;
+    tinos_canvas_fill(canvas, 0, 0, view->width, view->height,
+                      theme->background);
+    tinos_canvas_gradient(canvas, 0, 0, view->width, 74,
+                          theme->accent, theme->background);
+    tinos_canvas_icon(canvas, "tinos", 18, 14, 44);
+    tinos_canvas_text(canvas, 76, 22, view->width - 88,
+                      "TinOS 1.0.0", theme->foreground);
+    tinos_canvas_text(canvas, 76, 42, view->width - 88,
+                      "Lightweight and built to run on anything", theme->muted);
+    for (unsigned i = 0; i < sizeof(about_lines) / sizeof(about_lines[0]); i++)
+        tinos_canvas_text(canvas, 18, 88 + (int)i * 18,
+                          view->width - 36, about_lines[i],
+                          theme->foreground);
 }
 
 int main(void)
 {
-    if (tinos_widget_open(&ui, "About TinOS", 440, 240) < 0)
+    tinos_system_info_t info;
+    bool roomy = tinos_sysinfo(&info) == 0 &&
+                 info.memory_total_kib >= 12288;
+    if (tinos_widget_open(&ui, "About TinOS",
+                          roomy ? 512 : 440, roomy ? 420 : 320) < 0)
         return 1;
-    ui.on_action = on_action;
-    int banner = tinos_widget_add(&ui, 0, TINOS_WIDGET_BANNER, 0,
-                                  "TINOS / SYSTEM", 0, 32, 0);
-    int panel = tinos_widget_add(&ui, 0, TINOS_WIDGET_PANEL, 0, NULL,
-                                 0, 112, 1);
-    if (banner < 0 || panel < 0 ||
-        tinos_widget_add(&ui, panel, TINOS_WIDGET_LABEL, 0,
-                         "A small OS with isolated apps.", 0, 24, 0) < 0 ||
-        tinos_widget_add(&ui, panel, TINOS_WIDGET_LABEL, 0,
-                         "ELF32   |   ring 3   |   i386", 0, 24, 0) < 0 ||
-        tinos_widget_add(&ui, 0, TINOS_WIDGET_BUTTON, 1,
-                         "Close", 100, 32, 0) < 0 ||
-        tinos_widget_flush(&ui) < 0) {
+    ui.on_paint = paint;
+    if (tinos_widget_flush(&ui) < 0) {
         tinos_widget_close(&ui);
         return 1;
     }
 
     tinos_gui_event_t event;
-    while (!closing && tinos_gui_event(ui.handle, &event) == 1) {
+    while (tinos_gui_event(ui.handle, &event) == 1) {
         if (event.type == TINOS_GUI_CLOSE ||
             (event.type == TINOS_GUI_KEY && event.code == TINOS_KEY_ESCAPE))
             break;
-        tinos_widget_event(&ui, &event);
-        if (!closing && tinos_widget_flush(&ui) < 0)
+        if (event.type == TINOS_GUI_RESIZE)
+            ui.dirty = true;
+        if (tinos_widget_flush(&ui) < 0)
             break;
     }
     tinos_widget_close(&ui);

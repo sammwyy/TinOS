@@ -272,13 +272,21 @@ void syscall_dispatch(regs_t *frame)
         return;
     }
     case TINOS_SYS_GUI_THEME: {
+        unsigned bytes = frame->ecx ? frame->ecx : TINOS_GUI_THEME_V1_SIZE;
+        if (bytes != TINOS_GUI_THEME_V1_SIZE &&
+            bytes != sizeof(tinos_gui_theme_t)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
         tinos_gui_theme_t theme;
-        if (!process_user_buffer(frame->ebx, sizeof(theme), true)) {
+        if (!process_user_buffer(frame->ebx, bytes, true)) {
             frame->eax = (uint32_t)-1;
             return;
         }
         desktop_user_window_theme(&theme);
-        memcpy((void *)(uintptr_t)frame->ebx, &theme, sizeof(theme));
+        if (bytes == TINOS_GUI_THEME_V1_SIZE)
+            theme.revision = 1;
+        memcpy((void *)(uintptr_t)frame->ebx, &theme, bytes);
         frame->eax = 0;
         return;
     }

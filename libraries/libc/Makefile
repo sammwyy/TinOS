@@ -32,10 +32,24 @@ $(BUILD)/widgets.o: widgets.c include/tinos/widgets.h include/tinos/libc.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD)/ui_icons.c: $(ROOT)/tools/gen_user_icons.py \
+                     $(ROOT)/tools/gen_icons.py \
+                     $(wildcard $(ROOT)/resources/icons/*.bmp)
+	@mkdir -p $(BUILD)
+	python3 $(ROOT)/tools/gen_user_icons.py $(ROOT)/resources/icons $@
+
+$(BUILD)/ui_icons.o: $(BUILD)/ui_icons.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/widgets_icons.o: widgets_icons.c include/tinos/widgets.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD)/string.o: string.c include/tinos/string.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/libtinos.a: $(BUILD)/syscall.o $(BUILD)/ui.o $(BUILD)/string.o \
-                     $(BUILD)/widgets.o $(BUILD)/widget_font.o
+                     $(BUILD)/widgets.o $(BUILD)/widget_font.o \
+                     $(BUILD)/widgets_icons.o $(BUILD)/ui_icons.o
 	$(AR) rcsD $@ $^

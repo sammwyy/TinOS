@@ -112,7 +112,8 @@ shell atlas.  The legacy `icon_t` values remain as compatibility handles, but
 `widget_icon()` resolves them exclusively to those named bitmap resources;
 custom code can use `widget_icon_name(x, y, size, "name")` directly.
 
-The current File Explorer browses directories, previews text and launches
+The current File Explorer opens the user's home directory, browses other
+directories, previews text and launches
 Image Viewer for `.bmp` files and Media Player for `.wav` files.
 Image Viewer decodes uncompressed 24/32-bit
 BMPs (up to 320x192) in ring 3 and submits copied pixels to its own window;
@@ -239,16 +240,21 @@ do not fit. Widget actions and
 signal subscriptions run entirely in the owning process; a changed signal
 marks the view dirty, and `tinos_widget_flush()` paints it on demand.
 Colors come from the compositor's semantic system palette; an application
-can override its local palette without changing the system theme. Calculator
-and About use this toolkit, as does Explorer with a scrollable file list.
-The compositor validates window ownership,
-geometry, and each copied 64x64-maximum pixel tile. A window surface is at
-most 512x320 pixels to bound RAM on 8 MiB machines; if growth fails during
-resize, the old surface remains usable. Existing text and BMP image APIs
-remain available. This is a small immediate-mode/repaint-on-change toolkit,
-not React, CSS or a complete retained widget ecosystem: the other apps still
-need their visual interfaces ported, and system-wide theme switching is
-not implemented yet.
+can override its local palette without changing the system theme. A userspace
+canvas painter and a compact, generated copy of the original bitmap icons
+also let custom widgets keep the historical TinOS designs without running
+application drawing callbacks in ring 0. Explorer, Calculator, Editor, About,
+System Information, Control Panel, Image Viewer and Media Player now paint
+their old-style views through this toolkit; Terminal keeps its dark,
+text-cell console. The compositor validates window ownership, geometry, and
+each copied 64x64-maximum pixel tile. A surface can reach 800x600 (about
+1.83 MiB), but apps open smaller windows at 8 MiB; failed growth preserves
+the old surface, and an initial allocation failure retries at smaller window
+sizes. Existing text and BMP image APIs remain available. The
+palette syscall negotiates its struct size so earlier 40-byte clients remain
+safe. This is not React or CSS: system-wide theme switching and some former
+app actions still need ports (Explorer rename/clipboard, Editor undo/selection,
+Control Panel network configuration, media playlists and formats).
 
 The mouse (if present - QEMU provides a PS/2 mouse by default) can click the
 Start button and menu entries, focus windows, drag them by the title bar,
@@ -259,8 +265,8 @@ raise or minimise a window.
 ### Historical Graphical App Features
 
 The sections below describe the former ring-0 GUI implementations, kept as
-porting references under `apps/`. The new userspace programs do not yet
-implement all these features.
+porting references under `apps/`. Their visual structure has userspace
+counterparts; the new programs do not yet implement every historical action.
 
 ### Calculator
 

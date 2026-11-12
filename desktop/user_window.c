@@ -285,12 +285,17 @@ int desktop_user_window_surface_tile(uint32_t pid,
 void desktop_user_window_theme(tinos_gui_theme_t *theme)
 {
     *theme = (tinos_gui_theme_t){
-        .revision = 1,
+        .revision = 2,
         .background = COLOR_WINDOW_BG, .surface = COLOR_PANEL_LIGHT,
         .foreground = COLOR_TEXT, .muted = COLOR_TEXT_DIM,
         .accent = COLOR_ACCENT_DARK, .accent_text = RGB(0xff, 0xff, 0xff),
         .border = COLOR_BORDER, .selection = COLOR_SELECTION,
         .danger = COLOR_DANGER,
+        .panel = COLOR_PANEL, .panel_light = COLOR_PANEL_LIGHT,
+        .terminal_bg = COLOR_TERMINAL_BG,
+        .terminal_text = COLOR_TERMINAL_TEXT,
+        .folder = COLOR_FOLDER, .file = COLOR_FILE,
+        .accent_light = COLOR_ACCENT,
     };
 }
 

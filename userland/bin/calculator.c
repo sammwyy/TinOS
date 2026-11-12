@@ -11,8 +11,11 @@ static tinos_widget_view_t ui;
 static tinos_signal_t calculation;
 static char expression[64];
 static char result[32] = "0";
-static char result_label[48] = "Result: 0";
 static int evaluated;
+static const char *const buttons[20] = {
+    "C", "BS", "(", ")", "7", "8", "9", "/", "4", "5", "6", "*",
+    "1", "2", "3", "-", "0", "%", "=", "+",
+};
 
 static int32_t parse_expression(parser_t *parser);
 
@@ -101,8 +104,6 @@ static void calculate(void)
         }
     }
     evaluated = 1;
-    tinos_strlcpy(result_label, "Result: ", sizeof(result_label));
-    tinos_strlcpy(result_label + 8, result, sizeof(result_label) - 8);
     tinos_signal_set(&calculation, tinos_signal_get(&calculation) + 1);
 }
 
@@ -110,49 +111,85 @@ static void clear(void)
 {
     expression[0] = '\0';
     tinos_strlcpy(result, "0", sizeof(result));
-    tinos_strlcpy(result_label, "Result: 0", sizeof(result_label));
     evaluated = 0;
     tinos_signal_set(&calculation, tinos_signal_get(&calculation) + 1);
 }
 
-static void on_action(tinos_widget_view_t *view, unsigned id, void *context)
+static void grid_metrics(int *width, int *height, int *gap)
 {
-    (void)view;
+    *gap = 6;
+    *width = ((int)ui.width - 24 - 3 * *gap) / 4;
+    *height = ((int)ui.height - 58 - 12 - 4 * 8) / 5;
+    if (*height < 24)
+        *height = 24;
+}
+
+static void paint(tinos_widget_view_t *view, tinos_canvas_t *canvas,
+                  void *context)
+{
     (void)context;
-    if (id == 1)
+    const tinos_gui_theme_t *theme = &view->theme;
+    int w, h, gap;
+    grid_metrics(&w, &h, &gap);
+    tinos_canvas_fill(canvas, 0, 0, view->width, view->height,
+                      theme->background);
+    tinos_canvas_fill(canvas, 12, 12, view->width - 24, 36, 0x1c222du);
+    tinos_canvas_frame(canvas, 12, 12, view->width - 24, 36,
+                       theme->border);
+    int length = strlen(evaluated ? result : expression);
+    const char *shown = evaluated ? result :
+                        (length ? expression : result);
+    tinos_canvas_text(canvas, (int)view->width - 20 - (int)strlen(shown) * 8,
+                      22, view->width - 32, shown,
+                      result[0] == 'E' ? theme->danger : theme->terminal_text);
+    for (int row = 0; row < 5; row++)
+        for (int col = 0; col < 4; col++) {
+            const char *label = buttons[row * 4 + col];
+            int x = 12 + col * (w + gap);
+            int y = 58 + row * (h + 8);
+            tinos_canvas_button(canvas, x, y, w, h, NULL, false);
+            int len = strlen(label);
+            bool special = label[0] == '+' || label[0] == '-' ||
+                           label[0] == '*' || label[0] == '/' ||
+                           label[0] == '%' || label[0] == '=';
+            tinos_canvas_text(canvas, x + (w - len * 8) / 2,
+                              y + (h - 16) / 2, w, label,
+                              special ? theme->accent : theme->foreground);
+        }
+}
+
+static void press(const char *label)
+{
+    if (label[0] == '=')
         calculate();
-    else if (id == 2)
+    else if (label[0] == 'C')
         clear();
+    else if (label[0] == 'B') {
+        size_t len = strlen(expression);
+        if (len)
+            expression[len - 1] = '\0';
+        evaluated = 0;
+    } else {
+        if (evaluated && label[0] >= '0' && label[0] <= '9')
+            expression[0] = '\0';
+        size_t len = strlen(expression);
+        if (len + 1 < sizeof(expression)) {
+            expression[len] = label[0];
+            expression[len + 1] = '\0';
+        }
+        evaluated = 0;
+    }
+    ui.dirty = true;
 }
 
 int main(void)
 {
-    if (tinos_widget_open(&ui, "Calculator", 400, 250) < 0)
+    if (tinos_widget_open(&ui, "Calculator", 300, 300) < 0)
         return 1;
     tinos_signal_init(&calculation, 0);
     tinos_signal_watch(&calculation, &ui);
-    ui.on_action = on_action;
-    int banner = tinos_widget_add(&ui, 0, TINOS_WIDGET_BANNER, 0,
-                                  "CALCULATOR / EXPRESSION", 0, 32, 0);
-    int panel = tinos_widget_add(&ui, 0, TINOS_WIDGET_PANEL, 0, NULL,
-                                 0, 50, 1);
-    if (banner < 0 || panel < 0 ||
-        tinos_widget_add(&ui, panel, TINOS_WIDGET_LABEL, 0,
-                         result_label, 0, 24, 0) < 0 ||
-        tinos_widget_field(&ui, 0, 1, expression, sizeof(expression), 0) < 0) {
-        tinos_widget_close(&ui);
-        return 1;
-    }
-    int buttons = tinos_widget_add(&ui, 0, TINOS_WIDGET_ROW, 0, NULL,
-                                   0, 46, 0);
-    if (buttons < 0 ||
-        tinos_widget_add(&ui, buttons, TINOS_WIDGET_BUTTON, 1,
-                         "Evaluate", 104, 30, 1) < 0 ||
-        tinos_widget_add(&ui, buttons, TINOS_WIDGET_BUTTON, 2,
-                         "Clear", 88, 30, 1) < 0 ||
-        tinos_widget_add(&ui, 0, TINOS_WIDGET_LABEL, 0,
-                         "Type an expression. Enter to evaluate.", 0, 24, 0) < 0 ||
-        tinos_widget_flush(&ui) < 0) {
+    ui.on_paint = paint;
+    if (tinos_widget_flush(&ui) < 0) {
         tinos_widget_close(&ui);
         return 1;
     }
@@ -162,20 +199,30 @@ int main(void)
             (event.type == TINOS_GUI_KEY &&
              event.code == TINOS_KEY_ESCAPE))
             break;
-        if (event.type == TINOS_GUI_KEY && event.ch == '=' &&
-            ui.focused > 0 && ui.nodes[ui.focused].kind == TINOS_WIDGET_FIELD) {
-            calculate();
-        } else {
-            if (evaluated && event.type == TINOS_GUI_KEY &&
-                event.ch >= '0' && event.ch <= '9' &&
-                ui.focused > 0 &&
-                ui.nodes[ui.focused].kind == TINOS_WIDGET_FIELD)
-                expression[0] = '\0';
-            tinos_widget_event(&ui, &event);
-            if (event.type == TINOS_GUI_KEY &&
-                event.code != TINOS_KEY_ENTER &&
-                event.code != TINOS_KEY_TAB)
-                evaluated = 0;
+        if (event.type == TINOS_GUI_KEY) {
+            char label[2] = { (char)event.ch, '\0' };
+            if (event.code == TINOS_KEY_ENTER)
+                press("=");
+            else if (event.code == TINOS_KEY_BACKSPACE)
+                press("BS");
+            else if ((event.ch >= '0' && event.ch <= '9') ||
+                     event.ch == '+' || event.ch == '-' || event.ch == '*' ||
+                     event.ch == '/' || event.ch == '%' || event.ch == '(' ||
+                     event.ch == ')' || event.ch == '=' ||
+                     event.ch == 'c' || event.ch == 'C')
+                press(event.ch == 'c' ? "C" : label);
+        } else if (event.type == TINOS_GUI_MOUSE && event.code == 1) {
+            int w, h, gap;
+            grid_metrics(&w, &h, &gap);
+            for (int row = 0; row < 5; row++)
+                for (int col = 0; col < 4; col++) {
+                    int x = 12 + col * (w + gap), y = 58 + row * (h + 8);
+                    if (event.x >= x && event.y >= y &&
+                        event.x - x < w && event.y - y < h)
+                        press(buttons[row * 4 + col]);
+                }
+        } else if (event.type == TINOS_GUI_RESIZE) {
+            ui.dirty = true;
         }
         if (tinos_widget_flush(&ui) < 0)
             break;
