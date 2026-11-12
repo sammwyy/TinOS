@@ -10,6 +10,22 @@
 #define TINOS_SYS_GETPID 6u
 #define TINOS_SYS_SPAWN  7u
 #define TINOS_SYS_WAIT   8u
+#define TINOS_SYS_READDIR 9u
+#define TINOS_SYS_STAT   10u
+#define TINOS_SYS_GUI_OPEN 11u
+#define TINOS_SYS_GUI_PRESENT 12u
+#define TINOS_SYS_GUI_EVENT 13u
+#define TINOS_SYS_GUI_CLOSE 14u
+#define TINOS_SYS_MKDIR 15u
+#define TINOS_SYS_UNLINK 16u
+
+/* i386 Linux-compatible open flag values for the implemented subset. */
+#define TINOS_O_RDONLY 0u
+#define TINOS_O_WRONLY 1u
+#define TINOS_O_RDWR   2u
+#define TINOS_O_CREAT  0x40u
+#define TINOS_O_TRUNC  0x200u
+#define TINOS_O_APPEND 0x400u
 
 /* spawn: EBX path, ECX path length, EDX argc, ESI user argv array.
  * wait: EBX child PID, ECX optional pointer to a 32-bit exit status. */

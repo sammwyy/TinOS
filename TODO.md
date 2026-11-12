@@ -61,9 +61,11 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
 - [x] Replace `app_entry_t.launch` callbacks in the desktop registry with
       executable paths. Start menu selections use `process_spawn()` and
       share the ring-3 ELF validation and address-space setup with `run`.
-- [ ] Port the retired graphical programs to userspace. Until a framebuffer
-      device, client protocol and GUI libraries exist, only text/serial
-      output is available to menu-launched processes.
+- [x] Add a bounded window-handle/text-cell/event ABI. Port Terminal,
+      Explorer, Editor and About to ELF32 ring-3 clients using libc.
+- [ ] Port the remaining graphical programs and advanced controls. Add a
+      framebuffer/shared-buffer protocol for pixel apps, socket/audio device
+      handles, and PTYs/pipes so spawned commands appear in Terminal.
 - [ ] Add heap canaries / redzones and a `heap_check()` callable from the
       self-test and from the panic path (`kernel/mm/heap.c`).
 - [ ] Add stack guard words to thread stacks and check them on context switch

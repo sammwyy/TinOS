@@ -31,10 +31,27 @@ static unsigned path_length(const char *path)
 
 int tinos_open(const char *path)
 {
+    return tinos_open_flags(path, TINOS_O_RDONLY);
+}
+
+int tinos_open_flags(const char *path, unsigned flags)
+{
     unsigned length = path_length(path);
     if (!length)
         return -1;
-    return invoke(TINOS_SYS_OPEN, (unsigned)path, length, 0);
+    return invoke(TINOS_SYS_OPEN, (unsigned)path, length, flags);
+}
+
+int tinos_mkdir(const char *path)
+{
+    unsigned length = path_length(path);
+    return length ? invoke(TINOS_SYS_MKDIR, (unsigned)path, length, 0) : -1;
+}
+
+int tinos_unlink(const char *path)
+{
+    unsigned length = path_length(path);
+    return length ? invoke(TINOS_SYS_UNLINK, (unsigned)path, length, 0) : -1;
 }
 
 int tinos_close(int fd)
@@ -69,6 +86,51 @@ int tinos_wait(int pid, int *status)
 int tinos_getpid(void)
 {
     return invoke(TINOS_SYS_GETPID, 0, 0, 0);
+}
+
+int tinos_readdir(const char *path, unsigned index, tinos_dirent_t *entry)
+{
+    unsigned length = path_length(path);
+    if (!length)
+        return -1;
+    return invoke4(TINOS_SYS_READDIR, (unsigned)path, length, index,
+                   (unsigned)entry);
+}
+
+int tinos_stat(const char *path, tinos_dirent_t *entry)
+{
+    unsigned length = path_length(path);
+    if (!length)
+        return -1;
+    return invoke(TINOS_SYS_STAT, (unsigned)path, length, (unsigned)entry);
+}
+
+int tinos_gui_open(const char *title, unsigned width, unsigned height)
+{
+    unsigned length = path_length(title);
+    if (!length)
+        return -1;
+    return invoke4(TINOS_SYS_GUI_OPEN, (unsigned)title, length, width, height);
+}
+
+int tinos_gui_present(int handle, const char *cells, unsigned columns,
+                      unsigned rows)
+{
+    if (!columns || !rows || columns > TINOS_GUI_COLS ||
+        rows > TINOS_GUI_ROWS)
+        return -1;
+    return invoke4(TINOS_SYS_GUI_PRESENT, (unsigned)handle, (unsigned)cells,
+                   columns * rows, columns);
+}
+
+int tinos_gui_event(int handle, tinos_gui_event_t *event)
+{
+    return invoke(TINOS_SYS_GUI_EVENT, (unsigned)handle, (unsigned)event, 0);
+}
+
+int tinos_gui_close(int handle)
+{
+    return invoke(TINOS_SYS_GUI_CLOSE, (unsigned)handle, 0, 0);
 }
 
 __attribute__((noreturn)) void tinos_exit(int status)

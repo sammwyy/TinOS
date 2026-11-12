@@ -21,8 +21,8 @@ ELF executes there: the former native GUI apps are disabled, their ABI is
 not linked and the initrd contains only `userland/bin/` executables.
 They run in ring 3 through `run <path>` or the desktop menu. Up to four jobs can be
 resident on the boot processor; PIT preemption lets the console run even
-when a user program loops. They have console I/O and read-only access to
-memory-backed files through private integer descriptors.
+when a user program loops. They have console I/O and filesystem access
+through private integer descriptors; writable files are limited to ramfs.
 User programs can create child processes with `spawn` and wait for their
 exit without blocking the boot processor.
 
@@ -37,7 +37,7 @@ exit without blocking the boot processor.
 | Threads             | Kernel threads, `THREAD_MAX` = 32, 16 KiB stacks             |
 | SMP                 | APs brought up via ACPI MADT + LAPIC INIT/SIPI               |
 | Interrupts          | 8259 PIC, PIT timer                                          |
-| Syscalls            | `int 0x80`: console I/O, read-only files, getpid/spawn/wait/exit |
+| Syscalls            | `int 0x80`: I/O, ramfs, process lifecycle, GUI handles/events  |
 | Filesystem          | In-memory node tree; FAT16/FAT32 imported read-only          |
 | Network             | Polling Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS in the kernel |
 | Graphics            | Bochs/QEMU DISPI only, software framebuffer in the kernel    |
@@ -142,15 +142,19 @@ can still stall this loop.
 - The initrd is imported as read-only backing for files in `/apps`. A
   write detaches the file into private heap storage. The module stays
   reserved while borrowed data exists.
-- The desktop registry stores copied executable paths and names, never
+- The desktop registry stores copied paths under `/apps/gui/`, never
   callbacks from application code. Menu selections call `process_spawn()`
   after resolving the file; ELF validation and page mappings are shared with
   the text console's `run` command.
 - Former fixed-slot `apps/` sources and the function-pointer ABI remain in
   the repository as porting references, but are excluded from the boot
   image and kernel link. No fixed-slot physical arena is reserved.
-- The desktop does not yet provide windows, input events or visible stdout
-  to user processes; menu-launched programs write to serial.
+- The trusted compositor offers one window handle per process, text-cell
+  frame submission (bounded copy-in) and blocking keyboard/mouse/resize/close
+  events. The process table wakes only the blocked owner of a window.
+  Terminal, Explorer, Editor and About are ring-3 programs using this ABI.
+  Stdout still goes to serial; the terminal implements its own built-ins
+  until pipes and pseudo-terminals exist.
 
 ### 1.6 Dependency direction today
 

@@ -104,6 +104,8 @@ fs_result_t fs_copy_node(fs_node_t *src, fs_node_t *dst_dir,
  * the file from this storage by copying its contents into the heap. */
 fs_result_t fs_bind_external(fs_node_t *file, const void *data, size_t len);
 fs_result_t fs_write(fs_node_t *file, const void *data, size_t len);
+fs_result_t fs_write_at(fs_node_t *file, size_t offset,
+                        const void *data, size_t len);
 fs_result_t fs_append(fs_node_t *file, const void *data, size_t len);
 fs_result_t fs_write_path(fs_node_t *cwd, const char *path, const void *data,
                           size_t len, bool append);

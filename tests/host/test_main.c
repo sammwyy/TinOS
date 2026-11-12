@@ -208,6 +208,16 @@ static void test_fs_mutation(void)
     CHECK(fs_size(node) == sizeof(big));
     CHECK(fs_write(node, "small", 5) == FS_OK);
     CHECK(fs_size(node) == 5);
+    CHECK(fs_write_at(node, 2, "XY", 2) == FS_OK);
+    CHECK(memcmp(fs_data(node), "smXYl", 5) == 0);
+    CHECK(fs_write_at(node, 7, "Z", 1) == FS_OK);
+    CHECK(fs_size(node) == 8);
+    CHECK(memcmp(fs_data(node), "smXYl\0\0Z", 8) == 0);
+    CHECK(fs_bind_external(node, "immutable", 9) == FS_OK);
+    CHECK(fs_write_at(node, 1, "A", 1) == FS_OK);
+    CHECK(memcmp(fs_data(node), "iAmutable", 9) == 0);
+    CHECK(node->data_borrowed == false);
+    CHECK(fs_write(node, "small", 5) == FS_OK);
 
     /* Rename keeps contents and ordering. */
     CHECK(fs_rename(node, "renamed.txt") == FS_OK);

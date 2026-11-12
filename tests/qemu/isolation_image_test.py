@@ -15,7 +15,8 @@ def main():
     with tarfile.open(args.initrd) as archive:
         names = archive.getnames()
         assert names and "hello.elf" in names, names
-        assert all(member.isfile() and "/" not in member.name and
+        assert all(member.isfile() and
+                   ("/" not in member.name or member.name.startswith("gui/")) and
                    member.name.endswith(".elf") for member in archive), names
     symbols = subprocess.check_output(["nm", "-g", args.kernel], text=True)
     for forbidden in ("tinos_abi_build", "load_native_apps", "apps_register"):

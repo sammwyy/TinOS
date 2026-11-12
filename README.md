@@ -60,8 +60,10 @@ keyboard sleeps until a key arrives without busy-polling or blocking the
 kernel; Ctrl+C stops that reader. The desktop and text shell remain kernel
 services, but application ELF files can execute only in ring 3.
 
-At 8 MiB of QEMU RAM the graphical desktop can launch bundled ring-3
-programs from its menu (currently with serial output, not GUI windows).
+At 8 MiB of QEMU RAM the graphical desktop can launch Terminal, File
+Explorer, Text Editor and About as separate ring-3 ELF programs with their
+own windows. Programs still write standard output to serial; there is no
+pseudo-terminal or pipe API yet.
 At 4 MiB the loader skips the executable archive and boots into the text
 console. Graphics also falls back to
 the console on unsupported video hardware. This BIOS boot image is currently
@@ -106,9 +108,10 @@ shell atlas.  The legacy `icon_t` values remain as compatibility handles, but
 `widget_icon()` resolves them exclusively to those named bitmap resources;
 custom code can use `widget_icon_name(x, y, size, "name")` directly.
 
-The former graphical File Explorer and Image Viewer are disabled until they
-can run as isolated clients. Their source remains under `apps/` for porting;
-neither program is built into the boot image.
+The current File Explorer browses directories and previews text through
+userspace filesystem calls. The former Image Viewer still needs a safe
+pixel-buffer protocol and a userspace decoder; its source remains under
+`apps/` as a porting reference.
 
 For temporary artwork, create a numbered placeholder with:
 
@@ -181,11 +184,14 @@ The TinOS boot menu has three selections (Down/Up, then Enter):
 | `Right` / `Left` | focus the category's apps / return to the categories |
 | `Esc` | close the start menu |
 
-The start menu lists ELF32 programs under *Programs* and starts each one
-through the process loader. Until the desktop has a userspace window and
-terminal protocol, programs write to the serial log rather than a GUI window.
-The old graphical Control Panel, Terminal, Editor and Explorer are not
-available; their code is kept only as a porting reference.
+The start menu lists `/apps/gui/*.elf` under *Programs* and launches each
+through the process loader. Applications use `int 0x80` to open a window,
+submit bounded text-cell frames and block while awaiting keyboard/mouse
+events. Terminal supports `ls`, `cd`, `pwd`, `cat`, `echo`, `touch`, `mkdir`,
+`rm`, `edit`, `run`, `clear` and `exit`. Explorer browses directories,
+previews files and opens them in the editor with `E`; the editor saves
+ramfs files with `Ctrl+S`. These are new userspace implementations, not
+the old kernel-callback GUI apps; their advanced controls are not yet ported.
 | `Alt+Tab` | switch to the next window |
 | `Alt+F4` | close the focused window |
 
@@ -195,11 +201,11 @@ resize them by dragging the grip in the bottom-right corner, press the
 minimise and close buttons in the title bar, and click taskbar buttons to
 raise or minimise a window.
 
-### Retired Graphical Apps
+### Historical Graphical App Features
 
-The sections below describe historical ring-0 GUI programs. They are not
-built, installed or runnable in the current ISO. Their eventual userspace
-ports need a desktop client protocol rather than access to kernel pointers.
+The sections below describe the former ring-0 GUI implementations, kept as
+porting references under `apps/`. The new userspace programs do not yet
+implement all these features.
 
 ### Calculator
 
@@ -632,10 +638,13 @@ allocates a private address space and enters ring 3; the desktop start menu
 stores paths, not function pointers, and starts programs through that same
 process loader. The old fixed-address loader and function-pointer ABI are
 not linked into the kernel, and the fixed-slot arena is no longer reserved.
-The former GUI app sources remain under `apps/` for porting, but they are
+The former GUI app sources remain under `apps/` for porting, but are
 neither installed nor executable in this build. `make native-apps` fails
-intentionally. Userspace GUI windows and desktop-facing syscalls are not
-implemented yet.
+intentionally. The current GUI extension uses process-scoped integer
+window handles, copied text cells and blocking event delivery; filesystem
+calls use file descriptors and path-based metadata. Writes are limited to
+64 KiB per file, the installed `/apps` tree is read-only to userspace,
+and persistent disk writes, pipes and PTYs are not yet implemented.
 
 ## Error handling
 

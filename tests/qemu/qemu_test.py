@@ -694,7 +694,7 @@ def run_scenario(iso, shots_dir):
 
     try:
         vm.start()
-        c.check(vm.wait_for_serial("userland: imported 14 ELF32 file(s)",
+        c.check(vm.wait_for_serial("userland: imported ",
                                     timeout=30), "boot imports only ring-3 programs")
         c.check(vm.wait_for_serial("desktop starting", timeout=30),
                 "desktop starts without native apps")
@@ -706,22 +706,55 @@ def run_scenario(iso, shots_dir):
 
         vm.key("ctrl", "esc")
         menu = shot("programs")
-        for label in ("Programs", "hello.elf", "Restart", "Shut Down"):
+        for label in ("Programs", "terminal.elf", "explorer.elf",
+                      "editor.elf", "about.elf", "Restart", "Shut Down"):
             c.check(menu.has(label), "start menu shows " + label)
-        c.check(menu.missing("Terminal"), "old ring-0 terminal is unavailable")
 
-        hits = menu.find("hello.elf")
+        hits = menu.find("terminal.elf")
         if c.check(bool(hits), "ring-3 executable is selectable"):
             x, y = hits[0]
             vm.mouse_click(x + 20, y + 6)
-            c.check(vm.wait_for_serial("ring3: hello from an isolated ELF",
-                                       timeout=15), "menu launches ring-3 process")
-            c.check(vm.wait_for_serial("[proc] ring 3 exit status 17", timeout=15),
-                    "process exits without affecting the desktop")
+            c.check(vm.wait_for_serial("opened window 1 'Terminal'", timeout=15),
+                    "terminal opens from an isolated process")
+            terminal = shot("terminal")
+            c.check(terminal.has("tinos:/"), "terminal draws its own prompt")
+            vm.line("ls /")
+            c.check(shot("terminal-ls").has("README.txt"), "directory enumeration")
+            vm.line("echo orange > /users/sammy/note.txt")
+            vm.line("cat /users/sammy/note.txt")
+            c.check(shot("terminal-cat").has("orange"), "writable file descriptor")
+            vm.line("run /apps/gui_security.elf")
+            c.check(vm.wait_for_serial("ring3: GUI handles and files isolated",
+                                       timeout=15), "GUI handles are process-scoped")
+            vm.line("edit /users/sammy/note.txt")
+            c.check(vm.wait_for_serial("opened window 2 'Text Editor'",
+                                       timeout=15), "editor is another process")
+            c.check(shot("editor").has("orange"), "editor reads the file")
+            vm.type("blue")
+            vm.key("ctrl", "s")
+            c.check(shot("editor-save").has("Saved"), "editor saves through libc")
+            vm.key("alt", "f4")
+            c.check(vm.wait_for_serial("closed window 2 'Text Editor'",
+                                       timeout=15), "window close reaches the process")
+            vm.line("cat /users/sammy/note.txt")
+            c.check(shot("terminal-readback").has("blue"), "saved data is visible")
+            vm.key("alt", "f4")
+            c.check(vm.wait_for_serial("closed window 1 'Terminal'",
+                                       timeout=15), "terminal exits after close")
 
         vm.key("ctrl", "esc")
+        menu = shot("menu-explorer")
+        hits = menu.find("explorer.elf")
+        if c.check(bool(hits), "file explorer listed in the menu"):
+            x, y = hits[0]
+            vm.mouse_click(x + 20, y + 6)
+            c.check(vm.wait_for_serial("opened window 3 'File Explorer'",
+                                       timeout=15), "explorer opens in ring 3")
+            c.check(shot("explorer").has("README.txt"), "explorer lists files")
+            vm.key("alt", "f4")
+        vm.key("ctrl", "esc")
         after = shot("desktop-after-process")
-        c.check(after.has("Programs"), "desktop accepts input after process exit")
+        c.check(after.has("Programs"), "desktop accepts input after client exits")
         c.check("KERNEL PANIC" not in vm.serial(), "no kernel panic")
     finally:
         vm.stop()

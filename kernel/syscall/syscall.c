@@ -5,6 +5,8 @@
 #include <tinos/process.h>
 #include <tinos/syscall.h>
 #include <tinos/string.h>
+#include <tinos/user_window.h>
+#include <uapi/tinos/desktop.h>
 #include <uapi/tinos/syscall.h>
 
 extern NORETURN void arch_leave_user(int status);
@@ -63,6 +65,35 @@ static int spawn_user_process(const regs_t *frame)
     return process_spawn(file->data, fs_size(file), frame->edx, argv);
 }
 
+static int stat_user_path(const regs_t *frame, bool directory_entry)
+{
+    char path[FS_PATH_MAX];
+    uintptr_t output = directory_entry ? frame->esi : frame->edx;
+    if (!copy_user_path(frame->ebx, frame->ecx, path) ||
+        !process_user_buffer(output, sizeof(tinos_dirent_t), true) ||
+        (directory_entry && frame->edx > 4096))
+        return -1;
+    fs_node_t *node;
+    if (fs_resolve(fs_root(), path, &node) != FS_OK)
+        return -1;
+    if (directory_entry) {
+        if (node->type != FS_DIR)
+            return -1;
+        node = node->children;
+        for (uint32_t i = 0; i < frame->edx && node; i++)
+            node = node->next;
+        if (!node)
+            return 0;
+    }
+    tinos_dirent_t entry = {
+        .type = node->type == FS_DIR ? TINOS_DIRENT_DIR : TINOS_DIRENT_FILE,
+        .size = fs_size(node),
+    };
+    strlcpy(entry.name, node->name, sizeof(entry.name));
+    memcpy((void *)output, &entry, sizeof(entry));
+    return 1;
+}
+
 void syscall_dispatch(regs_t *frame)
 {
     if ((frame->cs & 3) != 3 || !process_active()) {
@@ -76,6 +107,66 @@ void syscall_dispatch(regs_t *frame)
     case TINOS_SYS_GETPID:
         frame->eax = process_current_pid();
         return;
+    case TINOS_SYS_READDIR:
+        frame->eax = (uint32_t)stat_user_path(frame, true);
+        return;
+    case TINOS_SYS_STAT:
+        frame->eax = (uint32_t)stat_user_path(frame, false);
+        return;
+    case TINOS_SYS_MKDIR:
+    case TINOS_SYS_UNLINK: {
+        char path[FS_PATH_MAX];
+        if (!copy_user_path(frame->ebx, frame->ecx, path)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        frame->eax = (uint32_t)(frame->eax == TINOS_SYS_MKDIR ?
+                                 process_file_mkdir(path) :
+                                 process_file_unlink(path));
+        return;
+    }
+    case TINOS_SYS_GUI_OPEN: {
+        if (!frame->ecx || frame->ecx >= 64 ||
+            !process_user_buffer(frame->ebx, frame->ecx, false)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        char title[64];
+        memcpy(title, (const void *)(uintptr_t)frame->ebx, frame->ecx);
+        title[frame->ecx] = '\0';
+        frame->eax = (uint32_t)desktop_user_window_open(process_current_pid(),
+                         title, (int)frame->edx, (int)frame->esi);
+        return;
+    }
+    case TINOS_SYS_GUI_PRESENT:
+        if (!frame->edx || frame->edx > TINOS_GUI_TEXT_SIZE ||
+            !process_user_buffer(frame->ecx, frame->edx, false)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        frame->eax = (uint32_t)desktop_user_window_present(process_current_pid(),
+                            frame->ebx, (const char *)(uintptr_t)frame->ecx,
+                            frame->edx, frame->esi);
+        return;
+    case TINOS_SYS_GUI_EVENT: {
+        if (!process_user_buffer(frame->ecx, sizeof(tinos_gui_event_t), true)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        tinos_gui_event_t event;
+        int result = desktop_user_window_next(process_current_pid(), frame->ebx,
+                                               &event);
+        if (result == 0)
+            process_block_gui(frame, frame->ecx);
+        if (result > 0)
+            memcpy((void *)(uintptr_t)frame->ecx, &event, sizeof(event));
+        frame->eax = (uint32_t)result;
+        return;
+    }
+    case TINOS_SYS_GUI_CLOSE:
+        frame->eax = (uint32_t)desktop_user_window_close(process_current_pid(),
+                                                          frame->ebx);
+        return;
     case TINOS_SYS_SPAWN:
         frame->eax = (uint32_t)spawn_user_process(frame);
         return;
@@ -88,16 +179,12 @@ void syscall_dispatch(regs_t *frame)
         frame->eax = (uint32_t)process_wait(frame->ebx, frame->ecx, frame);
         return;
     case TINOS_SYS_OPEN: {
-        if (frame->edx != 0) {
-            frame->eax = (uint32_t)-1;
-            return;
-        }
         char path[FS_PATH_MAX];
         if (!copy_user_path(frame->ebx, frame->ecx, path)) {
             frame->eax = (uint32_t)-1;
             return;
         }
-        frame->eax = (uint32_t)process_file_open(path);
+        frame->eax = (uint32_t)process_file_open(path, frame->edx);
         return;
     }
     case TINOS_SYS_CLOSE:
@@ -128,10 +215,14 @@ void syscall_dispatch(regs_t *frame)
         return;
     }
     case TINOS_SYS_WRITE:
-        if ((frame->ebx != 1 && frame->ebx != 2) ||
-            frame->edx > 1024 ||
+        if (frame->edx > 1024 ||
             !process_user_buffer(frame->ecx, frame->edx, false)) {
             frame->eax = (uint32_t)-1;
+            return;
+        }
+        if (frame->ebx != 1 && frame->ebx != 2) {
+            frame->eax = (uint32_t)process_file_write(
+                (int)frame->ebx, (const void *)(uintptr_t)frame->ecx, frame->edx);
             return;
         }
         for (size_t i = 0; i < frame->edx; i++) {

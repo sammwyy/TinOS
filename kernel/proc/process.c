@@ -11,6 +11,8 @@
 #include <tinos/string.h>
 #include <tinos/thread.h>
 #include <tinos/user_vm.h>
+#include <tinos/user_window.h>
+#include <uapi/tinos/syscall.h>
 
 extern int arch_enter_user(uintptr_t entry, uintptr_t stack);
 extern int arch_resume_user(const regs_t *frame);
@@ -23,6 +25,8 @@ extern NORETURN void arch_leave_user(int status);
 typedef struct {
     const uint8_t *data;
     uint8_t *owned;
+    char *path;
+    uint32_t flags;
     size_t size;
     size_t offset;
     bool open;
@@ -46,6 +50,7 @@ typedef struct {
     bool started;
     bool wants_input;
     uintptr_t blocked_address;
+    uintptr_t blocked_gui_address;
     uint64_t deadline;
     char input[PROCESS_INPUT_SIZE];
     unsigned input_head, input_tail;
@@ -144,6 +149,25 @@ NORETURN void process_block_console(regs_t *frame)
     arch_leave_user(0);
 }
 
+NORETURN void process_block_gui(regs_t *frame, uintptr_t event_address)
+{
+    KASSERT(running != NULL && (frame->cs & 3) == 3);
+    memcpy(&running->frame, frame, sizeof(*frame));
+    running->blocked_gui_address = event_address;
+    running->state = PROCESS_BLOCKED;
+    arch_leave_user(0);
+}
+
+void process_gui_wake(uint32_t pid)
+{
+    for (size_t i = 0; i < PROCESS_MAX; i++)
+        if (processes[i].pid == pid && processes[i].state == PROCESS_BLOCKED &&
+            processes[i].blocked_gui_address) {
+            processes[i].state = PROCESS_READY;
+            return;
+        }
+}
+
 size_t process_list(process_info_t *out, size_t capacity)
 {
     size_t count = 0;
@@ -160,18 +184,65 @@ size_t process_list(process_info_t *out, size_t capacity)
     return count;
 }
 
-int process_file_open(const char *path)
+static bool writable_path(const char *path)
 {
-    if (!running || path[0] != '/')
+    if (!path || path[0] != '/')
+        return false;
+    fs_node_t *apps, *node;
+    if (fs_resolve(fs_root(), "/apps", &apps) != FS_OK)
+        return false;
+    fs_result_t result = fs_resolve(fs_root(), path, &node);
+    if (result == FS_ERR_NOENT) {
+        char name[FS_NAME_MAX];
+        if (fs_resolve_parent(fs_root(), path, &node, name, sizeof(name)) != FS_OK)
+            return false;
+    } else if (result != FS_OK) {
+        return false;
+    }
+    return !fs_is_ancestor(apps, node);
+}
+
+int process_file_open(const char *path, uint32_t flags)
+{
+    bool writable = (flags & 3u) != TINOS_O_RDONLY;
+    if (!running || path[0] != '/' ||
+        (flags & ~(TINOS_O_WRONLY | TINOS_O_RDWR | TINOS_O_CREAT |
+                   TINOS_O_TRUNC | TINOS_O_APPEND)) ||
+        (flags & 3u) == 3u ||
+        (!writable && (flags & (TINOS_O_CREAT | TINOS_O_TRUNC |
+                                TINOS_O_APPEND))) ||
+        (writable && !writable_path(path)))
+        return -1;
+    int available = -1;
+    for (int fd = 3; fd < (int)ARRAY_SIZE(running->files); fd++) {
+        if (!running->files[fd].open) {
+            available = fd;
+            break;
+        }
+    }
+    if (available < 0)
         return -1;
     fs_node_t *node;
-    if (fs_resolve(fs_root(), path, &node) != FS_OK ||
-        node->type != FS_FILE || (!node->data && node->size))
+    fs_result_t result = fs_resolve(fs_root(), path, &node);
+    if (result == FS_ERR_NOENT && (flags & TINOS_O_CREAT))
+        result = fs_create(fs_root(), path, &node);
+    if (result != FS_OK || node->type != FS_FILE || node->backend ||
+        (!node->data && node->size))
         return -1;
-    for (int fd = 3; fd < (int)ARRAY_SIZE(running->files); fd++) {
-        process_file_t *file = &running->files[fd];
-        if (file->open)
-            continue;
+    process_file_t *file = &running->files[available];
+    if (writable) {
+        char *copy = kstrdup(path);
+        if (!copy)
+            return -1;
+        if ((flags & TINOS_O_TRUNC) && fs_write(node, NULL, 0) != FS_OK) {
+            kfree(copy);
+            return -1;
+        }
+        *file = (process_file_t){
+            .path = copy, .flags = flags, .offset =
+                (flags & TINOS_O_APPEND) ? node->size : 0, .open = true,
+        };
+    } else {
         uint8_t *copy = NULL;
         if (!node->data_borrowed && node->size) {
             copy = kmalloc(node->size);
@@ -185,9 +256,8 @@ int process_file_open(const char *path)
             .size = node->size,
             .open = true,
         };
-        return fd;
     }
-    return -1;
+    return available;
 }
 
 int process_file_read(int fd, void *buffer, size_t length)
@@ -196,14 +266,60 @@ int process_file_read(int fd, void *buffer, size_t length)
         !running->files[fd].open)
         return -1;
     process_file_t *file = &running->files[fd];
-    if (file->offset >= file->size)
+    fs_node_t *node = NULL;
+    size_t size = file->size;
+    if (file->path) {
+        if ((file->flags & 3u) == TINOS_O_WRONLY ||
+            fs_resolve(fs_root(), file->path, &node) != FS_OK ||
+            node->type != FS_FILE || node->backend)
+            return -1;
+        size = node->size;
+    }
+    if (file->offset >= size)
         return 0;
-    size_t remain = file->size - file->offset;
+    size_t remain = size - file->offset;
     if (length > remain)
         length = remain;
-    memcpy(buffer, file->data + file->offset, length);
+    if (node) {
+        if (!fs_read_at(node, file->offset, buffer, length))
+            return -1;
+    } else {
+        memcpy(buffer, file->data + file->offset, length);
+    }
     file->offset += length;
     return (int)length;
+}
+
+int process_file_write(int fd, const void *buffer, size_t length)
+{
+    if (!running || fd < 3 || fd >= (int)ARRAY_SIZE(running->files) ||
+        !running->files[fd].open || !running->files[fd].path)
+        return -1;
+    process_file_t *file = &running->files[fd];
+    fs_node_t *node;
+    if (fs_resolve(fs_root(), file->path, &node) != FS_OK ||
+        node->type != FS_FILE || node->backend)
+        return -1;
+    size_t offset = (file->flags & TINOS_O_APPEND) ? node->size : file->offset;
+    if (offset > 64 * 1024 || length > 64 * 1024 - offset ||
+        fs_write_at(node, offset, buffer, length) != FS_OK)
+        return -1;
+    file->offset = offset + length;
+    return (int)length;
+}
+
+int process_file_mkdir(const char *path)
+{
+    if (!running || !writable_path(path))
+        return -1;
+    return fs_mkdir(fs_root(), path, NULL) == FS_OK ? 0 : -1;
+}
+
+int process_file_unlink(const char *path)
+{
+    if (!running || !writable_path(path))
+        return -1;
+    return fs_remove(fs_root(), path, false) == FS_OK ? 0 : -1;
 }
 
 int process_file_close(int fd)
@@ -212,6 +328,7 @@ int process_file_close(int fd)
         !running->files[fd].open)
         return -1;
     kfree(running->files[fd].owned);
+    kfree(running->files[fd].path);
     memset(&running->files[fd], 0, sizeof(running->files[fd]));
     return 0;
 }
@@ -264,8 +381,11 @@ static bool prepare_user_stack(int argc, const char *const argv[],
 
 static void release_process(process_t *p)
 {
+    desktop_user_window_release(p->pid);
     for (size_t i = 3; i < ARRAY_SIZE(p->files); i++)
         kfree(p->files[i].owned);
+    for (size_t i = 3; i < ARRAY_SIZE(p->files); i++)
+        kfree(p->files[i].path);
     user_space_destroy(&p->space);
     pmm_free_contig(p->kernel_stack, PROCESS_KERNEL_STACK_FRAMES);
     p->kernel_stack = NULL;
@@ -414,6 +534,13 @@ void process_schedule(void)
     p->state = PROCESS_RUNNING;
     p->deadline = timer_ticks() + PROCESS_SLICE_TICKS;
     user_space_activate(&p->space);
+    if (p->blocked_gui_address) {
+        tinos_gui_event_t event;
+        KASSERT(desktop_user_window_next(p->pid, 1, &event) == 1);
+        memcpy((void *)p->blocked_gui_address, &event, sizeof(event));
+        p->frame.eax = 1;
+        p->blocked_gui_address = 0;
+    }
     if (p->blocked_address) {
         KASSERT(p->input_head != p->input_tail);
         *(char *)p->blocked_address = p->input[p->input_head];

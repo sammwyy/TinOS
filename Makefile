@@ -165,7 +165,8 @@ kernel: $(KERNEL)
 # from older builds are never read, even if they remain under build/native.
 RAMFS := $(BUILD)/ramfs.tar
 USERLAND_APPS := hello fault badptr echo fpu io df textwrite cat fdtest \
-                 spin spawn spawn_badarg multi
+                 spin spawn spawn_badarg multi gui_security
+GUI_APPS := about terminal explorer editor
 
 .PHONY: native-apps
 native-apps:
@@ -184,7 +185,8 @@ $(RAMFS): userland-apps
 	@mkdir -p $(dir $@)
 	@cd $(BUILD)/userland && tar --format=ustar --sort=name --mtime=@0 \
 		--owner=0 --group=0 --numeric-owner -cf $(abspath $@) \
-		$(addsuffix .elf,$(USERLAND_APPS))
+		$(addsuffix .elf,$(USERLAND_APPS)) \
+		$(addprefix gui/,$(addsuffix .elf,$(GUI_APPS)))
 
 # --- BIOS El Torito ISO ------------------------------------------------
 $(BOOT_IMAGE): $(KERNEL) $(RAMFS) boot/x86/loader.asm boot/x86/build_image.py

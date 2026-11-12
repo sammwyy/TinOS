@@ -24,6 +24,7 @@
 #include <tinos/sh.h>
 #include <tinos/string.h>
 #include <tinos/ui.h>
+#include <tinos/user_window.h>
 
 #define MENU_WIDTH      160
 #define MENU_SUBMENU_W  220
@@ -1025,6 +1026,7 @@ static bool pending_full;
 void desktop_start(void)
 {
     wm_init();
+    desktop_user_window_init();
     apps_discover();
     build_menu();
     mouse_set_bounds(gfx_width(), gfx_height());

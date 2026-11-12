@@ -1,0 +1,174 @@
+#include <tinos/gfx.h>
+#include <tinos/process.h>
+#include <tinos/string.h>
+#include <tinos/ui.h>
+#include <tinos/user_window.h>
+
+#define GUI_QUEUE 16
+
+typedef struct {
+    uint32_t pid;
+    window_t *window;
+    char cells[TINOS_GUI_TEXT_SIZE];
+    size_t columns, rows;
+    tinos_gui_event_t events[GUI_QUEUE];
+    unsigned head, tail;
+} gui_client_t;
+
+static gui_client_t clients[PROCESS_MAX];
+static bool available;
+
+static gui_client_t *client_for(uint32_t pid)
+{
+    for (size_t i = 0; i < ARRAY_SIZE(clients); i++)
+        if (clients[i].pid == pid && pid)
+            return &clients[i];
+    return NULL;
+}
+
+static void enqueue(gui_client_t *client, tinos_gui_event_t event)
+{
+    unsigned next = (client->tail + 1) % GUI_QUEUE;
+    if (next == client->head)
+        client->head = (client->head + 1) % GUI_QUEUE;
+    client->events[client->tail] = event;
+    client->tail = next;
+    process_gui_wake(client->pid);
+}
+
+static void user_draw(window_t *window, rect_t area)
+{
+    gui_client_t *client = window->priv;
+    gfx_fill_rect(area.x, area.y, area.w, area.h, COLOR_TERMINAL_BG);
+    for (size_t row = 0; row < client->rows && (int)(row + 1) * FONT_H <= area.h;
+         row++) {
+        char line[TINOS_GUI_COLS + 1];
+        size_t columns = MIN(client->columns, (size_t)area.w / FONT_W);
+        for (size_t col = 0; col < columns; col++) {
+            unsigned char c = client->cells[row * client->columns + col];
+            line[col] = c >= 32 && c < 127 ? c : ' ';
+        }
+        line[columns] = '\0';
+        gfx_text(area.x, area.y + (int)row * FONT_H, line, COLOR_TERMINAL_TEXT);
+    }
+}
+
+static bool user_key(window_t *window, const key_event_t *key)
+{
+    gui_client_t *client = window->priv;
+    enqueue(client, (tinos_gui_event_t){
+        .type = TINOS_GUI_KEY, .code = key->code, .ch = (uint8_t)key->ch,
+        .mods = key->mods,
+    });
+    return true;
+}
+
+static bool user_mouse(window_t *window, const mouse_event_t *mouse, int x, int y)
+{
+    if (mouse->pressed)
+        enqueue(window->priv, (tinos_gui_event_t){
+            .type = TINOS_GUI_MOUSE, .code = mouse->pressed, .x = x, .y = y,
+        });
+    return true;
+}
+
+static void user_resize(window_t *window, rect_t area)
+{
+    enqueue(window->priv, (tinos_gui_event_t){
+        .type = TINOS_GUI_RESIZE, .x = area.w / FONT_W,
+        .y = area.h / FONT_H,
+    });
+}
+
+static void user_close(window_t *window)
+{
+    gui_client_t *client = window->priv;
+    client->window = NULL;
+    client->head = client->tail = 0;
+    enqueue(client, (tinos_gui_event_t){ .type = TINOS_GUI_CLOSE });
+}
+
+static const app_class_t user_class = {
+    .name = "Userspace window", .on_draw = user_draw,
+    .on_key = user_key, .on_mouse = user_mouse,
+    .on_resize = user_resize, .on_close = user_close,
+};
+
+void desktop_user_window_init(void)
+{
+    memset(clients, 0, sizeof(clients));
+    available = true;
+}
+
+int desktop_user_window_open(uint32_t pid, const char *title, int width, int height)
+{
+    if (!available || !pid || client_for(pid) ||
+        width < WINDOW_MIN_W || width > 800 ||
+        height < WINDOW_MIN_H || height > 600)
+        return -1;
+    gui_client_t *client = NULL;
+    for (size_t i = 0; i < ARRAY_SIZE(clients); i++)
+        if (!clients[i].pid) {
+            client = &clients[i];
+            break;
+        }
+    if (!client)
+        return -1;
+    memset(client, 0, sizeof(*client));
+    client->pid = pid;
+    window_t *window = wm_open(&user_class, width, height, title, NULL);
+    if (!window) {
+        client->pid = 0;
+        return -1;
+    }
+    client->window = window;
+    window->priv = client;
+    return 1;
+}
+
+int desktop_user_window_present(uint32_t pid, int handle, const char *cells,
+                                size_t length, size_t columns)
+{
+    gui_client_t *client = client_for(pid);
+    if (handle != 1 || !client || !client->window ||
+        !columns || columns > TINOS_GUI_COLS ||
+        !length || length > TINOS_GUI_TEXT_SIZE ||
+        length % columns || length / columns > TINOS_GUI_ROWS)
+        return -1;
+    memcpy(client->cells, cells, length);
+    client->columns = columns;
+    client->rows = length / columns;
+    wm_invalidate(client->window);
+    return 0;
+}
+
+int desktop_user_window_next(uint32_t pid, int handle, tinos_gui_event_t *event)
+{
+    gui_client_t *client = client_for(pid);
+    if (handle != 1 || !client)
+        return -1;
+    if (client->head == client->tail)
+        return 0;
+    *event = client->events[client->head];
+    client->head = (client->head + 1) % GUI_QUEUE;
+    return 1;
+}
+
+int desktop_user_window_close(uint32_t pid, int handle)
+{
+    gui_client_t *client = client_for(pid);
+    if (handle != 1 || !client || !client->window)
+        return -1;
+    desktop_user_window_release(pid);
+    return 0;
+}
+
+void desktop_user_window_release(uint32_t pid)
+{
+    gui_client_t *client = client_for(pid);
+    if (!client)
+        return;
+    if (client->window)
+        wm_close(client->window);
+    memset(client, 0, sizeof(*client));
+}

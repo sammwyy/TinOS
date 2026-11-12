@@ -786,6 +786,28 @@ fs_result_t fs_append(fs_node_t *file, const void *data, size_t len)
     return FS_OK;
 }
 
+fs_result_t fs_write_at(fs_node_t *file, size_t offset,
+                        const void *data, size_t len)
+{
+    if (!file || file->type != FS_FILE || file->backend ||
+        len > (size_t)-1 - offset)
+        return FS_ERR_INVAL;
+    if (!len)
+        return FS_OK;
+    size_t size = offset + len;
+    fs_result_t result = ensure_capacity(file, size);
+    if (result != FS_OK)
+        return result;
+    if (offset > file->size)
+        memset(file->data + file->size, 0, offset - file->size);
+    memcpy(file->data + offset, data, len);
+    if (size > file->size)
+        file->size = size;
+    file->modified = fs_clock_ms();
+    touch_generation();
+    return FS_OK;
+}
+
 fs_result_t fs_write_path(fs_node_t *cwd, const char *path, const void *data,
                           size_t len, bool append)
 {

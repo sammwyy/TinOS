@@ -8,7 +8,7 @@
 static app_entry_t registry[REGISTRY_CAPACITY];
 static size_t       registry_count;
 static char         registry_names[REGISTRY_CAPACITY][FS_NAME_MAX];
-static char         registry_paths[REGISTRY_CAPACITY][sizeof("/apps/") + FS_NAME_MAX];
+static char         registry_paths[REGISTRY_CAPACITY][sizeof("/apps/gui/") + FS_NAME_MAX];
 
 const app_entry_t *apps_registry(size_t *count)
 {
@@ -20,7 +20,7 @@ void apps_discover(void)
 {
     registry_count = 0;
     fs_node_t *dir;
-    if (fs_resolve(fs_root(), "/apps", &dir) != FS_OK || dir->type != FS_DIR)
+    if (fs_resolve(fs_root(), "/apps/gui", &dir) != FS_OK || dir->type != FS_DIR)
         return;
     for (fs_node_t *file = dir->children; file && registry_count < REGISTRY_CAPACITY;
          file = file->next) {
@@ -30,9 +30,9 @@ void apps_discover(void)
             continue;
         size_t slot = registry_count++;
         strlcpy(registry_names[slot], file->name, sizeof(registry_names[slot]));
-        strlcpy(registry_paths[slot], "/apps/", sizeof(registry_paths[slot]));
-        strlcpy(registry_paths[slot] + sizeof("/apps/") - 1, file->name,
-                sizeof(registry_paths[slot]) - (sizeof("/apps/") - 1));
+        strlcpy(registry_paths[slot], "/apps/gui/", sizeof(registry_paths[slot]));
+        strlcpy(registry_paths[slot] + sizeof("/apps/gui/") - 1, file->name,
+                sizeof(registry_paths[slot]) - (sizeof("/apps/gui/") - 1));
         registry[slot] = (app_entry_t){
             .name = registry_names[slot],
             .summary = "",
