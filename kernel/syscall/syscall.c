@@ -2,7 +2,9 @@
 #include <tinos/console.h>
 #include <tinos/fs.h>
 #include <tinos/kernel.h>
+#include <tinos/input.h>
 #include <tinos/process.h>
+#include <tinos/sh.h>
 #include <tinos/syscall.h>
 #include <tinos/string.h>
 #include <tinos/user_window.h>
@@ -112,6 +114,42 @@ void syscall_dispatch(regs_t *frame)
         return;
     case TINOS_SYS_STAT:
         frame->eax = (uint32_t)stat_user_path(frame, false);
+        return;
+    case TINOS_SYS_SYSINFO: {
+        if (!process_user_buffer(frame->ebx, sizeof(tinos_system_info_t),
+                                 true)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        sys_info_t current;
+        sys_info_get(&current);
+        tinos_system_info_t info = {
+            .uptime_ms = current.uptime_ms,
+            .memory_total_kib = (uint32_t)(current.mem_total / 1024),
+            .memory_free_kib = (uint32_t)(current.mem_free / 1024),
+            .screen_width = current.screen_width,
+            .screen_height = current.screen_height,
+            .fs_nodes = fs_node_count(),
+        };
+        strlcpy(info.cpu, current.cpu, sizeof(info.cpu));
+        strlcpy(info.platform, current.platform, sizeof(info.platform));
+        strlcpy(info.clock, current.datetime, sizeof(info.clock));
+        memcpy((void *)(uintptr_t)frame->ebx, &info, sizeof(info));
+        frame->eax = 0;
+        return;
+    }
+    case TINOS_SYS_IOCTL:
+        if (frame->ebx == 0 && frame->ecx == TINOS_IOCTL_KBD_GET_LAYOUT) {
+            frame->eax = keyboard_get_layout();
+        } else if (frame->ebx == 0 &&
+                   frame->ecx == TINOS_IOCTL_KBD_SET_LAYOUT &&
+                   frame->edx <= TINOS_KBD_ES) {
+            keyboard_set_layout(frame->edx == TINOS_KBD_US ?
+                                KEYBOARD_LAYOUT_US : KEYBOARD_LAYOUT_ES);
+            frame->eax = 0;
+        } else {
+            frame->eax = (uint32_t)-1;
+        }
         return;
     case TINOS_SYS_MKDIR:
     case TINOS_SYS_UNLINK: {

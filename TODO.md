@@ -62,7 +62,8 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
       executable paths. Start menu selections use `process_spawn()` and
       share the ring-3 ELF validation and address-space setup with `run`.
 - [x] Add a bounded window-handle/text-cell/event ABI. Port Terminal,
-      Explorer, Editor and About to ELF32 ring-3 clients using libc.
+      Explorer, Editor, Calculator, System Information, Control Panel and
+      About to ELF32 ring-3 clients using libc.
 - [ ] Port the remaining graphical programs and advanced controls. Add a
       framebuffer/shared-buffer protocol for pixel apps, socket/audio device
       handles, and PTYs/pipes so spawned commands appear in Terminal.

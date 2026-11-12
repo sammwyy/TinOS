@@ -65,3 +65,16 @@ size_t tinos_strlcpy(char *dst, const char *src, size_t size)
     }
     return length;
 }
+
+void tinos_u32(char out[11], uint32_t value)
+{
+    char digits[10];
+    unsigned count = 0;
+    do {
+        digits[count++] = '0' + value % 10;
+        value /= 10;
+    } while (value);
+    for (unsigned i = 0; i < count; i++)
+        out[i] = digits[count - i - 1];
+    out[count] = '\0';
+}

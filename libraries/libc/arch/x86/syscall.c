@@ -105,6 +105,16 @@ int tinos_stat(const char *path, tinos_dirent_t *entry)
     return invoke(TINOS_SYS_STAT, (unsigned)path, length, (unsigned)entry);
 }
 
+int tinos_sysinfo(tinos_system_info_t *info)
+{
+    return invoke(TINOS_SYS_SYSINFO, (unsigned)info, 0, 0);
+}
+
+int tinos_ioctl(int fd, unsigned request, unsigned value)
+{
+    return invoke(TINOS_SYS_IOCTL, (unsigned)fd, request, value);
+}
+
 int tinos_gui_open(const char *title, unsigned width, unsigned height)
 {
     unsigned length = path_length(title);

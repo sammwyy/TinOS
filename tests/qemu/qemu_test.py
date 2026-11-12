@@ -707,7 +707,8 @@ def run_scenario(iso, shots_dir):
         vm.key("ctrl", "esc")
         menu = shot("programs")
         for label in ("Programs", "terminal.elf", "explorer.elf",
-                      "editor.elf", "about.elf", "Restart", "Shut Down"):
+                      "editor.elf", "about.elf", "calculator.elf",
+                      "sysinfo.elf", "control_panel.elf", "Restart", "Shut Down"):
             c.check(menu.has(label), "start menu shows " + label)
 
         hits = menu.find("terminal.elf")
@@ -751,6 +752,47 @@ def run_scenario(iso, shots_dir):
             c.check(vm.wait_for_serial("opened window 3 'File Explorer'",
                                        timeout=15), "explorer opens in ring 3")
             c.check(shot("explorer").has("README.txt"), "explorer lists files")
+            vm.key("alt", "f4")
+        vm.key("ctrl", "esc")
+        menu = shot("menu-calculator")
+        hits = menu.find("calculator.elf")
+        if c.check(bool(hits), "calculator listed in the menu"):
+            x, y = hits[0]
+            vm.mouse_click(x + 20, y + 6)
+            c.check(vm.wait_for_serial("opened window 4 'Calculator'", timeout=15),
+                    "calculator opens in ring 3")
+            vm.type("2+3*4")
+            vm.key("ret")
+            calc = shot("calculator")
+            c.check(calc.has("Result") and calc.has("14"),
+                    "calculator evaluates arithmetic in userspace")
+            vm.key("alt", "f4")
+        vm.key("ctrl", "esc")
+        menu = shot("menu-sysinfo")
+        hits = menu.find("sysinfo.elf")
+        if c.check(bool(hits), "system information listed in the menu"):
+            x, y = hits[0]
+            vm.mouse_click(x + 20, y + 6)
+            c.check(vm.wait_for_serial("opened window 5 'System Information'",
+                                       timeout=15), "sysinfo opens in ring 3")
+            info = shot("sysinfo")
+            c.check(info.has("RAM total") and info.has("CPU"),
+                    "system information comes through a validated syscall")
+            vm.key("alt", "f4")
+        vm.key("ctrl", "esc")
+        menu = shot("menu-settings")
+        hits = menu.find("control_panel.elf")
+        if c.check(bool(hits), "control panel listed in the menu"):
+            x, y = hits[0]
+            vm.mouse_click(x + 20, y + 6)
+            c.check(vm.wait_for_serial("opened window 6 'Control Panel'",
+                                       timeout=15), "settings app opens in ring 3")
+            vm.type("2")
+            c.check(shot("keyboard-es").has("Spanish"),
+                    "userspace can configure keyboard through ioctl")
+            vm.type("1")
+            c.check(shot("keyboard-us").has("English"),
+                    "keyboard setting can be restored")
             vm.key("alt", "f4")
         vm.key("ctrl", "esc")
         after = shot("desktop-after-process")

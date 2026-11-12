@@ -18,6 +18,13 @@
 #define TINOS_SYS_GUI_CLOSE 14u
 #define TINOS_SYS_MKDIR 15u
 #define TINOS_SYS_UNLINK 16u
+#define TINOS_SYS_SYSINFO 17u
+#define TINOS_SYS_IOCTL  18u
+
+#define TINOS_IOCTL_KBD_GET_LAYOUT 0x4B01u
+#define TINOS_IOCTL_KBD_SET_LAYOUT 0x4B02u
+#define TINOS_KBD_US 0u
+#define TINOS_KBD_ES 1u
 
 /* i386 Linux-compatible open flag values for the implemented subset. */
 #define TINOS_O_RDONLY 0u

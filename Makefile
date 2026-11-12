@@ -166,7 +166,7 @@ kernel: $(KERNEL)
 RAMFS := $(BUILD)/ramfs.tar
 USERLAND_APPS := hello fault badptr echo fpu io df textwrite cat fdtest \
                  spin spawn spawn_badarg multi gui_security
-GUI_APPS := about terminal explorer editor
+GUI_APPS := about terminal explorer editor calculator sysinfo control_panel
 
 .PHONY: native-apps
 native-apps:

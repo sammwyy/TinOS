@@ -2,6 +2,7 @@
 #define TINOS_LIBC_STRING_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 size_t strlen(const char *s);
 int strcmp(const char *a, const char *b);
@@ -10,5 +11,6 @@ void *memcpy(void *dst, const void *src, size_t n);
 void *memmove(void *dst, const void *src, size_t n);
 void *memset(void *dst, int value, size_t n);
 size_t tinos_strlcpy(char *dst, const char *src, size_t size);
+void tinos_u32(char out[11], uint32_t value);
 
 #endif

@@ -45,4 +45,16 @@ typedef struct {
     uint32_t size;
 } tinos_dirent_t;
 
+typedef struct {
+    uint32_t uptime_ms;
+    uint32_t memory_total_kib;
+    uint32_t memory_free_kib;
+    uint32_t screen_width;
+    uint32_t screen_height;
+    uint32_t fs_nodes;
+    char cpu[64];
+    char platform[48];
+    char clock[32];
+} tinos_system_info_t;
+
 #endif

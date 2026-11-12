@@ -37,7 +37,7 @@ exit without blocking the boot processor.
 | Threads             | Kernel threads, `THREAD_MAX` = 32, 16 KiB stacks             |
 | SMP                 | APs brought up via ACPI MADT + LAPIC INIT/SIPI               |
 | Interrupts          | 8259 PIC, PIT timer                                          |
-| Syscalls            | `int 0x80`: I/O, ramfs, process lifecycle, GUI handles/events  |
+| Syscalls            | `int 0x80`: I/O, ramfs, process lifecycle, GUI handles/events, sysinfo, keyboard ioctl |
 | Filesystem          | In-memory node tree; FAT16/FAT32 imported read-only          |
 | Network             | Polling Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS in the kernel |
 | Graphics            | Bochs/QEMU DISPI only, software framebuffer in the kernel    |
@@ -152,7 +152,8 @@ can still stall this loop.
 - The trusted compositor offers one window handle per process, text-cell
   frame submission (bounded copy-in) and blocking keyboard/mouse/resize/close
   events. The process table wakes only the blocked owner of a window.
-  Terminal, Explorer, Editor and About are ring-3 programs using this ABI.
+  Terminal, Explorer, Editor, Calculator, System Information, Control Panel
+  and About are ring-3 programs using this ABI.
   Stdout still goes to serial; the terminal implements its own built-ins
   until pipes and pseudo-terminals exist.
 

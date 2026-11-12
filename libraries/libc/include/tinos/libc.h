@@ -17,6 +17,8 @@ int tinos_wait(int pid, int *status);
 int tinos_getpid(void);
 int tinos_readdir(const char *path, unsigned index, tinos_dirent_t *entry);
 int tinos_stat(const char *path, tinos_dirent_t *entry);
+int tinos_sysinfo(tinos_system_info_t *info);
+int tinos_ioctl(int fd, unsigned request, unsigned value);
 int tinos_gui_open(const char *title, unsigned width, unsigned height);
 int tinos_gui_present(int handle, const char *cells, unsigned columns,
                       unsigned rows);
