@@ -529,7 +529,9 @@ Testing:
 - [x] Preempt i386 user execution with the PIT and resume its saved register
       frame in a later slice. Up to four processes have separate address
       spaces and kernel stacks on the BSP; `run` returns a PID immediately.
-      `jobs`, `kill` and `reap` control them from the text console.
+      `jobs`, `kill` and `reap` control them from the text console. QEMU
+      covers concurrent user jobs with 8/16 MiB, and kernel AP startup
+      alongside BSP user jobs with two CPUs and 64 MiB.
 - [x] Park a process in BLOCKED state on empty keyboard input and wake it
       from the TTY when a key arrives. The kernel never waits inside the
       syscall or burns a time slice polling for the next character.

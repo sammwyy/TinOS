@@ -18,9 +18,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--iso", default="build/tinos.iso")
     parser.add_argument("--mem", type=int, default=16)
+    parser.add_argument("--cpus", type=int, default=1)
     args = parser.parse_args()
 
-    vm = Tinos(args.iso, mem=args.mem, verbose=False)
+    vm = Tinos(args.iso, mem=args.mem, cpus=args.cpus, verbose=False)
     try:
         vm.start()
         vm.key("down")
@@ -50,7 +51,7 @@ def main():
             vm.line("run /apps/hello.elf")
             wait_count(vm, "ring3: hello from an isolated ELF", i)
         assert "KERNEL PANIC" not in vm.serial()
-        print(f"{args.mem} MiB preemptive processes and TTY recovery: OK")
+        print(f"{args.mem} MiB, {args.cpus} CPU preemptive processes and TTY: OK")
     finally:
         vm.stop()
         vm.cleanup()

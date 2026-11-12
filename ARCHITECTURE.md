@@ -116,6 +116,8 @@ are not driven by an independent scheduler loop:
   yields before returning to ring 3. Each job retains its address space
   and kernel stack across slices. Jobs cannot run on application processors.
 - On application processors, `smp.c:ap_entry()` loops on `thread_run(4)`.
+- The BSP can preempt ring-3 jobs while an AP runs kernel workers; APs do not
+  enter ring 3 until they have their own TSS and privilege-transition stack.
 - PIT preemption can transfer control to another worker before `thread_run()`
   resumes; its pending state is committed for the worker that actually
   returned to the scheduler.

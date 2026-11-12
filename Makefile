@@ -260,6 +260,7 @@ check: test $(ISO)
 	python3 tests/qemu/user_process_test.py --iso $(ISO)
 	python3 tests/qemu/process_preemption_test.py --iso $(ISO)
 	python3 tests/qemu/process_preemption_test.py --iso $(ISO) --mem 8
+	python3 tests/qemu/process_preemption_test.py --iso $(ISO) --mem 64 --cpus 2
 	python3 tests/qemu/user_spawn_test.py --iso $(ISO)
 	python3 tests/qemu/user_spawn_test.py --iso $(ISO) --mem 8
 
