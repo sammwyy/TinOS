@@ -725,8 +725,24 @@ def run_scenario(iso, shots_dir):
             vm.line("cat /users/sammy/note.txt")
             c.check(shot("terminal-cat").has("orange"), "writable file descriptor")
             vm.line("run /apps/gui_security.elf")
-            c.check(vm.wait_for_serial("ring3: GUI handles and files isolated",
-                                       timeout=15), "GUI handles are process-scoped")
+            c.check(shot("gui-security").has("GUI handles and files isolated"),
+                    "GUI handles and child controls are process-scoped")
+            vm.line("run /apps/echo.elf")
+            c.check(shot("child-prompt").has("ring3: type a line"),
+                    "child stdout reaches the GUI terminal")
+            vm.line("guest input")
+            c.check(shot("child-output").has("ring3 echo: guest input"),
+                    "child stdin and stdout work through the terminal")
+            vm.line("run /apps/stream.elf")
+            c.check(shot("stream-output").has("stream complete"),
+                    "backpressure lets large child output finish")
+            vm.line("run /apps/spin.elf")
+            vm.key("ctrl", "c")
+            c.check(vm.wait_for_serial("[proc] killed pid", timeout=15),
+                    "Ctrl+C kills a spinning child")
+            vm.line("echo still responsive")
+            c.check(shot("after-spinning-child").has("still responsive"),
+                    "desktop terminal survives a CPU-bound child")
             vm.line("edit /users/sammy/note.txt")
             c.check(vm.wait_for_serial("opened window 2 'Text Editor'",
                                        timeout=15), "editor is another process")

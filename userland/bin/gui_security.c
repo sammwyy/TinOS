@@ -17,7 +17,11 @@ int main(void)
              tinos_sysinfo((tinos_system_info_t *)0x00100000u) == -1 &&
              tinos_sysinfo(&info) == 0 && info.memory_total_kib > 0 &&
              tinos_ioctl(3, TINOS_IOCTL_KBD_SET_LAYOUT, TINOS_KBD_ES) == -1 &&
-             tinos_ioctl(0, TINOS_IOCTL_KBD_SET_LAYOUT, 99) == -1;
+             tinos_ioctl(0, TINOS_IOCTL_KBD_SET_LAYOUT, 99) == -1 &&
+             tinos_gui_console_attach(1) == -1 &&
+             tinos_gui_console_read(1, (char *)0x00100000u, 1) == -1 &&
+             tinos_tty_send(1, 'x') == -1 &&
+             tinos_kill(1) == -1;
     const char *message = ok ? "ring3: GUI handles and files isolated\n" :
                                "ring3: GUI isolation FAILED\n";
     tinos_write(1, message, strlen(message));

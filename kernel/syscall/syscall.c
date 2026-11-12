@@ -205,6 +205,27 @@ void syscall_dispatch(regs_t *frame)
         frame->eax = (uint32_t)desktop_user_window_close(process_current_pid(),
                                                           frame->ebx);
         return;
+    case TINOS_SYS_GUI_CONSOLE_ATTACH:
+        frame->eax = (uint32_t)desktop_user_window_console_attach(
+            process_current_pid(), frame->ebx);
+        return;
+    case TINOS_SYS_GUI_CONSOLE_READ:
+        if (frame->edx > 1024 ||
+            !process_user_buffer(frame->ecx, frame->edx, true)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        frame->eax = (uint32_t)desktop_user_window_console_read(
+            process_current_pid(), frame->ebx,
+            (char *)(uintptr_t)frame->ecx, frame->edx);
+        return;
+    case TINOS_SYS_TTY_SEND:
+        frame->eax = (uint32_t)(frame->ecx > 255 ? -1 :
+                                 process_console_send(frame->ebx, frame->ecx));
+        return;
+    case TINOS_SYS_KILL:
+        frame->eax = (uint32_t)process_kill_child(frame->ebx);
+        return;
     case TINOS_SYS_SPAWN:
         frame->eax = (uint32_t)spawn_user_process(frame);
         return;
@@ -262,6 +283,16 @@ void syscall_dispatch(regs_t *frame)
             frame->eax = (uint32_t)process_file_write(
                 (int)frame->ebx, (const void *)(uintptr_t)frame->ecx, frame->edx);
             return;
+        }
+        if (frame->edx) {
+            int sent = process_console_output((const void *)(uintptr_t)frame->ecx,
+                                               frame->edx);
+            if (sent == 0)
+                process_block_console_output(frame);
+            if (sent > 0) {
+                frame->eax = (uint32_t)sent;
+                return;
+            }
         }
         for (size_t i = 0; i < frame->edx; i++) {
             char c = ((const char *)(uintptr_t)frame->ecx)[i];

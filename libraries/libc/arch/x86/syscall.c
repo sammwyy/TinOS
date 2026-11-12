@@ -66,7 +66,11 @@ int tinos_read(int fd, void *buffer, unsigned length)
 
 int tinos_write(int fd, const void *buffer, unsigned length)
 {
-    return invoke(TINOS_SYS_WRITE, (unsigned)fd, (unsigned)buffer, length);
+    int result;
+    do {
+        result = invoke(TINOS_SYS_WRITE, (unsigned)fd, (unsigned)buffer, length);
+    } while (result == 0 && length && (fd == 1 || fd == 2));
+    return result;
 }
 
 int tinos_spawn(const char *path, unsigned argc, const char *const argv[])
@@ -141,6 +145,28 @@ int tinos_gui_event(int handle, tinos_gui_event_t *event)
 int tinos_gui_close(int handle)
 {
     return invoke(TINOS_SYS_GUI_CLOSE, (unsigned)handle, 0, 0);
+}
+
+int tinos_gui_console_attach(int handle)
+{
+    return invoke(TINOS_SYS_GUI_CONSOLE_ATTACH, (unsigned)handle, 0, 0);
+}
+
+int tinos_gui_console_read(int handle, char *buffer, unsigned length)
+{
+    return invoke(TINOS_SYS_GUI_CONSOLE_READ, (unsigned)handle,
+                  (unsigned)buffer, length);
+}
+
+int tinos_tty_send(int child_pid, char ch)
+{
+    return invoke(TINOS_SYS_TTY_SEND, (unsigned)child_pid,
+                  (unsigned)(unsigned char)ch, 0);
+}
+
+int tinos_kill(int child_pid)
+{
+    return invoke(TINOS_SYS_KILL, (unsigned)child_pid, 0, 0);
 }
 
 __attribute__((noreturn)) void tinos_exit(int status)

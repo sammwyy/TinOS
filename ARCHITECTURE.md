@@ -154,8 +154,12 @@ can still stall this loop.
   events. The process table wakes only the blocked owner of a window.
   Terminal, Explorer, Editor, Calculator, System Information, Control Panel
   and About are ring-3 programs using this ABI.
-  Stdout still goes to serial; the terminal implements its own built-ins
-  until pipes and pseudo-terminals exist.
+  The terminal handles simple commands itself and bridges its children's
+  fd 0/1/2 to a bounded parent-owned byte stream and input queue. Full
+  streams block child writers; the compositor wakes them when the terminal
+  drains data. Child exit and window events wake only their owner. Programs
+  without a terminal parent still write stdout to serial; pipes and a
+  general pseudo-terminal device are not implemented.
 
 ### 1.6 Dependency direction today
 

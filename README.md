@@ -62,9 +62,11 @@ services, but application ELF files can execute only in ring 3.
 
 At 8 MiB of QEMU RAM the graphical desktop can launch Terminal, File
 Explorer, Text Editor, Calculator, System Information, Control Panel and
-About as separate ring-3 ELF programs with their own windows. Programs
-still write standard output to serial; there is no pseudo-terminal or pipe
-API yet.
+About as separate ring-3 ELF programs with their own windows. Terminal
+connects its child processes to a bounded stdin/stdout channel, so `run`
+shows their output and forwards keyboard input; `Ctrl+C` stops a running
+child. Programs without a Terminal parent still write stdout to serial.
+This is not a full POSIX pseudo-terminal or pipe API yet.
 At 4 MiB the loader skips the executable archive and boots into the text
 console. Graphics also falls back to
 the console on unsupported video hardware. This BIOS boot image is currently
@@ -195,6 +197,10 @@ events. Terminal supports `ls`, `cd`, `pwd`, `cat`, `echo`, `touch`, `mkdir`,
 previews files and opens them in the editor with `E`; the editor saves
 ramfs files with `Ctrl+S`. These are new userspace implementations, not
 the old kernel-callback GUI apps; their advanced controls are not yet ported.
+`run /apps/echo.elf` demonstrates interactive child I/O in the GUI;
+`run /apps/cat.elf /README.txt` displays child output, and Ctrl+C cancels
+`run /apps/spin.elf`. The child stdout queue blocks writers when full and
+wakes them when Terminal reads it, without busy-waiting in the kernel.
 Calculator handles bounded integer arithmetic; System Information reads
 system status through a validated syscall. Control Panel changes the
 keyboard between US and ES through an `ioctl` on the console descriptor.

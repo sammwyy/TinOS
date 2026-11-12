@@ -49,6 +49,7 @@ typedef struct {
     int status;
     bool started;
     bool wants_input;
+    bool blocked_output;
     uintptr_t blocked_address;
     uintptr_t blocked_gui_address;
     uint64_t deadline;
@@ -147,6 +148,64 @@ NORETURN void process_block_console(regs_t *frame)
     running->blocked_address = frame->ecx;
     running->state = PROCESS_BLOCKED;
     arch_leave_user(0);
+}
+
+NORETURN void process_block_console_output(regs_t *frame)
+{
+    KASSERT(running != NULL && (frame->cs & 3) == 3);
+    memcpy(&running->frame, frame, sizeof(*frame));
+    running->blocked_output = true;
+    running->state = PROCESS_BLOCKED;
+    arch_leave_user(0);
+}
+
+void process_wake_console_output(uint32_t parent_pid)
+{
+    for (size_t i = 0; i < PROCESS_MAX; i++)
+        if (processes[i].parent_pid == parent_pid &&
+            processes[i].state == PROCESS_BLOCKED &&
+            processes[i].blocked_output)
+            processes[i].state = PROCESS_READY;
+}
+
+int process_console_output(const void *data, size_t length)
+{
+    if (!running || !running->parent_pid)
+        return -1;
+    return desktop_user_window_console_write(running->parent_pid, data, length);
+}
+
+int process_console_send(uint32_t child_pid, uint8_t ch)
+{
+    if (!running || !child_pid || !ch)
+        return -1;
+    for (size_t i = 0; i < PROCESS_MAX; i++) {
+        process_t *child = &processes[i];
+        if (child->pid != child_pid || child->parent_pid != running->pid ||
+            (child->state != PROCESS_READY &&
+             child->state != PROCESS_BLOCKED))
+            continue;
+        unsigned next = (child->input_tail + 1) % PROCESS_INPUT_SIZE;
+        if (next == child->input_head)
+            return -1;
+        child->input[child->input_tail] = ch;
+        child->input_tail = next;
+        if (child->state == PROCESS_BLOCKED && child->blocked_address)
+            child->state = PROCESS_READY;
+        return 0;
+    }
+    return -1;
+}
+
+int process_kill_child(uint32_t child_pid)
+{
+    if (!running || !child_pid)
+        return -1;
+    for (size_t i = 0; i < PROCESS_MAX; i++)
+        if (processes[i].pid == child_pid &&
+            processes[i].parent_pid == running->pid)
+            return process_kill(child_pid) ? 0 : -1;
+    return -1;
 }
 
 NORETURN void process_block_gui(regs_t *frame, uintptr_t event_address)
@@ -411,6 +470,7 @@ static void complete_process(process_t *p)
         memset(p, 0, sizeof(*p));
         return;
     }
+    desktop_user_window_child_exit(p->parent_pid, p->pid, p->status);
 }
 
 int process_spawn(const void *image, size_t length, int argc,
@@ -450,6 +510,10 @@ int process_spawn(const void *image, size_t length, int argc,
 
     bool interrupts = irq_save();
     user_space_activate(&p->space);
+    if (p->blocked_output) {
+        p->frame.eax = 0;
+        p->blocked_output = false;
+    }
     void *entry = NULL;
     bool loaded = elf_user_load(image, length, map_image_page, &p->space,
                                 protect_image_page, &entry);

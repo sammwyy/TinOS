@@ -165,7 +165,7 @@ kernel: $(KERNEL)
 # from older builds are never read, even if they remain under build/native.
 RAMFS := $(BUILD)/ramfs.tar
 USERLAND_APPS := hello fault badptr echo fpu io df textwrite cat fdtest \
-                 spin spawn spawn_badarg multi gui_security
+                 spin spawn spawn_badarg multi gui_security stream
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel
 
 .PHONY: native-apps

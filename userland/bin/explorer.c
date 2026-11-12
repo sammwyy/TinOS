@@ -119,6 +119,12 @@ int main(void)
     while (tinos_gui_event(ui.handle, &event) == 1) {
         if (event.type == TINOS_GUI_CLOSE)
             break;
+        if (event.type == TINOS_GUI_CHILD_EXIT) {
+            tinos_wait(event.code, 0);
+            refresh();
+            render();
+            continue;
+        }
         if (event.type == TINOS_GUI_MOUSE && !preview &&
             event.y >= 3 * 16 && event.code == 1) {
             unsigned row = event.y / 16 - 3 + first_visible;

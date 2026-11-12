@@ -64,9 +64,12 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
 - [x] Add a bounded window-handle/text-cell/event ABI. Port Terminal,
       Explorer, Editor, Calculator, System Information, Control Panel and
       About to ELF32 ring-3 clients using libc.
+- [x] Bridge a Terminal's child stdin/stdout through bounded queues and
+      process-scoped events. Block full writers, wake them when drained,
+      report child exit, and allow a parent to kill its own child with Ctrl+C.
 - [ ] Port the remaining graphical programs and advanced controls. Add a
       framebuffer/shared-buffer protocol for pixel apps, socket/audio device
-      handles, and PTYs/pipes so spawned commands appear in Terminal.
+      handles, and PTYs/pipes for arbitrary programs and shell pipelines.
 - [ ] Add heap canaries / redzones and a `heap_check()` callable from the
       self-test and from the panic path (`kernel/mm/heap.c`).
 - [ ] Add stack guard words to thread stacks and check them on context switch

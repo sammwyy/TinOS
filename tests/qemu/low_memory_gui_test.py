@@ -36,6 +36,14 @@ def main():
         time.sleep(0.4)
         vm.screenshot(path)
         assert Screen(path).has("README.txt"), "terminal cannot read directory"
+        vm.line("run /apps/echo.elf")
+        time.sleep(0.4)
+        vm.screenshot(path)
+        assert Screen(path).has("ring3: type a line"), "child output not visible"
+        vm.line("eight megabytes")
+        time.sleep(0.4)
+        vm.screenshot(path)
+        assert Screen(path).has("ring3 echo: eight megabytes"), "child input failed"
         assert "KERNEL PANIC" not in vm.serial()
         print("8 MiB desktop and ring-3 menu launch: OK")
     finally:

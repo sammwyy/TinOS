@@ -8,6 +8,7 @@ static tinos_ui_t ui;
 static char cwd[PATH_CAP] = "/";
 static char input[INPUT_CAP];
 static unsigned input_len;
+static int foreground;
 
 static void print(const char *text)
 {
@@ -176,8 +177,10 @@ static int execute(char *command)
             args[i] = args[i + 1];
         args[0] = path;
         int pid = tinos_spawn(path, argc - 1, (const char *const *)args);
-        print(pid < 0 ? "run: failed to start\n" :
-                         "run: started; output is on serial\n");
+        if (pid < 0)
+            print("run: failed to start\n");
+        else
+            foreground = pid;
     } else if (strcmp(args[0], "exit") == 0) {
         return 1;
     } else {
@@ -190,14 +193,51 @@ int main(void)
 {
     if (tinos_ui_open(&ui, "Terminal", 500, 320) < 0)
         return 1;
+    if (tinos_gui_console_attach(ui.handle) < 0)
+        return 1;
     print("TinOS terminal - type help for commands\n");
     prompt();
     tinos_gui_event_t event;
     while (tinos_gui_event(ui.handle, &event) == 1) {
         if (event.type == TINOS_GUI_CLOSE)
             break;
+        if (event.type == TINOS_GUI_OUTPUT) {
+            char buffer[1025];
+            int count;
+            while ((count = tinos_gui_console_read(ui.handle, buffer, 1024)) > 0) {
+                for (int i = 0; i < count; i++)
+                    if (buffer[i] < 32 && buffer[i] != '\n')
+                        buffer[i] = ' ';
+                buffer[count] = '\0';
+                print(buffer);
+            }
+            tinos_ui_present(&ui);
+            continue;
+        }
+        if (event.type == TINOS_GUI_CHILD_EXIT) {
+            int pid = (int)event.code;
+            tinos_wait(pid, 0);
+            if (pid == foreground) {
+                foreground = 0;
+                print("\n");
+                prompt();
+            }
+            continue;
+        }
         if (event.type != TINOS_GUI_KEY)
             continue;
+        if (foreground) {
+            if ((event.mods & TINOS_MOD_CTRL) &&
+                (event.ch == 'c' || event.ch == 'C'))
+                tinos_kill(foreground);
+            else if (event.code == TINOS_KEY_ENTER)
+                tinos_tty_send(foreground, '\n');
+            else if (event.code == TINOS_KEY_BACKSPACE)
+                tinos_tty_send(foreground, '\b');
+            else if (event.ch >= 32 && event.ch < 127)
+                tinos_tty_send(foreground, event.ch);
+            continue;
+        }
         if (event.code == TINOS_KEY_ENTER) {
             print("\n");
             int exit_requested = execute(input);
@@ -205,7 +245,10 @@ int main(void)
                 break;
             input_len = 0;
             input[0] = '\0';
-            prompt();
+            if (foreground)
+                tinos_ui_present(&ui);
+            else
+                prompt();
         } else if (event.code == TINOS_KEY_BACKSPACE && input_len) {
             input[--input_len] = '\0';
             if (ui.x) {
@@ -221,6 +264,8 @@ int main(void)
             tinos_ui_present(&ui);
         }
     }
+    if (foreground)
+        tinos_kill(foreground);
     tinos_gui_close(ui.handle);
     return 0;
 }
