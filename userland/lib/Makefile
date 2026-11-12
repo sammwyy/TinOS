@@ -9,7 +9,8 @@ CFLAGS := -m32 -std=gnu11 -O2 -ffreestanding -fno-builtin \
 LIBS := $(BUILD)/libtinosbmp.so $(BUILD)/libtinoswav.so \
         $(BUILD)/libtinostate.so $(BUILD)/libtinoschain.so \
         $(BUILD)/libtinostls.so $(BUILD)/libtinosrt.so \
-        $(BUILD)/libtinosgd.so $(BUILD)/libtinosconsumer.so
+        $(BUILD)/libtinosgd.so $(BUILD)/libtinosconsumer.so \
+        $(BUILD)/libtinosversioned.so $(BUILD)/libtinosversionconsumer.so
 
 .PHONY: all
 all: $(LIBS)
@@ -62,3 +63,15 @@ $(BUILD)/libtinosconsumer.so: $(BUILD)/gd_consumer.o \
 	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
 		--hash-style=gnu --build-id=none -soname libtinosconsumer.so \
 		-o $@ $(BUILD)/gd_consumer.o -L$(BUILD) -ltinosgd -ltinosrt
+
+$(BUILD)/libtinosversioned.so: $(BUILD)/versioned.o versioned.map Makefile
+	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
+		--hash-style=gnu --build-id=none -soname libtinosversioned.so \
+		--version-script=versioned.map -o $@ $(BUILD)/versioned.o
+
+$(BUILD)/libtinosversionconsumer.so: $(BUILD)/version_consumer.o \
+    $(BUILD)/libtinosversioned.so Makefile
+	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
+		--hash-style=gnu --build-id=none \
+		-soname libtinosversionconsumer.so -o $@ \
+		$(BUILD)/version_consumer.o -L$(BUILD) -ltinosversioned

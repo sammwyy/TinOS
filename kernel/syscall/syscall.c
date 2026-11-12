@@ -28,6 +28,18 @@ static bool copy_user_path(uintptr_t address, size_t length,
     return true;
 }
 
+static bool copy_user_symbol(uintptr_t address, char value[64])
+{
+    for (unsigned i = 0; i < 64; i++) {
+        if (!process_user_buffer(address + i, 1, false))
+            return false;
+        value[i] = *(const char *)(address + i);
+        if (!value[i])
+            return i != 0;
+    }
+    return false;
+}
+
 static int spawn_user_process(const regs_t *frame)
 {
     if (frame->edx == 0 || frame->edx > 16 ||
@@ -284,6 +296,14 @@ void syscall_dispatch(regs_t *frame)
             return;
         }
         frame->eax = (uint32_t)process_library_symbol((int)frame->ebx, name);
+        return;
+    }
+    case TINOS_SYS_DLVSYM: {
+        char name[64], version[64];
+        frame->eax = copy_user_symbol(frame->ecx, name) &&
+                     copy_user_symbol(frame->edx, version) ?
+                     (uint32_t)process_library_versioned_symbol(
+                         (int)frame->ebx, name, version) : 0;
         return;
     }
     case TINOS_SYS_DLCLOSE:

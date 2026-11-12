@@ -37,6 +37,7 @@ int tinos_pcm_wait(int handle, unsigned maximum_queued_frames);
 int tinos_dlopen(const char *name);
 int tinos_dlclose(int handle);
 void *tinos_dlsym(int handle, const char *symbol);
+void *tinos_dlvsym(int handle, const char *symbol, const char *version);
 int tinos_gui_console_attach(int handle);
 int tinos_gui_console_read(int handle, char *buffer, unsigned length);
 int tinos_tty_send(int child_pid, char ch);

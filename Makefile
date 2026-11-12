@@ -167,12 +167,13 @@ RAMFS := $(BUILD)/ramfs.tar
 USERLAND_APPS := hello fault badptr echo fpu io df textwrite cat fdtest \
                  spin spawn spawn_badarg multi gui_security stream \
                  libprobe libtamper pcm_demo chainprobe chainopen chainclose \
-                 tlsprobe gdprobe gd_consumer_probe
+                 tlsprobe gdprobe gd_consumer_probe versionprobe versionopen
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
             image_viewer media_player
 USERLAND_LIBS := libtinosbmp.so libtinoswav.so \
                  libtinostate.so libtinoschain.so libtinostls.so \
-                 libtinosrt.so libtinosgd.so libtinosconsumer.so
+                 libtinosrt.so libtinosgd.so libtinosconsumer.so \
+                 libtinosversioned.so libtinosversionconsumer.so
 SAMPLE_BMP := $(BUILD)/userland/media/demo.bmp
 SAMPLE_WAV := $(BUILD)/userland/media/demo.wav
 

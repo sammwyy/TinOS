@@ -80,6 +80,26 @@ typedef struct PACKED {
     uint32_t offset, info;
 } relocation_t;
 
+typedef struct PACKED {
+    uint16_t version, flags, index, count;
+    uint32_t hash, aux, next;
+} version_definition_t;
+
+typedef struct PACKED {
+    uint32_t name, next;
+} version_definition_aux_t;
+
+typedef struct PACKED {
+    uint16_t version, count;
+    uint32_t file, aux, next;
+} version_requirement_t;
+
+typedef struct PACKED {
+    uint32_t hash;
+    uint16_t flags, index;
+    uint32_t name, next;
+} version_requirement_aux_t;
+
 typedef struct {
     char name[FS_NAME_MAX];
     uintptr_t base;
@@ -511,6 +531,7 @@ typedef struct {
     uint32_t pltrel;
     uint32_t init, init_array, init_array_size;
     uint32_t fini, fini_array, fini_array_size;
+    uint32_t versym, verdef, verdefnum, verneed, verneednum;
     uint32_t needed[LIB_LIMIT];
     unsigned needed_count;
 } dynamic_info_t;
@@ -548,15 +569,15 @@ static bool read_dynamic(uintptr_t address, size_t bytes, dynamic_info_t *info)
         case DT_FINI: info->fini = entries[i].value; break;
         case DT_FINI_ARRAY: info->fini_array = entries[i].value; break;
         case DT_FINI_ARRAYSZ: info->fini_array_size = entries[i].value; break;
+        case DT_VERSYM: info->versym = entries[i].value; break;
+        case DT_VERDEF: info->verdef = entries[i].value; break;
+        case DT_VERDEFNUM: info->verdefnum = entries[i].value; break;
+        case DT_VERNEED: info->verneed = entries[i].value; break;
+        case DT_VERNEEDNUM: info->verneednum = entries[i].value; break;
         case DT_RELA:
         case DT_TEXTREL:
         case DT_PREINIT_ARRAY:
         case DT_PREINIT_ARRAYSZ:
-        case DT_VERSYM:
-        case DT_VERDEF:
-        case DT_VERDEFNUM:
-        case DT_VERNEED:
-        case DT_VERNEEDNUM:
             return false;
         default:
             break;
@@ -651,11 +672,208 @@ static bool dynamic_symbol_count(const user_space_t *space, uintptr_t base,
     return true;
 }
 
+typedef struct {
+    const uint16_t *symbols;
+    struct {
+        uint16_t index;
+        const char *name;
+    } definitions[16];
+    struct {
+        uint16_t index;
+        const char *name;
+        const char *file;
+    } requirements[16];
+    unsigned definition_count, requirement_count;
+} version_info_t;
+
+static uint32_t elf_version_hash(const char *name)
+{
+    uint32_t hash = 0;
+    while (*name) {
+        hash = (hash << 4) + (uint8_t)*name++;
+        uint32_t high = hash & 0xf0000000u;
+        if (high)
+            hash ^= high >> 24;
+        hash &= ~high;
+    }
+    return hash;
+}
+
+static bool version_record(const user_space_t *space, uintptr_t base,
+                           uint32_t offset, size_t length)
+{
+    return dynamic_range(base, offset, length) &&
+           mapped(space, base + offset, length, false);
+}
+
+static bool read_versions(const dynamic_info_t *info,
+                          const user_space_t *space, uintptr_t base,
+                          const symbol_t *symbols, uint32_t count,
+                          version_info_t *versions)
+{
+    memset(versions, 0, sizeof(*versions));
+    if (!info->versym)
+        return !info->verdef && !info->verdefnum &&
+               !info->verneed && !info->verneednum;
+    if ((info->verdef != 0) != (info->verdefnum != 0) ||
+        (info->verneed != 0) != (info->verneednum != 0) ||
+        info->verdefnum > 16 || info->verneednum > 16 ||
+        !version_record(space, base, info->versym,
+                        count * sizeof(uint16_t)))
+        return false;
+    versions->symbols = (const uint16_t *)(base + info->versym);
+    const char *strings = (const char *)(base + info->strtab);
+    uint32_t offset = info->verdef;
+    for (unsigned i = 0; i < info->verdefnum; i++) {
+        if (!version_record(space, base, offset,
+                            sizeof(version_definition_t)))
+            return false;
+        const version_definition_t *record =
+            (const version_definition_t *)(base + offset);
+        if (record->version != 1 || !record->index ||
+            record->index >= 0x8000 || !record->count ||
+            record->count > 16 || record->aux <
+            sizeof(version_definition_t) || record->aux > 4096)
+            return false;
+        for (unsigned j = 0; j < versions->definition_count; j++)
+            if (versions->definitions[j].index == record->index)
+                return false;
+        uint32_t aux = offset + record->aux;
+        const char *name = NULL;
+        for (unsigned j = 0; j < record->count; j++) {
+            if (!version_record(space, base, aux,
+                                sizeof(version_definition_aux_t)))
+                return false;
+            const version_definition_aux_t *entry =
+                (const version_definition_aux_t *)(base + aux);
+            const char *part;
+            if (!string_at(strings, info->strsz, entry->name, &part) ||
+                !*part || (j + 1 < record->count &&
+                           (entry->next < sizeof(*entry) ||
+                            entry->next > 4096)))
+                return false;
+            if (!j)
+                name = part;
+            if (j + 1 < record->count)
+                aux += entry->next;
+        }
+        if (elf_version_hash(name) != record->hash)
+            return false;
+        versions->definitions[versions->definition_count].index =
+            record->index;
+        versions->definitions[versions->definition_count++].name = name;
+        if (i + 1 < info->verdefnum) {
+            if (record->next < sizeof(*record) || record->next > 4096)
+                return false;
+            offset += record->next;
+        } else if (record->next)
+            return false;
+    }
+    offset = info->verneed;
+    for (unsigned i = 0; i < info->verneednum; i++) {
+        if (!version_record(space, base, offset,
+                            sizeof(version_requirement_t)))
+            return false;
+        const version_requirement_t *record =
+            (const version_requirement_t *)(base + offset);
+        const char *file;
+        if (record->version != 1 || !record->count ||
+            record->count > 16 || record->aux <
+            sizeof(version_requirement_t) || record->aux > 4096 ||
+            !string_at(strings, info->strsz, record->file, &file) ||
+            !valid_library_name(file))
+            return false;
+        uint32_t aux = offset + record->aux;
+        for (unsigned j = 0; j < record->count; j++) {
+            if (!version_record(space, base, aux,
+                                sizeof(version_requirement_aux_t)) ||
+                versions->requirement_count == 16)
+                return false;
+            const version_requirement_aux_t *entry =
+                (const version_requirement_aux_t *)(base + aux);
+            const char *name;
+            uint16_t index = entry->index & 0x7fffu;
+            if (index < 2 || entry->flags ||
+                !string_at(strings, info->strsz, entry->name, &name) ||
+                !*name || elf_version_hash(name) != entry->hash ||
+                (j + 1 < record->count &&
+                 (entry->next < sizeof(*entry) || entry->next > 4096)))
+                return false;
+            for (unsigned k = 0; k < versions->requirement_count; k++)
+                if (versions->requirements[k].index == index)
+                    return false;
+            unsigned next = versions->requirement_count++;
+            versions->requirements[next].index = index;
+            versions->requirements[next].name = name;
+            versions->requirements[next].file = file;
+            if (j + 1 < record->count)
+                aux += entry->next;
+        }
+        if (i + 1 < info->verneednum) {
+            if (record->next < sizeof(*record) || record->next > 4096)
+                return false;
+            offset += record->next;
+        } else if (record->next)
+            return false;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        uint16_t index = versions->symbols[i] & 0x7fffu;
+        if (index < 2)
+            continue;
+        bool found = false;
+        if (symbols[i].section) {
+            for (unsigned j = 0; j < versions->definition_count; j++)
+                if (versions->definitions[j].index == index)
+                    found = true;
+        } else {
+            for (unsigned j = 0; j < versions->requirement_count; j++)
+                if (versions->requirements[j].index == index)
+                    found = true;
+        }
+        if (!found)
+            return false;
+    }
+    return true;
+}
+
+static const char *required_version(const version_info_t *versions,
+                                    uint32_t index, const char **file)
+{
+    *file = NULL;
+    if (!versions->symbols || (versions->symbols[index] & 0x7fffu) < 2)
+        return NULL;
+    uint16_t version = versions->symbols[index] & 0x7fffu;
+    for (unsigned i = 0; i < versions->requirement_count; i++)
+        if (versions->requirements[i].index == version) {
+            *file = versions->requirements[i].file;
+            return versions->requirements[i].name;
+        }
+    return NULL;
+}
+
+static bool version_matches(const version_info_t *versions, uint32_t index,
+                            const char *requested)
+{
+    if (!versions->symbols)
+        return !requested;
+    uint16_t number = versions->symbols[index] & 0x7fffu;
+    if (!requested)
+        return number != 0 && !(versions->symbols[index] & 0x8000u);
+    for (unsigned i = 0; i < versions->definition_count; i++)
+        if (versions->definitions[i].index == number &&
+            !strcmp(versions->definitions[i].name, requested))
+            return true;
+    return false;
+}
+
 static bool export_symbol(const shared_library_t *library,
                           const user_space_t *space, const char *name,
                           uintptr_t *address,
-                          const dynlink_state_t *state, unsigned slot)
+                          const dynlink_state_t *state, unsigned slot,
+                          const char *requested, const char *filename)
 {
+    if (filename && strcmp(filename, library->name))
+        return false;
     fs_node_t *file;
     char path[FS_PATH_MAX];
     strlcpy(path, "/apps/lib/", sizeof(path));
@@ -690,11 +908,16 @@ static bool export_symbol(const shared_library_t *library,
             return false;
         const char *strings = (const char *)(library->base + info.strtab);
         const symbol_t *table = (const symbol_t *)(library->base + info.symtab);
+        version_info_t versions;
+        if (!read_versions(&info, space, library->base, table,
+                           symbols, &versions))
+            return false;
         for (uint32_t n = 1; n < symbols; n++) {
             const char *candidate;
             if (!table[n].section || (table[n].info >> 4) != 1 ||
                 !string_at(strings, info.strsz, table[n].name, &candidate) ||
-                strcmp(candidate, name))
+                strcmp(candidate, name) ||
+                !version_matches(&versions, n, requested))
                 continue;
             if ((table[n].info & 15) == STT_TLS) {
                 if (!state || !state->tls_size[slot] ||
@@ -749,7 +972,8 @@ static bool resolve_tls_symbol(const symbol_t *table, uint32_t index,
                                const char *strings, uint32_t strsz,
                                const user_space_t *space,
                                const dynlink_state_t *state, unsigned local,
-                               unsigned *module, uint32_t *offset)
+                               unsigned *module, uint32_t *offset,
+                               const char *version, const char *filename)
 {
     *module = local;
     *offset = 0;
@@ -770,7 +994,7 @@ static bool resolve_tls_symbol(const symbol_t *table, uint32_t index,
             continue;
         uintptr_t address = 0;
         if (!export_symbol(&libraries[i], space, name, &address,
-                           state, i))
+                           state, i, version, filename))
             continue;
         uintptr_t block = USER_TLS_TOP - state->tls_end[i];
         if (address >= block &&
@@ -810,6 +1034,9 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
         return false;
     const char *strings = (const char *)(base + info->strtab);
     const symbol_t *table = (const symbol_t *)(base + info->symtab);
+    version_info_t versions;
+    if (!read_versions(info, space, base, table, symbols, &versions))
+        return false;
     const uint32_t offsets[] = { info->rel, info->jmprel };
     const uint32_t sizes[] = { info->relsz, info->pltrelsz };
     for (unsigned group = 0; group < 2; group++) {
@@ -826,6 +1053,10 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
                               base + rel[n].offset))
                 return false;
             uint32_t *target = (uint32_t *)(base + rel[n].offset);
+            const char *filename = NULL;
+            const char *version = NULL;
+            if (index && index < symbols && !table[index].section)
+                version = required_version(&versions, index, &filename);
             if (type == R_386_RELATIVE) {
                 if (index || !library_range(*target, 1) ||
                     !mapped(space, base + *target, 1, false))
@@ -839,7 +1070,7 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
                 if (index >= symbols ||
                     !resolve_tls_symbol(table, index, strings, info->strsz,
                                         space, state, slot, &module,
-                                        &offset) ||
+                                        &offset, version, filename) ||
                     *target >= state->tls_size[module] ||
                     offset > state->tls_size[module] - 1 - *target)
                     return false;
@@ -853,7 +1084,7 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
                 if (index >= symbols ||
                     !resolve_tls_symbol(table, index, strings, info->strsz,
                                         space, state, slot, &module,
-                                        &offset))
+                                        &offset, version, filename))
                     return false;
                 if (type == R_386_TLS_DTPMOD32) {
                     if (*target)
@@ -883,7 +1114,7 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
                 for (unsigned j = 0; j < LIB_LIMIT; j++)
                     if ((state->mask & (1u << j)) &&
                         export_symbol(&libraries[j], space, name, &symbol,
-                                      NULL, 0))
+                                      NULL, 0, version, filename))
                         break;
             }
             if (!symbol)
@@ -1082,6 +1313,9 @@ bool dynlink_load(const void *image, size_t size, user_space_t *space,
         return false;
     const char *strings = (const char *)(uintptr_t)info.strtab;
     const symbol_t *symbols = (const symbol_t *)(uintptr_t)info.symtab;
+    version_info_t versions;
+    if (!read_versions(&info, space, 0, symbols, symbol_count, &versions))
+        return false;
     uint32_t loaded = 0;
     for (unsigned i = 0; i < info.needed_count; i++) {
         const char *name;
@@ -1115,9 +1349,12 @@ bool dynlink_load(const void *image, size_t size, user_space_t *space,
                           relocations[i].offset))
             return false;
         uintptr_t target = 0;
+        const char *filename = NULL;
+        const char *version = required_version(&versions, index, &filename);
         for (unsigned j = 0; j < ARRAY_SIZE(libraries); j++)
             if ((loaded & (1u << j)) &&
-                export_symbol(&libraries[j], space, name, &target, NULL, 0))
+                export_symbol(&libraries[j], space, name, &target, NULL, 0,
+                              version, filename))
                 break;
         if (!target)
             return false;
@@ -1148,7 +1385,8 @@ uintptr_t dynlink_next_finalizer(dynlink_state_t *state)
 
 uintptr_t dynlink_symbol(int handle, const char *name,
                          const user_space_t *space,
-                         const dynlink_state_t *state)
+                         const dynlink_state_t *state,
+                         const char *version)
 {
     if (!name || !space || !state ||
         handle < 1 || handle > (int)LIB_LIMIT ||
@@ -1157,7 +1395,7 @@ uintptr_t dynlink_symbol(int handle, const char *name,
         return 0;
     uintptr_t address = 0;
     if (!export_symbol(&libraries[handle - 1], space, name, &address,
-                       state, (unsigned)(handle - 1)))
+                       state, (unsigned)(handle - 1), version, NULL))
         return 0;
     return address;
 }

@@ -21,7 +21,9 @@ def main():
         libraries = ("lib/libtinosbmp.so", "lib/libtinoswav.so",
                      "lib/libtinostate.so", "lib/libtinoschain.so",
                      "lib/libtinostls.so", "lib/libtinosrt.so",
-                     "lib/libtinosgd.so", "lib/libtinosconsumer.so")
+                     "lib/libtinosgd.so", "lib/libtinosconsumer.so",
+                     "lib/libtinosversioned.so",
+                     "lib/libtinosversionconsumer.so")
         for library in libraries:
             assert library in names, names
             header = archive.extractfile(library).read(20)

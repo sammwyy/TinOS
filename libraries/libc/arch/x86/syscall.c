@@ -233,6 +233,17 @@ void *tinos_dlsym(int handle, const char *symbol)
                                    (unsigned)symbol, length) : 0;
 }
 
+void *tinos_dlvsym(int handle, const char *symbol, const char *version)
+{
+    unsigned symbol_length = path_length(symbol);
+    unsigned version_length = path_length(version);
+    if (!symbol_length || symbol_length >= 64 ||
+        !version_length || version_length >= 64)
+        return 0;
+    return (void *)invoke(TINOS_SYS_DLVSYM, (unsigned)handle,
+                          (unsigned)symbol, (unsigned)version);
+}
+
 int tinos_gui_console_attach(int handle)
 {
     return invoke(TINOS_SYS_GUI_CONSOLE_ATTACH, (unsigned)handle, 0, 0);

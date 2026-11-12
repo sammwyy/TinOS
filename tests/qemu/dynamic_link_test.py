@@ -89,6 +89,14 @@ def main():
         wait_new(vm, before, "ring3: TLS imports use dependency state")
 
         before = len(vm.serial())
+        vm.line("run /apps/versionprobe.elf")
+        wait_new(vm, before, "ring3: versioned ELF imports resolve correctly")
+
+        before = len(vm.serial())
+        vm.line("run /apps/versionopen.elf")
+        wait_new(vm, before, "ring3: versioned library dependency works")
+
+        before = len(vm.serial())
         vm.line("run /apps/libtamper.elf")
         wait_new(vm, before, "[proc] user exception 14")
         wait_new(vm, before, "[proc] ring 3 exit status 142")

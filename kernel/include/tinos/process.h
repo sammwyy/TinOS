@@ -61,6 +61,8 @@ int process_library_open(const char *name);
 int process_library_close(int handle);
 int process_library_prepare_close(int handle);
 uintptr_t process_library_symbol(int handle, const char *name);
+uintptr_t process_library_versioned_symbol(int handle, const char *name,
+                                           const char *version);
 uintptr_t process_library_initializer(void);
 uintptr_t process_library_finalizer(void);
 uintptr_t process_library_close_finalizer(void);

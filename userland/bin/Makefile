@@ -6,12 +6,12 @@ LIBC_BUILD := $(ROOT)/build/libc
 LIB_BUILD := $(ROOT)/build/userland/lib
 LIBC_APPS := cat fdtest spin spawn spawn_badarg multi gui_security stream \
              libprobe libtamper pcm_demo chainopen chainclose tlsprobe gdprobe \
-             gd_consumer_probe
+             gd_consumer_probe versionopen
 LIBC_ELFS := $(addprefix $(BUILD)/,$(addsuffix .elf,$(LIBC_APPS)))
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
             image_viewer media_player
 GUI_ELFS := $(addprefix $(BUILD)/gui/,$(addsuffix .elf,$(GUI_APPS)))
-DYNAMIC_ELFS := $(BUILD)/chainprobe.elf
+DYNAMIC_ELFS := $(BUILD)/chainprobe.elf $(BUILD)/versionprobe.elf
 DYNAMIC_APPS := image_viewer media_player
 STATIC_GUI_APPS := $(filter-out $(DYNAMIC_APPS),$(GUI_APPS))
 STATIC_GUI_ELFS := $(addprefix $(BUILD)/gui/,$(addsuffix .elf,$(STATIC_GUI_APPS)))
@@ -35,8 +35,10 @@ $(LIBC_BUILD)/libtinos.a $(LIBC_BUILD)/crt0.o &: \
 $(LIB_BUILD)/libtinosbmp.so $(LIB_BUILD)/libtinoswav.so \
 $(LIB_BUILD)/libtinostate.so $(LIB_BUILD)/libtinoschain.so \
 $(LIB_BUILD)/libtinostls.so $(LIB_BUILD)/libtinosrt.so \
-$(LIB_BUILD)/libtinosgd.so $(LIB_BUILD)/libtinosconsumer.so &: \
+$(LIB_BUILD)/libtinosgd.so $(LIB_BUILD)/libtinosconsumer.so \
+$(LIB_BUILD)/libtinosversioned.so $(LIB_BUILD)/libtinosversionconsumer.so &: \
     $(ROOT)/userland/lib/Makefile $(wildcard $(ROOT)/userland/lib/*.c) \
+    $(wildcard $(ROOT)/userland/lib/*.map) \
     $(wildcard $(ROOT)/userland/lib/include/tinos/*.h)
 	$(MAKE) -C $(ROOT)/userland/lib
 
@@ -86,5 +88,13 @@ $(BUILD)/chainprobe.elf: $(BUILD)/chainprobe.o $(LIBC_BUILD)/crt0.o \
 		-T link.ld -o $@ \
 		$(LIBC_BUILD)/crt0.o $(BUILD)/chainprobe.o \
 		$(LIBC_BUILD)/libtinos.a -L$(LIB_BUILD) -ltinoschain
+
+$(BUILD)/versionprobe.elf: $(BUILD)/versionprobe.o $(LIBC_BUILD)/crt0.o \
+    $(LIBC_BUILD)/libtinos.a $(LIB_BUILD)/libtinosversioned.so link.ld Makefile
+	$(LD) -m elf_i386 -nostdlib -z noexecstack -z now --build-id=none \
+		--no-dynamic-linker --hash-style=gnu -rpath-link $(LIB_BUILD) \
+		-T link.ld -o $@ \
+		$(LIBC_BUILD)/crt0.o $(BUILD)/versionprobe.o \
+		$(LIBC_BUILD)/libtinos.a -L$(LIB_BUILD) -ltinosversioned
 
 -include $(wildcard $(BUILD)/*.d)

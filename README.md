@@ -694,7 +694,7 @@ Library code can call into another `.so` and use its own private
 mutable state.
 Image Viewer and Media Player use `libtinosbmp.so` and `libtinoswav.so`
 for their userspace decoders. Programs can also call `tinos_dlopen()` and
-`tinos_dlsym()` with a library basename from `/apps/lib`. Up to eight
+`tinos_dlsym()` with a library basename from `/apps/lib`. Up to twelve
 64 KiB shared objects have fixed slots inside the 4 MiB i386 user address
 space. The kernel caches their read-only pages once, maps those physical
 frames into each process as read-only, and allocates writable data pages
@@ -721,13 +721,17 @@ addressed through `%gs`. The loader supports initial-exec
 `libtinosrt.so` supplies `___tls_get_addr` in ring 3. `dlsym` on exported
 TLS variables returns a process-local pointer; reopening a library resets
 its TLS template without moving other loaded modules.
+Bounded `DT_VERSYM`, `DT_VERDEF` and `DT_VERNEED` metadata select the
+required library version for ELF relocations; `tinos_dlvsym()` selects an
+explicit version, while `tinos_dlsym()` chooses the default export.
+Malformed tables and unavailable versions fail the load.
 
 This is an initial ELF dynamic-linking subset, not a Linux/glibc loader:
 shared libraries can import symbols from supported `.so` dependencies, but
 not from the executable or host libc. TLS is bounded to one user thread
 per process and a single page for all modules. Multiple user threads,
-symbol versioning,
-text relocations and lazy binding remain unsupported; their ELF
+weak-version fallbacks, text relocations and lazy binding remain
+unsupported; their ELF
 requirements are rejected instead of running them incorrectly. Executables
 still use a fixed load address and TinOS startup code; the small shared-object
 cache is pinned until reboot.

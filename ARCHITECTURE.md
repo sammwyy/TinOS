@@ -145,10 +145,10 @@ can still stall this loop.
 - `kernel/proc/dynlink.c` follows bounded ELF32 `DT_NEEDED` chains,
   applies `R_386_RELATIVE`, `R_386_32`, `R_386_GLOB_DAT` and
   `R_386_JUMP_SLOT` only to private writable pages, and offers
-  `dlopen`/`dlsym`. SysV `DT_HASH` and bounded GNU `DT_GNU_HASH` tables
+  `dlopen`/`dlsym`/`dlvsym`. SysV `DT_HASH` and bounded GNU `DT_GNU_HASH` tables
   support eager symbol lookup. Cyclic dependencies, invalid hash tables
   and invalid relocation targets fail
-  loading. At most eight 64 KiB ET_DYN objects occupy distinct user regions.
+  loading. At most twelve 64 KiB ET_DYN objects occupy distinct user regions.
   `kernel/arch/x86/paging.c` maps their cached read-only physical frames
   into each process and gives each process private writable pages. Code
   cache frames remain pinned until reboot; user processes cannot modify
@@ -167,8 +167,12 @@ can still stall this loop.
   templates. The loader handles `R_386_TLS_TPOFF`, `R_386_TLS_DTPMOD32`
   and `R_386_TLS_DTPOFF32`, including symbols imported from a dependency.
   The ring-3 `libtinosrt.so` implements the i386 `___tls_get_addr` entry.
-  `dlsym` returns process-local pointers for exported TLS. Multiple user
-  threads per process, symbol versions and lazy binding remain unsupported.
+  `dlsym` returns process-local pointers for exported TLS. Bounded ELF
+  `DT_VERSYM`/`DT_VERDEF`/`DT_VERNEED` records select matching symbol
+  definitions for imports, including transitive libraries; `dlvsym`
+  selects a specific export and `dlsym` skips nondefault versions.
+  Multiple user threads per process, weak-version fallbacks and lazy
+  binding remain unsupported.
 - The initrd is imported as read-only backing for files in `/apps`. A
   write detaches the file into private heap storage. The module stays
   reserved while borrowed data exists.

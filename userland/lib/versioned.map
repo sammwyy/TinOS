@@ -1,0 +1,8 @@
+TINOS_1 {
+    global: tinos_versioned;
+    local: *;
+};
+
+TINOS_2 {
+    global: tinos_versioned;
+} TINOS_1;

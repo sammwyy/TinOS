@@ -8,6 +8,7 @@ import struct
 import subprocess
 import tarfile
 import tempfile
+import time
 
 from qemu_test import Tinos
 
@@ -83,6 +84,45 @@ def invalid_tls_import(image):
     struct.pack_into("<I", image, offset + 4, 128 << 8 | 35)
     return image
 
+def version_definition(image, missing):
+    headers = list(program_headers(image))
+    dynamic = next(ph for ph in headers if ph[0] == 2)
+    verdef = next(value for tag, value in struct.iter_unpack(
+        "<II", image[dynamic[1]:dynamic[1] + dynamic[4]])
+        if tag == 0x6ffffffc)
+    segment = next(ph for ph in headers if ph[0] == 1 and
+                   ph[2] <= verdef and verdef - ph[2] + 20 <= ph[4])
+    first = segment[1] + verdef - segment[2]
+    second = first + struct.unpack_from("<I", image, first + 16)[0]
+    assert struct.unpack_from("<H", image, second + 4)[0] == 2
+    if not missing:
+        struct.pack_into("<I", image, second + 12, 0xfffffff0)
+        return image
+    before, after = b"TINOS_1\x00", b"TINOS_9\x00"
+    assert image.count(before) >= 1 and len(before) == len(after)
+    image[:] = image.replace(before, after)
+    hash_value = 0
+    for ch in b"TINOS_9":
+        hash_value = (hash_value << 4) + ch
+        high = hash_value & 0xf0000000
+        if high:
+            hash_value ^= high >> 24
+        hash_value &= ~high
+    struct.pack_into("<I", image, second + 8, hash_value)
+    return image
+
+def invalid_version_requirement(image):
+    headers = list(program_headers(image))
+    dynamic = next(ph for ph in headers if ph[0] == 2)
+    verneed = next(value for tag, value in struct.iter_unpack(
+        "<II", image[dynamic[1]:dynamic[1] + dynamic[4]])
+        if tag == 0x6ffffffe)
+    segment = next(ph for ph in headers if ph[0] == 1 and
+                   ph[2] <= verneed and verneed - ph[2] + 16 <= ph[4])
+    offset = segment[1] + verneed - segment[2]
+    struct.pack_into("<I", image, offset + 8, 0xfffffff0)
+    return image
+
 
 def boot_variant(source, kernel, loader, mode, temp):
     archive_path = temp / "ramfs.tar"
@@ -97,6 +137,12 @@ def boot_variant(source, kernel, loader, mode, temp):
             elif (member.name == "lib/libtinosconsumer.so" and
                   mode == "tls_import"):
                 data = invalid_tls_import(bytearray(data))
+            elif (member.name == "lib/libtinosversioned.so" and
+                  mode in ("version", "version_missing")):
+                data = version_definition(bytearray(data),
+                                          mode == "version_missing")
+            elif member.name == "versionprobe.elf" and mode == "version_need":
+                data = invalid_version_requirement(bytearray(data))
             elif member.name == "lib/libtinoschain.so" and mode in (
                     "relocation", "dependency", "initializer"):
                 modified = bytearray(data)
@@ -129,7 +175,21 @@ def boot_variant(source, kernel, loader, mode, temp):
         vm.key("down")
         vm.key("ret")
         assert vm.wait_for_serial("[tty] text console ready", timeout=30), vm.serial()
-        if mode in ("tls", "tls_import"):
+        if mode in ("version", "version_missing", "version_need"):
+            vm.line("run /apps/versionprobe.elf")
+            if mode == "version":
+                assert vm.wait_for_serial(
+                    "[ld  ] rejected libtinosversioned.so",
+                    timeout=15), vm.serial()
+            else:
+                if mode == "version_missing":
+                    assert vm.wait_for_serial(
+                        "[ld  ] cached libtinosversioned.so",
+                        timeout=15), vm.serial()
+                time.sleep(1)
+            assert "ring3: versioned ELF imports resolve correctly" not in vm.serial()
+            assert "[proc] spawned pid" not in vm.serial()
+        elif mode in ("tls", "tls_import"):
             library = ("libtinostls.so" if mode == "tls" else
                        "libtinosconsumer.so")
             program = ("tlsprobe.elf" if mode == "tls" else
@@ -161,12 +221,12 @@ def main():
     parser.add_argument("--loader", default="boot/x86/loader.asm")
     args = parser.parse_args()
     for mode in ("relocation", "dependency", "initializer", "hash", "tls",
-                 "tls_import"):
+                 "tls_import", "version", "version_missing", "version_need"):
         with tempfile.TemporaryDirectory(prefix="tinos-invalid-so-") as path:
             boot_variant(args.initrd, pathlib.Path(args.kernel),
                          pathlib.Path(args.loader), mode, pathlib.Path(path))
-    print("invalid library relocation, dependency, initializer, GNU hash "
-          "and TLS rejected: OK")
+    print("invalid library relocation, dependency, initializer, GNU hash, "
+          "TLS and version metadata rejected: OK")
 
 
 if __name__ == "__main__":

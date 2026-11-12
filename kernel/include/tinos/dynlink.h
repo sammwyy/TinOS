@@ -41,7 +41,8 @@ int dynlink_prepare_close(int handle, dynlink_state_t *state);
 uintptr_t dynlink_close_next_finalizer(dynlink_state_t *state);
 uintptr_t dynlink_symbol(int handle, const char *name,
                          const user_space_t *space,
-                         const dynlink_state_t *state);
+                         const dynlink_state_t *state,
+                         const char *version);
 uintptr_t dynlink_next_initializer(dynlink_state_t *state);
 uintptr_t dynlink_next_finalizer(dynlink_state_t *state);
 

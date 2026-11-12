@@ -103,10 +103,13 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
       `R_386_TLS_DTPOFF32` across `.so` dependencies and run
       `___tls_get_addr` in ring 3 through `libtinosrt.so`. Verify malformed
       imports and isolated TLS at 8/16 MiB.
+- [x] Validate bounded `DT_VERSYM`, `DT_VERDEF` and `DT_VERNEED` tables.
+      Resolve executable and library imports by required version, expose
+      `dlvsym`, and reject missing versions or malformed records in QEMU.
 - [ ] Extend the dynamic ABI with multiple user threads per process,
-      symbol versions, eviction of globally cached read-only pages and more
-      flexible address-space allocation. Reject unsupported ELF metadata
-      instead of skipping it.
+      weak-version fallbacks, eviction of globally cached read-only pages
+      and more flexible address-space allocation. Reject unsupported ELF
+      metadata instead of skipping it.
 - [x] Bridge a Terminal's child stdin/stdout through bounded queues and
       process-scoped events. Block full writers, wake them when drained,
       report child exit, and allow a parent to kill its own child with Ctrl+C.

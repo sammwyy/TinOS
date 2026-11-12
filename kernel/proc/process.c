@@ -108,7 +108,15 @@ uintptr_t process_library_symbol(int handle, const char *name)
 {
     if (!running)
         return 0;
-    return dynlink_symbol(handle, name, &running->space, &running->libraries);
+    return dynlink_symbol(handle, name, &running->space,
+                          &running->libraries, NULL);
+}
+
+uintptr_t process_library_versioned_symbol(int handle, const char *name,
+                                           const char *version)
+{
+    return running ? dynlink_symbol(handle, name, &running->space,
+                                    &running->libraries, version) : 0;
 }
 
 uintptr_t process_library_initializer(void)
