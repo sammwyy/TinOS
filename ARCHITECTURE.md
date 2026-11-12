@@ -155,8 +155,11 @@ can still stall this loop.
   `/apps/lib` or write to the shared code pages. The loader validates
   `DT_INIT`/`DT_INIT_ARRAY` and queues at most 32 user entry points per
   process. `crt0` and the libc `dlopen` wrapper consume that queue in ring 3
-  after relocation and dependency initialization. TLS, destructors,
-  symbol versions, lazy binding and unload remain unsupported.
+  after relocation and dependency initialization. `dlclose` counts direct
+  opens and retains the dependency closure of all active handles and
+  executable `DT_NEEDED` roots. Once unreachable, a library's private pages
+  are unmapped and freed; global read-only frames remain cached. TLS,
+  destructors, symbol versions and lazy binding remain unsupported.
 - The initrd is imported as read-only backing for files in `/apps`. A
   write detaches the file into private heap storage. The module stays
   reserved while borrowed data exists.

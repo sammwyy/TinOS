@@ -92,12 +92,18 @@ int process_library_open(const char *name)
     return dynlink_open(name, &running->space, &running->libraries);
 }
 
+int process_library_close(int handle)
+{
+    if (!running)
+        return -1;
+    return dynlink_close(handle, &running->space, &running->libraries);
+}
+
 uintptr_t process_library_symbol(int handle, const char *name)
 {
     if (!running)
         return 0;
-    return dynlink_symbol(handle, name, &running->space,
-                          running->libraries.mask);
+    return dynlink_symbol(handle, name, &running->space, &running->libraries);
 }
 
 uintptr_t process_library_initializer(void)

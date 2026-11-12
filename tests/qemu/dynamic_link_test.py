@@ -59,6 +59,12 @@ def main():
         assert vm.serial().count("reused libtinostate.so read-only pages") == 2
 
         before = len(vm.serial())
+        vm.line("run /apps/chainclose.elf")
+        wait_new(vm, before, "ring3: dlclose released private library state")
+        assert vm.serial().count("reused libtinoschain.so read-only pages") == 4
+        assert vm.serial().count("reused libtinostate.so read-only pages") == 4
+
+        before = len(vm.serial())
         vm.line("run /apps/libtamper.elf")
         wait_new(vm, before, "[proc] user exception 14")
         wait_new(vm, before, "[proc] ring 3 exit status 142")

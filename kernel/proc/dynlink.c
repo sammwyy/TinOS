@@ -6,7 +6,7 @@
 
 #define LIB_REGION_SIZE 0x10000u
 #define LIB_PAGES (LIB_REGION_SIZE / PAGE_SIZE)
-#define LIB_LIMIT 8u
+#define LIB_LIMIT DYNLINK_LIBRARY_LIMIT
 #define ELF_LOAD 1u
 #define ELF_DYNAMIC 2u
 #define ELF_INTERP 3u
@@ -329,7 +329,8 @@ int dynlink_open(const char *name, user_space_t *space, dynlink_state_t *state)
         transaction.next_initializer = transaction.initializer_count = 0;
     uint32_t original = state->mask;
     int slot = -1;
-    if (!open_recursive(name, space, &transaction, 0, &slot)) {
+    bool ok = open_recursive(name, space, &transaction, 0, &slot);
+    if (!ok || transaction.opens[slot] == 255u) {
         klog("[ld  ] rejected %s\n", name);
         for (unsigned i = 0; i < LIB_LIMIT; i++) {
             if (!(transaction.mask & (1u << i)) || (original & (1u << i)))
@@ -339,8 +340,52 @@ int dynlink_open(const char *name, user_space_t *space, dynlink_state_t *state)
         }
         return -1;
     }
+    transaction.opens[slot]++;
     *state = transaction;
     return slot + 1;
+}
+
+int dynlink_close(int handle, user_space_t *space, dynlink_state_t *state)
+{
+    if (!space || !state || handle < 1 || handle > (int)LIB_LIMIT ||
+        !state->opens[handle - 1])
+        return -1;
+    state->opens[handle - 1]--;
+    uint32_t reachable = state->needed_roots;
+    for (unsigned i = 0; i < LIB_LIMIT; i++)
+        if (state->opens[i])
+            reachable |= 1u << i;
+    for (;;) {
+        uint32_t previous = reachable;
+        for (unsigned i = 0; i < LIB_LIMIT; i++)
+            if (reachable & (1u << i))
+                reachable |= state->dependencies[i];
+        if (previous == reachable)
+            break;
+    }
+    uint32_t removed = state->mask & ~reachable;
+    for (unsigned i = 0; i < LIB_LIMIT; i++) {
+        if (!(removed & (1u << i)))
+            continue;
+        for (unsigned p = 0; p < LIB_PAGES; p++)
+            user_space_unmap(space, libraries[i].base + p * PAGE_SIZE);
+        state->dependencies[i] = 0;
+    }
+    state->mask &= reachable;
+    unsigned remaining = state->next_initializer;
+    for (unsigned i = remaining; i < state->initializer_count; i++) {
+        uintptr_t callback = state->initializers[i];
+        bool unloaded = false;
+        for (unsigned j = 0; j < LIB_LIMIT; j++)
+            if ((removed & (1u << j)) &&
+                callback >= libraries[j].base &&
+                callback - libraries[j].base < LIB_REGION_SIZE)
+                unloaded = true;
+        if (!unloaded)
+            state->initializers[remaining++] = callback;
+    }
+    state->initializer_count = remaining;
+    return 0;
 }
 
 typedef struct {
@@ -737,17 +782,22 @@ static bool link_library(unsigned slot, user_space_t *space,
         !mapped(space, library->base + info.strtab, info.strsz, false))
         return false;
     const char *strings = (const char *)(library->base + info.strtab);
+    uint32_t dependencies = 0;
     for (unsigned i = 0; i < info.needed_count; i++) {
         const char *name;
         int dependency;
         if (!string_at(strings, info.strsz, info.needed[i], &name) ||
             !open_recursive(name, space, state, visiting, &dependency))
             return false;
+        dependencies |= 1u << dependency;
     }
-    return link_relocations(ph, header->phnum, space, library->base,
-                            &info, state->mask) &&
-           append_initializers(ph, header->phnum, space, library->base,
-                               &info, state);
+    if (!link_relocations(ph, header->phnum, space, library->base,
+                          &info, state->mask) ||
+        !append_initializers(ph, header->phnum, space, library->base,
+                             &info, state))
+        return false;
+    state->dependencies[slot] = dependencies;
+    return true;
 }
 
 bool dynlink_load(const void *image, size_t size, user_space_t *space,
@@ -794,6 +844,8 @@ bool dynlink_load(const void *image, size_t size, user_space_t *space,
         int handle = dynlink_open(name, space, state);
         if (handle < 1 || (loaded & (1u << (handle - 1))))
             return false;
+        state->needed_roots |= 1u << (handle - 1);
+        state->opens[handle - 1]--;
         loaded |= 1u << (handle - 1);
     }
     if (info.init || info.init_array || info.init_array_size ||
@@ -835,10 +887,13 @@ uintptr_t dynlink_next_initializer(dynlink_state_t *state)
 }
 
 uintptr_t dynlink_symbol(int handle, const char *name,
-                         const user_space_t *space, uint32_t library_mask)
+                         const user_space_t *space,
+                         const dynlink_state_t *state)
 {
-    if (!name || !space || handle < 1 || handle > (int)LIB_LIMIT ||
-        !(library_mask & (1u << (handle - 1))))
+    if (!name || !space || !state ||
+        handle < 1 || handle > (int)LIB_LIMIT ||
+        !(state->mask & (1u << (handle - 1))) ||
+        !state->opens[handle - 1])
         return 0;
     uintptr_t address = 0;
     if (!export_symbol(&libraries[handle - 1], space, name, &address))

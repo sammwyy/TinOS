@@ -88,9 +88,14 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
 - [x] Resolve ELF32 symbols with either bounded SysV `DT_HASH` or GNU
       `DT_GNU_HASH`; test GNU-only shared objects and executables and reject
       malformed GNU hash tables without a kernel fault.
+- [x] Implement per-process `dlclose` with direct-open counts and dependency
+      reachability. Free private library pages after the last reference;
+      keep executable `DT_NEEDED` roots mapped and allow reopening with
+      fresh writable state and ring-3 constructors.
 - [ ] Extend the dynamic ABI with ring-3 destructors, TLS,
-      symbol versions, optional unload and more flexible address-space
-      allocation. Reject unsupported ELF metadata instead of skipping it.
+      symbol versions, eviction of globally cached read-only pages and more
+      flexible address-space allocation. Reject unsupported ELF metadata
+      instead of skipping it.
 - [x] Bridge a Terminal's child stdin/stdout through bounded queues and
       process-scoped events. Block full writers, wake them when drained,
       report child exit, and allow a parent to kill its own child with Ctrl+C.

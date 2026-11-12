@@ -286,6 +286,9 @@ void syscall_dispatch(regs_t *frame)
         frame->eax = (uint32_t)process_library_symbol((int)frame->ebx, name);
         return;
     }
+    case TINOS_SYS_DLCLOSE:
+        frame->eax = (uint32_t)process_library_close((int)frame->ebx);
+        return;
     case TINOS_SYS_DL_INIT_NEXT:
         frame->eax = (uint32_t)process_library_initializer();
         return;

@@ -58,6 +58,7 @@ int process_file_close(int fd);
 int process_file_mkdir(const char *path);
 int process_file_unlink(const char *path);
 int process_library_open(const char *name);
+int process_library_close(int handle);
 uintptr_t process_library_symbol(int handle, const char *name);
 uintptr_t process_library_initializer(void);
 NORETURN void process_abort(int reason);

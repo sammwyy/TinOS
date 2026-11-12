@@ -706,11 +706,16 @@ dependencies, invalid GNU hash tables, and a ring-3 write to shared code.
 `DT_INIT` and
 `DT_INIT_ARRAY` constructors run in dependency order through the TinOS
 userspace startup or `tinos_dlopen()` wrapper, never inside the kernel.
+`tinos_dlclose()` releases a process's private library pages when neither
+an open handle nor a dependency needs them; reopening the library creates
+fresh writable state and runs its constructors again. Outstanding function
+pointers must not be called after the final close. The read-only code cache
+remains pinned globally for reuse.
 
 This is an initial ELF dynamic-linking subset, not a Linux/glibc loader:
 shared libraries can import symbols from supported `.so` dependencies, but
 not from the executable or host libc. TLS, destructors, symbol versioning,
-text relocations, lazy binding and `dlclose` remain unsupported; their ELF
+text relocations and lazy binding remain unsupported; their ELF
 requirements are rejected instead of running them incorrectly. Executables
 still use a fixed load address and TinOS startup code; the small shared-object
 cache is pinned until reboot.

@@ -16,7 +16,10 @@ int main(void)
         *state() != 8 || tinos_chain_next() != 9 ||
         *state() != 9 || tinos_chain_next() != 10 || *state() != 10 ||
         !object || *object != 30 ||
-        tinos_chain_object_next() != 31 || *object != 31)
+        tinos_chain_object_next() != 31 || *object != 31 ||
+        tinos_dlclose(handle) != 0 ||
+        tinos_dlsym(handle, "tinos_state_pointer") ||
+        tinos_chain_next() != 11 || *state() != 11)
         return 1;
     const char message[] = "ring3: chained libraries keep private state\n";
     tinos_write(1, message, sizeof(message) - 1);

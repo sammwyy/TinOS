@@ -35,6 +35,7 @@ int tinos_pcm_open(const tinos_pcm_format_t *format);
 int tinos_pcm_write(int handle, const void *data, unsigned frames);
 int tinos_pcm_wait(int handle, unsigned maximum_queued_frames);
 int tinos_dlopen(const char *name);
+int tinos_dlclose(int handle);
 void *tinos_dlsym(int handle, const char *symbol);
 int tinos_gui_console_attach(int handle);
 int tinos_gui_console_read(int handle, char *buffer, unsigned length);

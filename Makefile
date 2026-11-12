@@ -166,7 +166,7 @@ kernel: $(KERNEL)
 RAMFS := $(BUILD)/ramfs.tar
 USERLAND_APPS := hello fault badptr echo fpu io df textwrite cat fdtest \
                  spin spawn spawn_badarg multi gui_security stream \
-                 libprobe libtamper pcm_demo chainprobe chainopen
+                 libprobe libtamper pcm_demo chainprobe chainopen chainclose
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
             image_viewer media_player
 USERLAND_LIBS := libtinosbmp.so libtinoswav.so \

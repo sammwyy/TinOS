@@ -210,6 +210,11 @@ int tinos_dlopen(const char *name)
     return handle;
 }
 
+int tinos_dlclose(int handle)
+{
+    return invoke(TINOS_SYS_DLCLOSE, (unsigned)handle, 0, 0);
+}
+
 void *tinos_dlsym(int handle, const char *symbol)
 {
     unsigned length = path_length(symbol);
