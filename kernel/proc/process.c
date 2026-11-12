@@ -512,10 +512,6 @@ int process_spawn(const void *image, size_t length, int argc,
 
     bool interrupts = irq_save();
     user_space_activate(&p->space);
-    if (p->blocked_output) {
-        p->frame.eax = 0;
-        p->blocked_output = false;
-    }
     void *entry = NULL;
     bool loaded = elf_user_load(image, length, map_image_page, &p->space,
                                 protect_image_page, &entry);
@@ -600,6 +596,10 @@ void process_schedule(void)
     p->state = PROCESS_RUNNING;
     p->deadline = timer_ticks() + PROCESS_SLICE_TICKS;
     user_space_activate(&p->space);
+    if (p->blocked_output) {
+        p->frame.eax = 0;
+        p->blocked_output = false;
+    }
     if (p->blocked_gui_address) {
         tinos_gui_event_t event;
         KASSERT(desktop_user_window_next(p->pid, 1, &event) == 1);
