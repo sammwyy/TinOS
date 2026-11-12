@@ -1,41 +1,21 @@
 #include <tinos/string.h>
 #include <tinos/ui.h>
+#include <tinos/wav.h>
 
 static tinos_ui_t ui;
 static const char *track;
 static int audio = -1;
 static int fd = -1;
-static uint32_t remaining, submitted;
-static unsigned channels, frame_bytes;
+static uint32_t submitted;
+static tinos_wav_t wav;
 static int16_t samples[256 * 2];
-static uint8_t input[1024];
 static unsigned pending, pending_at, ticks;
 static int paused, draining, finished;
 static const char *error;
 
-static uint16_t read_u16(const uint8_t *bytes)
+static int read_file(void *context, void *buffer, unsigned length)
 {
-    return (uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8);
-}
-
-static uint32_t read_u32(const uint8_t *bytes)
-{
-    return (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8) |
-           ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
-}
-
-static int read_exact(int stream, void *output, unsigned length)
-{
-    uint8_t *bytes = output;
-    while (length) {
-        unsigned want = length > 1024 ? 1024 : length;
-        int got = tinos_read(stream, bytes, want);
-        if (got <= 0)
-            return -1;
-        bytes += got;
-        length -= got;
-    }
-    return 0;
+    return tinos_read(*(int *)context, buffer, length);
 }
 
 static void close_track(void)
@@ -58,31 +38,12 @@ static void start_track(void)
         error = "Cannot open WAV file";
         return;
     }
-    uint8_t header[44];
-    if (read_exact(fd, header, sizeof(header)) < 0 ||
-        memcmp(header, "RIFF", 4) || memcmp(header + 8, "WAVE", 4) ||
-        memcmp(header + 12, "fmt ", 4) ||
-        read_u32(header + 16) != 16 ||
-        read_u16(header + 20) != 1 ||
-        memcmp(header + 36, "data", 4)) {
-        error = "Only standard PCM WAV files work";
+    if (tinos_wav_open(read_file, &fd, &wav) < 0) {
+        error = "Expected standard PCM16 WAV";
         close_track();
         return;
     }
-    channels = read_u16(header + 22);
-    unsigned bits = read_u16(header + 34);
-    uint32_t rate = read_u32(header + 24);
-    frame_bytes = channels * 2;
-    remaining = read_u32(header + 40);
-    if ((channels != 1 && channels != 2) || bits != 16 ||
-        rate < 8000 || rate > 48000 ||
-        read_u16(header + 32) != frame_bytes ||
-        !remaining || remaining % frame_bytes) {
-        error = "Expected 16-bit mono/stereo PCM";
-        close_track();
-        return;
-    }
-    audio = tinos_audio_open(rate);
+    audio = tinos_audio_open(wav.sample_rate);
     if (audio < 0) {
         error = "AC97 audio unavailable or busy";
         close_track();
@@ -94,24 +55,14 @@ static void send_samples(void)
     if (audio < 0 || paused || error || finished)
         return;
     for (int i = 0; i < 5; i++) {
-        if (!pending && remaining) {
-            unsigned frames = remaining / frame_bytes;
-            if (frames > 256)
-                frames = 256;
-            if (read_exact(fd, input, frames * frame_bytes) < 0) {
+        if (!pending && wav.frames_remaining) {
+            int frames = tinos_wav_read(read_file, &fd, &wav, samples, 256);
+            if (frames <= 0) {
                 error = "Unexpected end of WAV data";
                 close_track();
                 return;
             }
-            for (unsigned f = 0; f < frames; f++) {
-                int16_t left = (int16_t)read_u16(input + f * frame_bytes);
-                int16_t right = channels == 2 ?
-                    (int16_t)read_u16(input + f * frame_bytes + 2) : left;
-                samples[f * 2] = left;
-                samples[f * 2 + 1] = right;
-            }
-            remaining -= frames * frame_bytes;
-            pending = frames;
+            pending = (unsigned)frames;
             pending_at = 0;
         }
         if (!pending)
@@ -123,7 +74,7 @@ static void send_samples(void)
         pending_at += (unsigned)sent;
         submitted += (unsigned)sent;
     }
-    if (!remaining && !pending && !draining) {
+    if (!wav.frames_remaining && !pending && !draining) {
         tinos_audio_control(audio, TINOS_AUDIO_DRAIN);
         draining = 1;
     }

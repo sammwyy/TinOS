@@ -138,8 +138,18 @@ can still stall this loop.
 - `libraries/image` and `libraries/audio` (stb_image, simplewebp, stb_vorbis
   wrappers) are also linked into the kernel, with per-directory SSE2 flags.
 - `userland/bin/` produces freestanding ELF32 programs against
-  `libraries/libc/`; the boot image packages these binaries and sample
-  BMP/WAV resources. The older ring-0 native app ABI is never packed.
+  `libraries/libc/`; `userland/lib/` produces freestanding ELF32 shared
+  objects with the reusable BMP/WAV decoders. The boot image packages
+  these binaries and sample BMP/WAV resources. The older ring-0 native
+  app ABI is never packed.
+- `kernel/proc/dynlink.c` handles bounded ELF32 `DT_NEEDED` dependencies
+  and eager PLT symbol resolution, plus `dlopen`/`dlsym`. At most four
+  self-contained, 64 KiB ET_DYN objects occupy distinct user regions.
+  `kernel/arch/x86/paging.c` maps their cached read-only physical frames
+  into each process and gives each process private writable pages. Code
+  cache frames remain pinned until reboot; user processes cannot modify
+  `/apps/lib` or write to the shared code pages. This subset does not
+  support recursive dependencies, library relocations, TLS or constructors.
 - The initrd is imported as read-only backing for files in `/apps`. A
   write detaches the file into private heap storage. The module stays
   reserved while borrowed data exists.
@@ -172,7 +182,7 @@ can still stall this loop.
 ### 1.6 Dependency direction today
 
 ```
-userland/bin       ->  libraries/libc + kernel/include/uapi/tinos
+userland/bin       ->  libraries/libc + userland/lib/include + kernel/include/uapi/tinos
 kernel/main.c      ->  desktop_start()/kernel_loop_run(), codec registration
 desktop/registry.c ->  filesystem executable paths (not app code)
 desktop            ->  kernel internals (gfx, fs, net, threads, input, shell)

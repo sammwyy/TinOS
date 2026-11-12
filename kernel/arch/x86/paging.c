@@ -20,6 +20,7 @@
 #define PDE_WRITABLE  (1u << 1)
 #define PDE_USER      (1u << 2)
 #define PDE_PAGE_SIZE (1u << 7) /* PS: this entry maps a 4 MiB page directly */
+#define PTE_SHARED    (1u << 9)
 #define USER_PDE_INDEX (USER_BASE >> 22)
 
 /* Must be page (4 KiB) aligned - this address is loaded straight into CR3. */
@@ -83,6 +84,22 @@ bool user_space_map(user_space_t *space, uintptr_t address)
     memset(frame, 0, PAGE_SIZE);
     space->table[index] = (uint32_t)(uintptr_t)frame |
                           PDE_PRESENT | PDE_WRITABLE | PDE_USER;
+    __asm__ volatile("invlpg (%0)" : : "r"(address) : "memory");
+    return true;
+}
+
+bool user_space_map_shared(user_space_t *space, uintptr_t address, void *frame)
+{
+    if (!frame || ((uintptr_t)frame & (PAGE_SIZE - 1)) ||
+        address < USER_BASE || address >= USER_REGION_END ||
+        (address & (PAGE_SIZE - 1)))
+        return false;
+    size_t index = (address - USER_BASE) / PAGE_SIZE;
+    if (space->table[index] & PDE_PRESENT)
+        return false;
+    space->table[index] = (uint32_t)(uintptr_t)frame |
+                          PDE_PRESENT | PDE_USER | PTE_SHARED;
+    __asm__ volatile("invlpg (%0)" : : "r"(address) : "memory");
     return true;
 }
 
@@ -108,7 +125,7 @@ void user_space_destroy(user_space_t *space)
     if (!space->directory)
         return;
     for (size_t i = 0; i < 1024; i++)
-        if (space->table[i] & PDE_PRESENT)
+        if ((space->table[i] & (PDE_PRESENT | PTE_SHARED)) == PDE_PRESENT)
             pmm_free_frame((void *)(uintptr_t)(space->table[i] & ~0xFFFu));
     pmm_free_frame(space->table);
     pmm_free_frame(space->directory);

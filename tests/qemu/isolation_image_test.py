@@ -2,6 +2,7 @@
 """Ensure the boot image cannot load the retired ring-0 application ABI."""
 
 import argparse
+import struct
 import subprocess
 import tarfile
 
@@ -17,10 +18,16 @@ def main():
         assert names and "hello.elf" in names, names
         assert "media/demo.bmp" in names, names
         assert "media/demo.wav" in names, names
+        libraries = ("lib/libtinosbmp.so", "lib/libtinoswav.so")
+        for library in libraries:
+            assert library in names, names
+            header = archive.extractfile(library).read(20)
+            assert header[:4] == b"\x7fELF" and \
+                   struct.unpack_from("<H", header, 16)[0] == 3, library
         assert archive.extractfile("media/demo.bmp").read(2) == b"BM"
         assert archive.extractfile("media/demo.wav").read(4) == b"RIFF"
         assert all(member.isfile() and (
-            member.name in ("media/demo.bmp", "media/demo.wav") or
+            member.name in (*libraries, "media/demo.bmp", "media/demo.wav") or
             ("/" not in member.name or member.name.startswith("gui/")) and
             member.name.endswith(".elf")) for member in archive), names
     symbols = subprocess.check_output(["nm", "-g", args.kernel], text=True)

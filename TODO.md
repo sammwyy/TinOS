@@ -69,6 +69,13 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
 - [x] Provide a process-owned stereo PCM device with validated, copied
       buffers and cleanup on exit; port Media Player with userspace PCM WAV
       decoding and GUI timer events, including an 8 MiB test.
+- [x] Build BMP/WAV decoders as ELF32 shared objects, load them through
+      bounded `DT_NEEDED`/eager relocation or `dlopen`/`dlsym`, share
+      read-only physical code pages and keep per-process writable data.
+      Verify 8/16 MiB boots, page protection and fault recovery.
+- [ ] Expand the dynamic linker beyond self-contained libraries: shared
+      object relocations/dependencies, TLS, constructors, symbol versions,
+      optional unload and more flexible address-space allocation.
 - [x] Bridge a Terminal's child stdin/stdout through bounded queues and
       process-scoped events. Block full writers, wake them when drained,
       report child exit, and allow a parent to kill its own child with Ctrl+C.
@@ -547,7 +554,9 @@ Testing:
 - [x] `exec` loads an ELF into a fresh address space with a user stack,
       `argc`/`argv` and an entry point; the booting shell owns the initial
       arguments.
-- [ ] Supply an environment, relocatable executables and dynamic linking.
+- [ ] Supply an environment and relocatable executables. Basic dynamic
+      linking works for self-contained `.so` files, but not arbitrary
+      Unix/Linux libraries.
 - [x] Use `spawn` plus `exit` and `wait` as the initial process lifecycle,
       rather than requiring `fork`/copy-on-write. The current `spawn` accepts
       only memory-backed ELF32 files from the root filesystem.

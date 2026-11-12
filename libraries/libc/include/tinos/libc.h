@@ -31,6 +31,8 @@ int tinos_gui_timer(int handle, unsigned interval_ms);
 int tinos_audio_open(unsigned sample_rate);
 int tinos_audio_write(int handle, const int16_t *samples, unsigned frames);
 int tinos_audio_control(int handle, unsigned command);
+int tinos_dlopen(const char *name);
+void *tinos_dlsym(int handle, const char *symbol);
 int tinos_gui_console_attach(int handle);
 int tinos_gui_console_read(int handle, char *buffer, unsigned length);
 int tinos_tty_send(int child_pid, char ch);

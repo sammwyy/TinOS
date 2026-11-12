@@ -1,4 +1,5 @@
 #include <tinos/arch.h>
+#include <tinos/dynlink.h>
 #include <tinos/elf.h>
 #include <tinos/fs.h>
 #include <tinos/heap.h>
@@ -41,6 +42,7 @@ typedef struct {
     uintptr_t entry, user_sp;
     uint32_t pid;
     uint32_t parent_pid;
+    uint32_t library_mask;
     uint32_t waiting_pid;
     uintptr_t waiting_status_address;
     uint32_t waited_pid;
@@ -79,6 +81,20 @@ bool process_active(void)
 uint32_t process_current_pid(void)
 {
     return running ? running->pid : 0;
+}
+
+int process_library_open(const char *name)
+{
+    if (!running)
+        return -1;
+    return dynlink_open(name, &running->space, &running->library_mask);
+}
+
+uintptr_t process_library_symbol(int handle, const char *name)
+{
+    if (!running)
+        return 0;
+    return dynlink_symbol(handle, name, &running->space, running->library_mask);
 }
 
 bool process_user_buffer(uintptr_t address, size_t length, bool writable)
@@ -515,6 +531,8 @@ int process_spawn(const void *image, size_t length, int argc,
     void *entry = NULL;
     bool loaded = elf_user_load(image, length, map_image_page, &p->space,
                                 protect_image_page, &entry);
+    if (loaded)
+        loaded = dynlink_load(image, length, &p->space, &p->library_mask);
     if (loaded)
         loaded = prepare_user_stack(argc, argv, &p->user_sp);
     if (parent)

@@ -15,6 +15,8 @@ typedef struct {
 
 bool user_space_init(user_space_t *space);
 bool user_space_map(user_space_t *space, uintptr_t address);
+/* A pinned supervisor-owned frame mapped read-only in this process. */
+bool user_space_map_shared(user_space_t *space, uintptr_t address, void *frame);
 void user_space_readonly(user_space_t *space, uintptr_t address);
 void user_space_activate(const user_space_t *space);
 void user_space_kernel(void);

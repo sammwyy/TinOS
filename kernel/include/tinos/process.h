@@ -55,6 +55,8 @@ int process_file_write(int fd, const void *buffer, size_t length);
 int process_file_close(int fd);
 int process_file_mkdir(const char *path);
 int process_file_unlink(const char *path);
+int process_library_open(const char *name);
+uintptr_t process_library_symbol(int handle, const char *name);
 NORETURN void process_abort(int reason);
 
 #endif /* TINOS_PROCESS_H */

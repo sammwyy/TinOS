@@ -174,7 +174,8 @@ The default QEMU run uses an AC'97 device with the PipeWire audio backend, so
 for example to `driver=pa,id=tinos-audio` or `driver=none,id=tinos-audio`, when
 another backend is required. Automated headless tests select `none` explicitly.
 The `doremi` shell command remains a blocking AC'97 hardware test. The
-former graphical Media Player is not included until its userspace port.
+current userspace Media Player handles standard PCM16 WAV files; the
+former kernel-side player is not installed.
 
 The TinOS boot menu has three selections (Down/Up, then Enter):
 
@@ -653,8 +654,9 @@ an API that can later absorb virtual-to-physical mappings. The e1000 driver
 backs the current Ethernet stack; networking is intentionally a small
 polling-oriented kernel service rather than a userspace socket subsystem.
 
-**Application isolation.** Only ELF32 programs from `userland/bin/` and
-explicit media resources are packed into the initrd. `kernel/proc/process.c`
+**Application isolation.** Only ELF32 programs from `userland/bin/`,
+shared objects from `userland/lib/` and explicit media resources are packed
+into the initrd. `kernel/proc/process.c`
 checks each executable,
 allocates a private address space and enters ring 3; the desktop start menu
 stores paths, not function pointers, and starts programs through that same
@@ -668,6 +670,23 @@ also submit bounded, copied RGBA pixel buffers. Filesystem calls use file
 descriptors and path-based metadata. Writes are limited to
 64 KiB per file, the installed `/apps` tree is read-only to userspace,
 and persistent disk writes, pipes and PTYs are not yet implemented.
+
+**Shared libraries.** The ELF32 loader reads `DT_NEEDED` and resolves
+`R_386_JUMP_SLOT`/`R_386_GLOB_DAT` symbols before starting a process.
+Image Viewer and Media Player use `libtinosbmp.so` and `libtinoswav.so`
+for their userspace decoders. Programs can also call `tinos_dlopen()` and
+`tinos_dlsym()` with a library basename from `/apps/lib`. Up to four
+64 KiB shared objects have fixed slots inside the 4 MiB i386 user address
+space. The kernel caches their read-only pages once, maps those physical
+frames into each process as read-only, and allocates writable data pages
+privately. The bounded cache remains in RAM until reboot; on a system
+without an initrd, no objects are loaded. QEMU tests cover reusing a
+library at 8 and 16 MiB and rejecting a ring-3 write to its code.
+
+This is an initial ELF dynamic-linking subset, not a Linux/glibc loader:
+shared objects must be self-contained, with no relocations or dependencies
+of their own. There is no TLS, constructors, symbol versioning, lazy binding
+or `dlclose`, and executables still use a fixed load address.
 
 ## Error handling
 

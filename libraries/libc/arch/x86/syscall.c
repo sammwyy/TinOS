@@ -175,6 +175,19 @@ int tinos_audio_control(int handle, unsigned command)
     return invoke(TINOS_SYS_AUDIO_CONTROL, (unsigned)handle, command, 0);
 }
 
+int tinos_dlopen(const char *name)
+{
+    unsigned length = path_length(name);
+    return length ? invoke(TINOS_SYS_DLOPEN, (unsigned)name, length, 0) : -1;
+}
+
+void *tinos_dlsym(int handle, const char *symbol)
+{
+    unsigned length = path_length(symbol);
+    return length ? (void *)invoke(TINOS_SYS_DLSYM, (unsigned)handle,
+                                   (unsigned)symbol, length) : 0;
+}
+
 int tinos_gui_console_attach(int handle)
 {
     return invoke(TINOS_SYS_GUI_CONSOLE_ATTACH, (unsigned)handle, 0, 0);

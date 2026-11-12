@@ -165,9 +165,11 @@ kernel: $(KERNEL)
 # from older builds are never read, even if they remain under build/native.
 RAMFS := $(BUILD)/ramfs.tar
 USERLAND_APPS := hello fault badptr echo fpu io df textwrite cat fdtest \
-                 spin spawn spawn_badarg multi gui_security stream
+                 spin spawn spawn_badarg multi gui_security stream \
+                 libprobe libtamper
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
             image_viewer media_player
+USERLAND_LIBS := libtinosbmp.so libtinoswav.so
 SAMPLE_BMP := $(BUILD)/userland/media/demo.bmp
 SAMPLE_WAV := $(BUILD)/userland/media/demo.wav
 
@@ -187,6 +189,7 @@ native-apps:
 .PHONY: userland-apps
 userland-apps:
 	$(MAKE) -C libraries/libc
+	$(MAKE) -C userland/lib
 	$(MAKE) -C userland/bin
 
 # --mtime/--owner/--group/--sort keep the archive's bytes independent of
@@ -198,6 +201,7 @@ $(RAMFS): userland-apps $(SAMPLE_BMP) $(SAMPLE_WAV)
 		--owner=0 --group=0 --numeric-owner -cf $(abspath $@) \
 		$(addsuffix .elf,$(USERLAND_APPS)) \
 		$(addprefix gui/,$(addsuffix .elf,$(GUI_APPS))) \
+		$(addprefix lib/,$(USERLAND_LIBS)) \
 		media/demo.bmp media/demo.wav
 
 # --- BIOS El Torito ISO ------------------------------------------------
@@ -259,6 +263,8 @@ check: test $(ISO)
 	python3 tests/qemu/process_preemption_test.py --iso $(ISO) --mem 64 --cpus 2
 	python3 tests/qemu/user_spawn_test.py --iso $(ISO)
 	python3 tests/qemu/user_spawn_test.py --iso $(ISO) --mem 8
+	python3 tests/qemu/dynamic_link_test.py --iso $(ISO) --mem 8
+	python3 tests/qemu/dynamic_link_test.py --iso $(ISO) --mem 16
 
 # Build the kernel and ISO twice from a clean tree and compare the results.
 verify-reproducible:
