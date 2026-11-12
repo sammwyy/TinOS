@@ -70,6 +70,19 @@ def invalid_tls(image):
             return image
     raise AssertionError("library has no PT_TLS")
 
+def invalid_tls_import(image):
+    headers = list(program_headers(image))
+    dynamic = next(ph for ph in headers if ph[0] == 2)
+    rel = next(value for tag, value in struct.iter_unpack(
+        "<II", image[dynamic[1]:dynamic[1] + dynamic[4]]) if tag == 17)
+    segment = next(ph for ph in headers if ph[0] == 1 and
+                   ph[2] <= rel and rel - ph[2] + 8 <= ph[4])
+    offset = segment[1] + rel - segment[2]
+    info = struct.unpack_from("<I", image, offset + 4)[0]
+    assert info & 255 == 35  # R_386_TLS_DTPMOD32
+    struct.pack_into("<I", image, offset + 4, 128 << 8 | 35)
+    return image
+
 
 def boot_variant(source, kernel, loader, mode, temp):
     archive_path = temp / "ramfs.tar"
@@ -81,6 +94,9 @@ def boot_variant(source, kernel, loader, mode, temp):
                 data = invalid_gnu_hash(bytearray(data))
             elif member.name == "lib/libtinostls.so" and mode == "tls":
                 data = invalid_tls(bytearray(data))
+            elif (member.name == "lib/libtinosconsumer.so" and
+                  mode == "tls_import"):
+                data = invalid_tls_import(bytearray(data))
             elif member.name == "lib/libtinoschain.so" and mode in (
                     "relocation", "dependency", "initializer"):
                 modified = bytearray(data)
@@ -113,9 +129,13 @@ def boot_variant(source, kernel, loader, mode, temp):
         vm.key("down")
         vm.key("ret")
         assert vm.wait_for_serial("[tty] text console ready", timeout=30), vm.serial()
-        if mode == "tls":
-            vm.line("run /apps/tlsprobe.elf")
-            assert vm.wait_for_serial("[ld  ] rejected libtinostls.so",
+        if mode in ("tls", "tls_import"):
+            library = ("libtinostls.so" if mode == "tls" else
+                       "libtinosconsumer.so")
+            program = ("tlsprobe.elf" if mode == "tls" else
+                       "gd_consumer_probe.elf")
+            vm.line("run /apps/" + program)
+            assert vm.wait_for_serial("[ld  ] rejected " + library,
                                       timeout=15), vm.serial()
             assert vm.wait_for_serial("[proc] ring 3 exit status 1",
                                       timeout=15), vm.serial()
@@ -140,7 +160,8 @@ def main():
     parser.add_argument("--initrd", default="build/ramfs.tar")
     parser.add_argument("--loader", default="boot/x86/loader.asm")
     args = parser.parse_args()
-    for mode in ("relocation", "dependency", "initializer", "hash", "tls"):
+    for mode in ("relocation", "dependency", "initializer", "hash", "tls",
+                 "tls_import"):
         with tempfile.TemporaryDirectory(prefix="tinos-invalid-so-") as path:
             boot_variant(args.initrd, pathlib.Path(args.kernel),
                          pathlib.Path(args.loader), mode, pathlib.Path(path))

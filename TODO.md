@@ -99,7 +99,11 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
       through traps and preemption, apply local `R_386_TLS_TPOFF`, and return
       process-local addresses through `dlsym`; test 8/16 MiB and malformed
       TLS rejection.
-- [ ] Extend the dynamic ABI with global-dynamic TLS, multiple user threads,
+- [x] Add global-dynamic i386 TLS: resolve `R_386_TLS_DTPMOD32` and
+      `R_386_TLS_DTPOFF32` across `.so` dependencies and run
+      `___tls_get_addr` in ring 3 through `libtinosrt.so`. Verify malformed
+      imports and isolated TLS at 8/16 MiB.
+- [ ] Extend the dynamic ABI with multiple user threads per process,
       symbol versions, eviction of globally cached read-only pages and more
       flexible address-space allocation. Reject unsupported ELF metadata
       instead of skipping it.

@@ -20,7 +20,8 @@ def main():
         assert "media/demo.wav" in names, names
         libraries = ("lib/libtinosbmp.so", "lib/libtinoswav.so",
                      "lib/libtinostate.so", "lib/libtinoschain.so",
-                     "lib/libtinostls.so")
+                     "lib/libtinostls.so", "lib/libtinosrt.so",
+                     "lib/libtinosgd.so", "lib/libtinosconsumer.so")
         for library in libraries:
             assert library in names, names
             header = archive.extractfile(library).read(20)

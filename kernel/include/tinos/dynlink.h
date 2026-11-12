@@ -2,11 +2,12 @@
 #define TINOS_DYNLINK_H
 
 #include <tinos/types.h>
+#include <uapi/tinos/tls.h>
 #include <tinos/user_vm.h>
 
 #define DYNLINK_INIT_LIMIT 32u
 #define DYNLINK_FINI_LIMIT 32u
-#define DYNLINK_LIBRARY_LIMIT 8u
+#define DYNLINK_LIBRARY_LIMIT TINOS_TLS_MODULES
 
 typedef struct {
     uintptr_t address;

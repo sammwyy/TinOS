@@ -4,10 +4,12 @@ ROOT := $(abspath ../..)
 BUILD := $(ROOT)/build/userland/lib
 CFLAGS := -m32 -std=gnu11 -O2 -ffreestanding -fno-builtin \
           -fno-stack-protector -fPIC -fno-asynchronous-unwind-tables \
-          -mno-sse -mno-sse2 -Wall -Wextra -Iinclude
+          -mno-sse -mno-sse2 -Wall -Wextra -Iinclude \
+          -I$(ROOT)/kernel/include/uapi
 LIBS := $(BUILD)/libtinosbmp.so $(BUILD)/libtinoswav.so \
         $(BUILD)/libtinostate.so $(BUILD)/libtinoschain.so \
-        $(BUILD)/libtinostls.so
+        $(BUILD)/libtinostls.so $(BUILD)/libtinosrt.so \
+        $(BUILD)/libtinosgd.so $(BUILD)/libtinosconsumer.so
 
 .PHONY: all
 all: $(LIBS)
@@ -44,3 +46,19 @@ $(BUILD)/libtinostls.so: $(BUILD)/tls.o Makefile
 	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
 		--hash-style=gnu --build-id=none -soname libtinostls.so \
 		-o $@ $<
+
+$(BUILD)/libtinosrt.so: $(BUILD)/tls_runtime.o Makefile
+	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
+		--hash-style=gnu --build-id=none -soname libtinosrt.so \
+		-o $@ $<
+
+$(BUILD)/libtinosgd.so: $(BUILD)/gd.o $(BUILD)/libtinosrt.so Makefile
+	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
+		--hash-style=gnu --build-id=none -soname libtinosgd.so \
+		-o $@ $(BUILD)/gd.o -L$(BUILD) -ltinosrt
+
+$(BUILD)/libtinosconsumer.so: $(BUILD)/gd_consumer.o \
+    $(BUILD)/libtinosgd.so $(BUILD)/libtinosrt.so Makefile
+	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
+		--hash-style=gnu --build-id=none -soname libtinosconsumer.so \
+		-o $@ $(BUILD)/gd_consumer.o -L$(BUILD) -ltinosgd -ltinosrt

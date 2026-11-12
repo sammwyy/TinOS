@@ -73,6 +73,21 @@ def main():
         assert vm.serial().count("cached libtinostls.so read-only pages") == 1
         assert vm.serial().count("reused libtinostls.so read-only pages") == 3
 
+        gd_marker = "ring3: global-dynamic TLS keeps private state"
+        for count in (1, 2):
+            before = len(vm.serial())
+            vm.line("run /apps/gdprobe.elf")
+            wait_new(vm, before, gd_marker)
+            assert vm.serial().count(gd_marker) == count, vm.serial()
+        assert vm.serial().count("cached libtinosgd.so read-only pages") == 1
+        assert vm.serial().count("cached libtinosrt.so read-only pages") == 1
+        assert vm.serial().count("reused libtinosgd.so read-only pages") == 3
+        assert vm.serial().count("reused libtinosrt.so read-only pages") == 3
+
+        before = len(vm.serial())
+        vm.line("run /apps/gd_consumer_probe.elf")
+        wait_new(vm, before, "ring3: TLS imports use dependency state")
+
         before = len(vm.serial())
         vm.line("run /apps/libtamper.elf")
         wait_new(vm, before, "[proc] user exception 14")

@@ -50,6 +50,8 @@
 #define R_386_JUMP_SLOT 7u
 #define R_386_RELATIVE 8u
 #define R_386_TLS_TPOFF 14u
+#define R_386_TLS_DTPMOD32 35u
+#define R_386_TLS_DTPOFF32 36u
 #define STT_TLS 6u
 
 typedef struct PACKED {
@@ -208,6 +210,8 @@ static bool load_tls(const void *image, const elf_header_t *header,
             state->tls_used = end;
         state->tls_end[slot] = end;
         state->tls_size[slot] = ph[i].memsz;
+        ((uint32_t *)USER_TLS_TOP)[TINOS_TLS_BASE_WORD(slot)] = block;
+        ((uint32_t *)USER_TLS_TOP)[TINOS_TLS_SIZE_WORD(slot)] = ph[i].memsz;
         return true;
     }
     return true;
@@ -475,6 +479,8 @@ int dynlink_close(int handle, user_space_t *space, dynlink_state_t *state)
         for (unsigned p = 0; p < LIB_PAGES; p++)
             user_space_unmap(space, libraries[i].base + p * PAGE_SIZE);
         state->dependencies[i] = 0;
+        ((uint32_t *)USER_TLS_TOP)[TINOS_TLS_BASE_WORD(i)] = 0;
+        ((uint32_t *)USER_TLS_TOP)[TINOS_TLS_SIZE_WORD(i)] = 0;
     }
     state->mask &= reachable;
     unsigned remaining = state->next_initializer;
@@ -739,6 +745,44 @@ static bool library_range(uint32_t offset, size_t length)
     return offset < LIB_REGION_SIZE && length <= LIB_REGION_SIZE - offset;
 }
 
+static bool resolve_tls_symbol(const symbol_t *table, uint32_t index,
+                               const char *strings, uint32_t strsz,
+                               const user_space_t *space,
+                               const dynlink_state_t *state, unsigned local,
+                               unsigned *module, uint32_t *offset)
+{
+    *module = local;
+    *offset = 0;
+    if (!index)
+        return state->tls_size[local] != 0;
+    if ((table[index].info & 15u) != STT_TLS)
+        return false;
+    if (table[index].section) {
+        *offset = table[index].value;
+        return state->tls_size[local] &&
+               *offset < state->tls_size[local];
+    }
+    const char *name;
+    if (!string_at(strings, strsz, table[index].name, &name))
+        return false;
+    for (unsigned i = 0; i < LIB_LIMIT; i++) {
+        if (!(state->mask & (1u << i)) || !state->tls_size[i])
+            continue;
+        uintptr_t address = 0;
+        if (!export_symbol(&libraries[i], space, name, &address,
+                           state, i))
+            continue;
+        uintptr_t block = USER_TLS_TOP - state->tls_end[i];
+        if (address >= block &&
+            address - block < state->tls_size[i]) {
+            *module = i;
+            *offset = address - block;
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool link_relocations(const program_header_t *ph, unsigned phnum,
                              const user_space_t *space, uintptr_t base,
                              const dynamic_info_t *info,
@@ -790,17 +834,37 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
                 continue;
             }
             if (type == R_386_TLS_TPOFF) {
-                if (index >= symbols || !state->tls_size[slot] ||
-                    (index && ((table[index].info & 15u) != STT_TLS ||
-                               !table[index].section ||
-                               table[index].value >
-                                   state->tls_size[slot] - 1)) ||
-                    *target >= state->tls_size[slot] ||
-                    (index && table[index].value >
-                     state->tls_size[slot] - 1 - *target))
+                unsigned module;
+                uint32_t offset;
+                if (index >= symbols ||
+                    !resolve_tls_symbol(table, index, strings, info->strsz,
+                                        space, state, slot, &module,
+                                        &offset) ||
+                    *target >= state->tls_size[module] ||
+                    offset > state->tls_size[module] - 1 - *target)
                     return false;
-                *target += (index ? table[index].value : 0) -
-                           state->tls_end[slot];
+                *target += offset - state->tls_end[module];
+                continue;
+            }
+            if (type == R_386_TLS_DTPMOD32 ||
+                type == R_386_TLS_DTPOFF32) {
+                unsigned module;
+                uint32_t offset;
+                if (index >= symbols ||
+                    !resolve_tls_symbol(table, index, strings, info->strsz,
+                                        space, state, slot, &module,
+                                        &offset))
+                    return false;
+                if (type == R_386_TLS_DTPMOD32) {
+                    if (*target)
+                        return false;
+                    *target = module + 1;
+                } else {
+                    if (*target >= state->tls_size[module] ||
+                        offset > state->tls_size[module] - 1 - *target)
+                        return false;
+                    *target += offset;
+                }
                 continue;
             }
             if ((type != R_386_GLOB_DAT && type != R_386_JUMP_SLOT &&
