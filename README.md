@@ -51,8 +51,12 @@ message and exits; `run /apps/echo.elf` reads a line from the keyboard.
 and prints it using the new userspace libc. `run /apps/fault.elf` demonstrates
 that a user page fault terminates only that program. Programs receive
 arguments on their own user stack and call `int 0x80`; they cannot access
-kernel memory. Processes still run one at a time while the shell waits;
-the desktop and nine existing native apps remain kernel-linked/ring 0.
+kernel memory. `run` returns to the shell with a PID immediately; `jobs`
+lists processes, `kill <pid>` stops a running process, and `reap <pid>` collects
+its exit status. The PIT preempts ring-3 CPU loops every 5 ms, so even
+`run /apps/spin.elf` does not block the console. A process reading from the
+keyboard receives input until it exits; Ctrl+C stops that reader. The
+desktop and nine existing native apps remain kernel-linked/ring 0.
 
 With 16 MiB of QEMU RAM the text console and graphical desktop load the
 bundled apps. An 8 MiB graphical boot runs at 640x480 with the app archive.
@@ -721,12 +725,14 @@ make check     # the above plus the scripted QEMU boot/GUI session
   they only render if a file already contains them.
 * The filesystem is session-oriented: imported FAT volumes are read-only and
   the writable base tree is not persisted back to disk.
-* There are no user accounts or permissions, concurrent userspace processes,
+* There are no user accounts or permissions, userspace process creation or
+  waiting syscalls, independently scheduled kernel idle loop,
   NTFS support, or USB host controllers beyond the current UHCI path.
   The ring-3 syscall ABI has console I/O, read-only access to memory-backed
-  files, and exit; it has no writable files, graphical APIs, or process
-  scheduling. Ring-3 floating-point instructions currently trap; an
-  independent FPU context is still pending.
+  files, and exit; it has no writable files or graphical APIs. Up to four
+  processes share the boot processor while the kernel's TTY or desktop event
+  loop runs. Ring-3 floating-point instructions currently trap; an independent
+  FPU context is still pending.
 * The RTC is read directly, so the taskbar clock follows the host clock via
   `-rtc base=localtime`; without that flag QEMU reports UTC.
 * Only the Bochs/QEMU DISPI graphics interface is supported. On hardware or

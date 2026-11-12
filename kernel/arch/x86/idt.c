@@ -153,6 +153,7 @@ regs_t *isr_dispatch(regs_t *regs)
     }
     if (regs->int_no == 128) {
         syscall_dispatch(regs);
+        process_maybe_preempt(regs);
         return regs;
     }
 
@@ -171,8 +172,10 @@ regs_t *isr_dispatch(regs_t *regs)
         if (irq_handlers[irq])
             irq_handlers[irq](regs);
         pic_send_eoi(irq);
-        if (irq == 0)
+        if (irq == 0) {
+            process_on_tick(regs);
             return thread_preempt(regs);
+        }
     }
     return regs;
 }

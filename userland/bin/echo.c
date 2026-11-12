@@ -20,6 +20,8 @@ void _start(void)
         __asm__ volatile("int $0x80" : "=a"(result)
                          : "a"(TINOS_SYS_READ), "b"(0), "c"(&ch), "d"(1)
                          : "memory");
+        if (result == (unsigned)TINOS_ERR_AGAIN)
+            continue;
         if (result != 1)
             break;
         write_console(&ch, 1);

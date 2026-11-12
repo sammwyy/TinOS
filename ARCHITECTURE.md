@@ -18,8 +18,9 @@ code.
 
 The kernel, text shell, desktop, codecs and nine native desktop apps still
 share one ring-0 address space. Separately linked programs under
-`userland/bin/` can run in ring 3 through `run <path>`; they execute one at a
-time while their caller waits. They have console I/O and read-only access to
+`userland/bin/` run in ring 3 through `run <path>`. Up to four jobs can be
+resident on the boot processor; PIT preemption lets the console run even
+when a user program loops. They have console I/O and read-only access to
 memory-backed files through private integer descriptors.
 
 | Property            | Today                                                        |
@@ -29,7 +30,7 @@ memory-backed files through private integer descriptors.
 | Privilege           | Kernel/desktop/native apps ring 0; `run` programs ring 3     |
 | Paging              | Supervisor identity map (PSE); 4 KiB user pages per process  |
 | Memory isolation    | Ring-3 programs cannot access the kernel or each other       |
-| Processes           | One synchronous process on the boot processor at a time      |
+| Processes           | Four slots, distinct address spaces and kernel stacks; BSP-only scheduling |
 | Threads             | Kernel threads, `THREAD_MAX` = 32, 16 KiB stacks             |
 | SMP                 | APs brought up via ACPI MADT + LAPIC INIT/SIPI               |
 | Interrupts          | 8259 PIC, PIT timer                                          |
@@ -65,11 +66,14 @@ The text console runs the existing in-kernel shell without the graphics
 device. `desktop` leaves the console and enters the desktop; it cannot
 return to the console. Neither shell nor desktop is a userspace process yet.
 From the VGA text console, `run` loads a validated ELF32 into a fresh
-address space, copies arguments onto the user stack and blocks until exit.
-Its mapped pages and file descriptors are released afterward. User faults
-return a nonzero status without halting the kernel. A BSP TSS supplies the
-privilege transition stack; `int 0x80` validates mapped user buffers, copies
-pathnames into the kernel and reads file data through a kernel bounce buffer.
+address space, copies arguments onto the user stack, assigns a PID and
+returns to the prompt. Each process has a 16 KiB kernel stack for its
+BSP TSS transitions. Its mapped pages and open-file snapshots are freed on
+exit; `jobs` can inspect its status until `reap` collects it. User faults
+terminate only the affected process. `int 0x80` validates mapped user
+buffers, copies pathnames into the kernel and reads file data through a
+kernel bounce buffer. Keyboard reads return `TINOS_ERR_AGAIN` instead of
+blocking the kernel; the TTY forwards input to a process waiting for stdin.
 Floating-point instructions trap until per-process FPU state exists.
 
 ### 1.3 Kernel subsystems
@@ -98,6 +102,11 @@ are not driven by an independent scheduler loop:
 - On the boot processor, threads run when the **desktop event loop** or
   **text console loop** calls `thread_run(8)` (`desktop/desktop.c` or
   `kernel/tty/tty.c`).
+- The same loops call `process_schedule()`. It runs one READY ring-3 job at
+  a time for at most 5 ms. PIT interrupts save the user register frame
+  and resume the kernel loop; a syscall that reaches the deadline also
+  yields before returning to ring 3. Each job retains its address space
+  and kernel stack across slices. Jobs cannot run on application processors.
 - On application processors, `smp.c:ap_entry()` loops on `thread_run(4)`.
 - PIT preemption can transfer control to another worker before `thread_run()`
   resumes; its pending state is committed for the worker that actually
@@ -105,9 +114,9 @@ are not driven by an independent scheduler loop:
 - `thread_spawn_pinned()` restricts a thread to the boot processor because the
   filesystem and network stack have no SMP-safe locking.
 
-Consequence: the desktop is currently part of the scheduler. Removing or
-making the desktop optional requires a real idle/scheduler loop in the kernel
-first.
+Consequence: kernel and user scheduling on the boot processor still depend on
+an active TTY or desktop event loop. A kernel-owned idle/scheduler loop is
+needed before either UI can stop driving the system.
 
 ### 1.5 Desktop, libraries and applications
 

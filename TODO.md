@@ -526,19 +526,24 @@ Testing:
       kernel mappings, 4 KiB user pages and a user stack; it validates the ELF,
       enters ring 3 and frees the address space on return. Initial programs
       live in `userland/bin/`; the nine native desktop apps still run in ring 0.
-- [ ] Run processes asynchronously from the scheduler. `run` currently blocks
-      the caller, supports only one process on the BSP and has no time slice,
-      PID, parent or waitable child handle. A CPU-bound program
-      can stall the caller indefinitely; the kernel remains reachable via
-      interrupts but cannot recover the shell without a user fault/exit.
+- [x] Preempt i386 user execution with the PIT and resume its saved register
+      frame in a later slice. Up to four processes have separate address
+      spaces and kernel stacks on the BSP; `run` returns a PID immediately.
+      `jobs`, `kill` and `reap` control them from the text console.
+- [ ] Move scheduling and idle handling out of the TTY/desktop event loops.
+      Both currently call `process_schedule()`; user jobs do not yet have a
+      kernel-owned run queue, wait queue, or scheduling on an AP.
+- [ ] Add parent-child relationships, blocking `wait`, and userspace
+      `spawn`/`kill` syscalls. The current PID and job control live in the
+      kernel shell only; exited slots are reused if all four are occupied.
 - [ ] Route process standard streams through terminal/TTY file descriptors
-      so `run` works from the graphical terminal too. It currently runs only
-      from the VGA text console; the desktop event loop cannot redraw while
-      `run` blocks.
-- [x] The current synchronous process stores its address space, 16-slot
-      read-only descriptor table and independent file offsets.
-- [ ] Expand process state with threads, working directory, parent, PID
-      and an exit status that a separate caller can wait on.
+      so `run` works from the graphical terminal too. It currently starts
+      only from VGA text; jobs that persist into desktop mode write to serial.
+- [x] Processes have separate address spaces, kernel stacks, PIDs, exit
+      status and 16-slot read-only descriptor tables with independent offsets.
+      Mutable ramfs files are copied on open so unlinking a file cannot
+      leave a process descriptor pointing to freed memory.
+- [ ] Expand process state with threads, working directory and parent.
 - [x] `exec` loads an ELF into a fresh address space with a user stack,
       `argc`/`argv` and an entry point; the booting shell owns the initial
       arguments.
@@ -570,7 +575,7 @@ Testing:
 
 ### Syscall interface
 
-- [x] `int 0x80` ring-3 syscall gate with `exit`, blocking keyboard `read`,
+- [x] `int 0x80` ring-3 syscall gate with `exit`, nonblocking keyboard `read`,
       console `write`, and read-only `open`/`read`/`close` for memory-backed
       VFS files.
 - [ ] Add a fast syscall entry if useful after the ABI stabilizes.
@@ -578,8 +583,9 @@ Testing:
       the sample userspace binaries include only this public header.
 - [x] Build a separate `libraries/libc/` with i386 syscall stubs and `crt0`;
       `userland/bin/cat.c` uses no kernel-private headers.
-- [ ] Define public error codes and versioned structs before adding
-      filesystem or graphical APIs; no internal kernel headers in userspace.
+- [ ] Define complete public error codes and versioned structs before adding
+      richer filesystem or graphical APIs; `-1` and `TINOS_ERR_AGAIN` are
+      currently the only error returns.
 - [ ] No kernel pointers across the boundary. Today's ABI exposes
       `fs_node_t *`, `window_t *`, `kernel_thread_t *`, `shell_t *`,
       `audio_decoder_t *`; replace with integer handles / file descriptors.
@@ -596,9 +602,10 @@ Testing:
 
 ### VFS
 
-- [ ] Add write-capable file descriptors and independent open-file objects.
-      Today's 16-slot table points at ramfs nodes directly, with no refcount
-      or filesystem locking; disk-backed files are not opened by userspace.
+- [ ] Add write-capable file descriptors and real shared open-file objects.
+      Today each process holds immutable file contents, snapshotting writable
+      ramfs files on open; disk-backed files are not opened by userspace.
+      Add filesystem locking and refcounts before exposing disk backends.
 - [ ] `fs_node_t` is simultaneously the directory entry, the inode and the
       file contents buffer. Split into vnode operations, a mount table, and
       open-file objects with an offset.

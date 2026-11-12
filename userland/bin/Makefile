@@ -12,7 +12,7 @@ CFLAGS := -m32 -std=gnu11 -O2 -ffreestanding -fno-builtin \
 all: $(BUILD)/hello.elf $(BUILD)/fault.elf $(BUILD)/badptr.elf \
      $(BUILD)/echo.elf $(BUILD)/fpu.elf $(BUILD)/io.elf \
      $(BUILD)/df.elf $(BUILD)/textwrite.elf $(BUILD)/cat.elf \
-     $(BUILD)/fdtest.elf
+     $(BUILD)/fdtest.elf $(BUILD)/spin.elf
 
 $(LIBC_BUILD)/libtinos.a $(LIBC_BUILD)/crt0.o &: \
     $(ROOT)/libraries/libc/Makefile \
@@ -35,6 +35,12 @@ $(BUILD)/cat.elf: $(BUILD)/cat.o $(LIBC_BUILD)/crt0.o \
 
 $(BUILD)/fdtest.elf: $(BUILD)/fdtest.o $(LIBC_BUILD)/crt0.o \
                      $(LIBC_BUILD)/libtinos.a link.ld
+	$(LD) -m elf_i386 -nostdlib -z noexecstack --build-id=none \
+		-T link.ld -o $@ $(LIBC_BUILD)/crt0.o $< \
+		$(LIBC_BUILD)/libtinos.a
+
+$(BUILD)/spin.elf: $(BUILD)/spin.o $(LIBC_BUILD)/crt0.o \
+                   $(LIBC_BUILD)/libtinos.a link.ld
 	$(LD) -m elf_i386 -nostdlib -z noexecstack --build-id=none \
 		-T link.ld -o $@ $(LIBC_BUILD)/crt0.o $< \
 		$(LIBC_BUILD)/libtinos.a

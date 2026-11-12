@@ -22,6 +22,7 @@
 #include <tinos/kernel.h>
 #include <tinos/net.h>
 #include <tinos/printf.h>
+#include <tinos/process.h>
 #include <tinos/sh.h>
 #include <tinos/string.h>
 #include <tinos/ui.h>
@@ -1063,6 +1064,7 @@ void desktop_run(void)
          * here would make the desktop appear frozen even though interrupts
          * remain enabled. */
         thread_run(8);
+        process_schedule();
         fs_io_poll();
         ktimer_poll(4);
 

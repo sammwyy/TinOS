@@ -35,6 +35,25 @@ arch_enter_user:
     iret
 .size arch_enter_user, . - arch_enter_user
 
+.global arch_resume_user
+.type arch_resume_user, @function
+arch_resume_user:
+    pushl %ebp
+    pushl %ebx
+    pushl %esi
+    pushl %edi
+    movl %esp, user_kernel_esp
+    movl 20(%esp), %esp
+    popl %eax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %fs
+    movw %ax, %gs
+    popa
+    addl $8, %esp
+    iret
+.size arch_resume_user, . - arch_resume_user
+
 .global arch_leave_user
 .type arch_leave_user, @function
 arch_leave_user:

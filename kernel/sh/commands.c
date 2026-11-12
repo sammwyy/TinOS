@@ -1203,14 +1203,80 @@ static int cmd_run(shell_t *sh, int argc, char **argv, stream_t *in,
         stream_puts(err, "run: executable must be a memory-backed file\n");
         return 1;
     }
-    int status;
-    if (!process_run(fs_data(file), fs_size(file), argc - 1,
-                     (const char *const *)&argv[1], &status)) {
+    int pid = process_spawn(fs_data(file), fs_size(file), argc - 1,
+                            (const char *const *)&argv[1]);
+    if (pid < 0) {
         stream_puts(err, "run: invalid ELF or insufficient memory\n");
         return 1;
     }
-    stream_printf(out, "run: exit status %d\n", status);
-    return status ? 1 : 0;
+    stream_printf(out, "run: started process %d\n", pid);
+    return 0;
+}
+
+static bool parse_process_id(const char *text, uint32_t *id)
+{
+    if (!*text)
+        return false;
+    uint32_t value = 0;
+    for (; *text; text++) {
+        if (*text < '0' || *text > '9')
+            return false;
+        unsigned digit = (unsigned)(*text - '0');
+        if (value > (UINT32_MAX - digit) / 10)
+            return false;
+        value = value * 10 + digit;
+    }
+    *id = value;
+    return value != 0;
+}
+
+static int cmd_jobs(shell_t *sh, int argc, char **argv, stream_t *in,
+                    stream_t *out, stream_t *err)
+{
+    process_info_t jobs[PROCESS_MAX];
+    size_t count = process_list(jobs, PROCESS_MAX);
+    for (size_t i = 0; i < count; i++) {
+        const char *state = jobs[i].state == PROCESS_EXITED ? "exited" :
+                            jobs[i].state == PROCESS_RUNNING ? "running" : "ready";
+        stream_printf(out, "%u %s", jobs[i].pid, state);
+        if (jobs[i].state == PROCESS_EXITED)
+            stream_printf(out, " %d", jobs[i].status);
+        stream_putc(out, '\n');
+    }
+    return 0;
+}
+
+static int cmd_kill(shell_t *sh, int argc, char **argv, stream_t *in,
+                    stream_t *out, stream_t *err)
+{
+    uint32_t pid;
+    if (argc != 2 || !parse_process_id(argv[1], &pid)) {
+        usage_error(err, "kill");
+        return 1;
+    }
+    if (!process_kill(pid)) {
+        stream_printf(err, "kill: process %u is not running\n", pid);
+        return 1;
+    }
+    stream_printf(out, "kill: stopped process %u\n", pid);
+    return 0;
+}
+
+static int cmd_reap(shell_t *sh, int argc, char **argv, stream_t *in,
+                    stream_t *out, stream_t *err)
+{
+    uint32_t pid;
+    if (argc != 2 || !parse_process_id(argv[1], &pid)) {
+        usage_error(err, "reap");
+        return 1;
+    }
+    int status;
+    if (!process_reap(pid, &status)) {
+        stream_printf(err, "reap: process %u has not exited\n", pid);
+        return 1;
+    }
+    stream_printf(out, "reap: process %u exited with %d\n", pid, status);
+    return 0;
 }
 #endif
 
@@ -1329,6 +1395,9 @@ static const sh_command_def_t commands[] = {
     { "rm",       "rm [-rf] path...",
       "remove files and directories",                cmd_rm },
 #ifndef TINOS_HOST
+    { "jobs",     "jobs", "list user processes",       cmd_jobs },
+    { "kill",     "kill <pid>", "stop a user process",  cmd_kill },
+    { "reap",     "reap <pid>", "release an exited job", cmd_reap },
     { "run",      "run <ELF32 file> [arguments...]",
       "run an isolated ring 3 program",              cmd_run },
 #endif

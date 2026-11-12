@@ -1,8 +1,6 @@
 #include <tinos/arch.h>
 #include <tinos/console.h>
 #include <tinos/fs.h>
-#include <tinos/input.h>
-#include <tinos/io.h>
 #include <tinos/kernel.h>
 #include <tinos/process.h>
 #include <tinos/syscall.h>
@@ -61,20 +59,9 @@ void syscall_dispatch(regs_t *frame)
             frame->eax = (uint32_t)-1;
             return;
         }
-        key_event_t key;
-        for (;;) {
-            while (keyboard_poll(&key)) {
-                if (key.code == KEY_ENTER)
-                    key.ch = '\n';
-                if (key.ch) {
-                    *(char *)(uintptr_t)frame->ecx = key.ch;
-                    cli();
-                    frame->eax = 1;
-                    return;
-                }
-            }
-            arch_idle();
-        }
+        frame->eax = (uint32_t)process_read_console(
+            (char *)(uintptr_t)frame->ecx);
+        return;
     }
     case TINOS_SYS_WRITE:
         if ((frame->ebx != 1 && frame->ebx != 2) ||

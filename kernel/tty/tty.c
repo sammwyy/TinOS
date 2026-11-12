@@ -6,6 +6,7 @@
 #include <tinos/fs.h>
 #include <tinos/input.h>
 #include <tinos/kernel.h>
+#include <tinos/process.h>
 #include <tinos/sh.h>
 #include <tinos/thread.h>
 #include <tinos/timer.h>
@@ -72,6 +73,7 @@ void tty_run(void)
         bus_dispatch(16);
         async_run(8);
         thread_run(8);
+        process_schedule();
         fs_io_poll();
         ktimer_poll(4);
 
@@ -79,8 +81,11 @@ void tty_run(void)
         while (keyboard_poll(&key)) {
             if ((key.mods & KMOD_CTRL) && (key.ch == 'c' || key.ch == 'C')) {
                 vga_text_write("^C\n");
+                process_cancel_input();
                 len = 0;
                 tty_prompt(sh);
+            } else if (process_feed_key(&key)) {
+                continue;
             } else if (key.code == KEY_BACKSPACE) {
                 if (len) {
                     len--;
