@@ -113,7 +113,7 @@ def emit(glyphs, path, source):
                 " * C1 controls, are blank). Each glyph is 16 rows of 8 pixels,\n"
                 " * most significant bit leftmost.\n"
                 " */\n\n" % os.path.basename(source))
-        f.write("#include <tinos/gfx.h>\n\n")
+        f.write("#include <stdint.h>\n\n")
         f.write("const uint8_t font8x16[256][16] = {\n")
         for code in range(256):
             bitmap = glyphs.get(code, [0] * 16)

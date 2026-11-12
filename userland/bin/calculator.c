@@ -1,5 +1,5 @@
 #include <tinos/string.h>
-#include <tinos/ui.h>
+#include <tinos/widgets.h>
 
 typedef struct {
     const char *input;
@@ -7,9 +7,11 @@ typedef struct {
     int invalid;
 } parser_t;
 
-static tinos_ui_t ui;
+static tinos_widget_view_t ui;
+static tinos_signal_t calculation;
 static char expression[64];
 static char result[32] = "0";
+static char result_label[48] = "Result: 0";
 static int evaluated;
 
 static int32_t parse_expression(parser_t *parser);
@@ -99,61 +101,86 @@ static void calculate(void)
         }
     }
     evaluated = 1;
+    tinos_strlcpy(result_label, "Result: ", sizeof(result_label));
+    tinos_strlcpy(result_label + 8, result, sizeof(result_label) - 8);
+    tinos_signal_set(&calculation, tinos_signal_get(&calculation) + 1);
 }
 
-static void render(void)
+static void clear(void)
 {
-    tinos_ui_clear(&ui);
-    tinos_ui_text(&ui, 2, 1, "Calculator");
-    tinos_ui_text(&ui, 2, 3, "Expression");
-    tinos_ui_text(&ui, 2, 4, expression);
-    tinos_ui_text(&ui, 2, 6, "Result");
-    tinos_ui_text(&ui, 2, 7, result);
-    tinos_ui_text(&ui, 2, 10, "Enter or = evaluate    C clear");
-    tinos_ui_text(&ui, 2, 11, "+  -  *  /  %  (  )");
-    tinos_ui_present(&ui);
+    expression[0] = '\0';
+    tinos_strlcpy(result, "0", sizeof(result));
+    tinos_strlcpy(result_label, "Result: 0", sizeof(result_label));
+    evaluated = 0;
+    tinos_signal_set(&calculation, tinos_signal_get(&calculation) + 1);
+}
+
+static void on_action(tinos_widget_view_t *view, unsigned id, void *context)
+{
+    (void)view;
+    (void)context;
+    if (id == 1)
+        calculate();
+    else if (id == 2)
+        clear();
 }
 
 int main(void)
 {
-    if (tinos_ui_open(&ui, "Calculator", 400, 250) < 0)
+    if (tinos_widget_open(&ui, "Calculator", 400, 250) < 0)
         return 1;
-    render();
+    tinos_signal_init(&calculation, 0);
+    tinos_signal_watch(&calculation, &ui);
+    ui.on_action = on_action;
+    int banner = tinos_widget_add(&ui, 0, TINOS_WIDGET_BANNER, 0,
+                                  "CALCULATOR / EXPRESSION", 0, 32, 0);
+    int panel = tinos_widget_add(&ui, 0, TINOS_WIDGET_PANEL, 0, NULL,
+                                 0, 50, 1);
+    if (banner < 0 || panel < 0 ||
+        tinos_widget_add(&ui, panel, TINOS_WIDGET_LABEL, 0,
+                         result_label, 0, 24, 0) < 0 ||
+        tinos_widget_field(&ui, 0, 1, expression, sizeof(expression), 0) < 0) {
+        tinos_widget_close(&ui);
+        return 1;
+    }
+    int buttons = tinos_widget_add(&ui, 0, TINOS_WIDGET_ROW, 0, NULL,
+                                   0, 46, 0);
+    if (buttons < 0 ||
+        tinos_widget_add(&ui, buttons, TINOS_WIDGET_BUTTON, 1,
+                         "Evaluate", 104, 30, 1) < 0 ||
+        tinos_widget_add(&ui, buttons, TINOS_WIDGET_BUTTON, 2,
+                         "Clear", 88, 30, 1) < 0 ||
+        tinos_widget_add(&ui, 0, TINOS_WIDGET_LABEL, 0,
+                         "Type an expression. Enter to evaluate.", 0, 24, 0) < 0 ||
+        tinos_widget_flush(&ui) < 0) {
+        tinos_widget_close(&ui);
+        return 1;
+    }
     tinos_gui_event_t event;
     while (tinos_gui_event(ui.handle, &event) == 1) {
         if (event.type == TINOS_GUI_CLOSE ||
             (event.type == TINOS_GUI_KEY &&
              event.code == TINOS_KEY_ESCAPE))
             break;
-        if (event.type != TINOS_GUI_KEY)
-            continue;
-        if (event.code == TINOS_KEY_ENTER || event.ch == '=') {
+        if (event.type == TINOS_GUI_KEY && event.ch == '=' &&
+            ui.focused > 0 && ui.nodes[ui.focused].kind == TINOS_WIDGET_FIELD) {
             calculate();
-        } else if (event.ch == 'c' || event.ch == 'C') {
-            expression[0] = '\0';
-            tinos_strlcpy(result, "0", sizeof(result));
-            evaluated = 0;
-        } else if (event.code == TINOS_KEY_BACKSPACE) {
-            size_t length = strlen(expression);
-            if (length)
-                expression[length - 1] = '\0';
-            evaluated = 0;
-        } else if ((event.ch >= '0' && event.ch <= '9') ||
-                   event.ch == '+' || event.ch == '-' ||
-                   event.ch == '*' || event.ch == '/' ||
-                   event.ch == '%' || event.ch == '(' ||
-                   event.ch == ')') {
-            if (evaluated && event.ch >= '0' && event.ch <= '9')
+        } else {
+            if (evaluated && event.type == TINOS_GUI_KEY &&
+                event.ch >= '0' && event.ch <= '9' &&
+                ui.focused > 0 &&
+                ui.nodes[ui.focused].kind == TINOS_WIDGET_FIELD)
                 expression[0] = '\0';
-            size_t length = strlen(expression);
-            if (length + 1 < sizeof(expression)) {
-                expression[length] = event.ch;
-                expression[length + 1] = '\0';
-            }
-            evaluated = 0;
+            tinos_widget_event(&ui, &event);
+            if (event.type == TINOS_GUI_KEY &&
+                event.code != TINOS_KEY_ENTER &&
+                event.code != TINOS_KEY_TAB)
+                evaluated = 0;
         }
-        render();
+        if (tinos_widget_flush(&ui) < 0)
+            break;
     }
-    tinos_gui_close(ui.handle);
+    tinos_signal_unwatch(&calculation, &ui);
+    tinos_widget_close(&ui);
     return 0;
 }

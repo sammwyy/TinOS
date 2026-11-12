@@ -33,7 +33,7 @@ kernel.
 | `kernel/fs/path.c` (userspace copy) | `libraries/libc/` | Same as above |
 | `kernel/gfx/gfx.c`, `font8x16.c` | `libraries/gfx/` | Phase 2 console done (kernel has its own text renderer) and Phase 3 framebuffer device exists |
 | `kernel/include/tinos/gfx.h` | `libraries/gfx/include/tinos/` | With `kernel/gfx` |
-| `desktop/widgets.c`, widget and `text_input_*` part of `desktop/include/tinos/ui.h` | `libraries/ui/` | Phase 3: client protocol defined, `libraries/gfx` draws into arbitrary buffers |
+| `desktop/widgets.c`, widget and `text_input_*` part of `desktop/include/tinos/ui.h` | `libraries/ui/` | A new userspace widget toolkit exists in `libraries/libc/widgets.c`; extracting the desktop's trusted controls and sharing more widgets remains pending |
 | Retired `kernel/core/abi.c`, `kernel/include/tinos/{abi,native_app}.h` | remove after preserving porting references | The kernel no longer links the ABI or reserves the arena |
 | `libraries/image`, `libraries/audio` (leave the kernel link; no path change) | - | Phase 3: apps link them directly |
 | `resources/icons` generated atlas (`icons_generated.[ch]`) | image files in the root filesystem | Phase 3: desktop loads icons at runtime |
@@ -64,6 +64,17 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
 - [x] Add a bounded window-handle/text-cell/event ABI. Port Terminal,
       Explorer, Editor, Calculator, System Information, Control Panel and
       About to ELF32 ring-3 clients using libc.
+- [x] Add process-owned XRGB8888 window surfaces with copied bounded tiles,
+      client pixel geometry, and a system semantic color palette. Provide a
+      ring-3 widget library with responsive row/column layouts, fields,
+      selectable lists, buttons, action callbacks and subscribed signals.
+      Port Calculator, About and Explorer and verify rendering, resize,
+      invalid pointers and low RAM in QEMU at 8/16 MiB.
+- [ ] Port Editor, System Information, Control Panel and the media
+      apps from text-cell interfaces to the userland widget API; add
+      multiline editing, accessible focus, Unicode and scalable rendering.
+      Add a trusted theme-setting service and notify views of palette changes;
+      only the default palette and per-view overrides exist today.
 - [x] Add copied pixel surfaces (320x192 maximum, allocated per client)
       and a ring-3 BMP decoder for Image Viewer, including an 8 MiB GUI test.
 - [x] Provide a process-owned stereo PCM device with validated, copied

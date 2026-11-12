@@ -233,6 +233,55 @@ void syscall_dispatch(regs_t *frame)
             (const uint32_t *)(uintptr_t)frame->ecx, frame->edx, frame->esi);
         return;
     }
+    case TINOS_SYS_GUI_SURFACE_SIZE: {
+        tinos_gui_size_t size;
+        if (!process_user_buffer(frame->ecx, sizeof(size), true)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        int result = desktop_user_window_size(process_current_pid(),
+                                               frame->ebx, &size);
+        if (result == 0)
+            memcpy((void *)(uintptr_t)frame->ecx, &size, sizeof(size));
+        frame->eax = (uint32_t)result;
+        return;
+    }
+    case TINOS_SYS_GUI_SURFACE_CONFIG:
+        frame->eax = (uint32_t)desktop_user_window_surface_config(
+            process_current_pid(), frame->ebx, frame->ecx, frame->edx);
+        return;
+    case TINOS_SYS_GUI_SURFACE_TILE: {
+        tinos_gui_tile_t tile;
+        if (!process_user_buffer(frame->ebx, sizeof(tile), false)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        memcpy(&tile, (const void *)(uintptr_t)frame->ebx, sizeof(tile));
+        if (!tile.width || !tile.height ||
+            tile.width > TINOS_GUI_TILE_MAX_WIDTH ||
+            tile.height > TINOS_GUI_TILE_MAX_HEIGHT ||
+            !process_user_buffer(tile.pixels,
+                                 (size_t)tile.width * tile.height *
+                                     sizeof(uint32_t), false)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        frame->eax = (uint32_t)desktop_user_window_surface_tile(
+            process_current_pid(), &tile,
+            (const uint32_t *)(uintptr_t)tile.pixels);
+        return;
+    }
+    case TINOS_SYS_GUI_THEME: {
+        tinos_gui_theme_t theme;
+        if (!process_user_buffer(frame->ebx, sizeof(theme), true)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        desktop_user_window_theme(&theme);
+        memcpy((void *)(uintptr_t)frame->ebx, &theme, sizeof(theme));
+        frame->eax = 0;
+        return;
+    }
     case TINOS_SYS_GUI_TIMER:
         frame->eax = (uint32_t)desktop_user_window_timer(
             process_current_pid(), frame->ebx, frame->ecx);

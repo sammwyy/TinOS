@@ -3,13 +3,18 @@
 
 #include <stdint.h>
 
-/* Version 1: opaque per-process window handle and copied text-cell frames.
- * All fields have fixed widths so the ABI does not expose kernel pointers. */
+/* Version 1: process-owned window handles and copied text-cell frames.
+ * Version 2: bounded tiled XRGB8888 surfaces and the system color theme.
+ * All fields have fixed widths; no kernel pointers cross this ABI. */
 #define TINOS_GUI_COLS 80u
 #define TINOS_GUI_ROWS 32u
 #define TINOS_GUI_TEXT_SIZE (TINOS_GUI_COLS * TINOS_GUI_ROWS)
 #define TINOS_GUI_IMAGE_WIDTH 320u
 #define TINOS_GUI_IMAGE_HEIGHT 192u
+#define TINOS_GUI_SURFACE_MAX_WIDTH 512u
+#define TINOS_GUI_SURFACE_MAX_HEIGHT 320u
+#define TINOS_GUI_TILE_MAX_WIDTH 64u
+#define TINOS_GUI_TILE_MAX_HEIGHT 64u
 
 #define TINOS_GUI_KEY    1u
 #define TINOS_GUI_CLOSE  2u
@@ -40,6 +45,25 @@ typedef struct {
     int32_t x;     /* RESIZE: columns; MOUSE: client-relative x */
     int32_t y;     /* RESIZE: rows; MOUSE: client-relative y */
 } tinos_gui_event_t;
+
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+} tinos_gui_size_t;
+
+/* The compositor copies one tightly packed XRGB8888 tile from user memory. */
+typedef struct {
+    uint32_t handle;
+    uint32_t x, y;
+    uint32_t width, height;
+    uint32_t pixels;
+} tinos_gui_tile_t;
+
+typedef struct {
+    uint32_t revision;
+    uint32_t background, surface, foreground, muted;
+    uint32_t accent, accent_text, border, selection, danger;
+} tinos_gui_theme_t;
 
 #define TINOS_DIRENT_FILE 1u
 #define TINOS_DIRENT_DIR  2u

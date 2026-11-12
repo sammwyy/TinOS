@@ -24,9 +24,18 @@ $(BUILD)/ui.o: ui.c include/tinos/ui.h include/tinos/libc.h \
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD)/widget_font.o: $(ROOT)/kernel/gfx/font8x16.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/widgets.o: widgets.c include/tinos/widgets.h include/tinos/libc.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD)/string.o: string.c include/tinos/string.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD)/libtinos.a: $(BUILD)/syscall.o $(BUILD)/ui.o $(BUILD)/string.o
+$(BUILD)/libtinos.a: $(BUILD)/syscall.o $(BUILD)/ui.o $(BUILD)/string.o \
+                     $(BUILD)/widgets.o $(BUILD)/widget_font.o
 	$(AR) rcsD $@ $^

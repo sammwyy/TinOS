@@ -154,6 +154,32 @@ int tinos_gui_blit(int handle, const uint32_t *pixels,
                    width, height);
 }
 
+int tinos_gui_surface_size(int handle, tinos_gui_size_t *size)
+{
+    return invoke(TINOS_SYS_GUI_SURFACE_SIZE, (unsigned)handle,
+                  (unsigned)size, 0);
+}
+
+int tinos_gui_surface_config(int handle, unsigned width, unsigned height)
+{
+    return invoke(TINOS_SYS_GUI_SURFACE_CONFIG, (unsigned)handle,
+                  width, height);
+}
+
+int tinos_gui_surface_tile(int handle, unsigned x, unsigned y,
+                           unsigned width, unsigned height,
+                           const uint32_t *pixels)
+{
+    tinos_gui_tile_t tile = { (uint32_t)handle, x, y, width, height,
+                              (uint32_t)(uintptr_t)pixels };
+    return invoke(TINOS_SYS_GUI_SURFACE_TILE, (unsigned)&tile, 0, 0);
+}
+
+int tinos_gui_theme(tinos_gui_theme_t *theme)
+{
+    return invoke(TINOS_SYS_GUI_THEME, (unsigned)theme, 0, 0);
+}
+
 int tinos_gui_timer(int handle, unsigned interval_ms)
 {
     return invoke(TINOS_SYS_GUI_TIMER, (unsigned)handle, interval_ms, 0);

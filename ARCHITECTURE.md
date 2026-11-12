@@ -37,7 +37,7 @@ exit without blocking the boot processor.
 | Threads             | Kernel threads, `THREAD_MAX` = 32, 16 KiB stacks             |
 | SMP                 | APs brought up via ACPI MADT + LAPIC INIT/SIPI               |
 | Interrupts          | 8259 PIC, PIT timer                                          |
-| Syscalls            | `int 0x80`: I/O, ramfs, process lifecycle, GUI handles/events, sysinfo, keyboard ioctl, PCM audio |
+| Syscalls            | `int 0x80`: I/O, ramfs, process lifecycle, GUI handles/events/surfaces/theme, sysinfo, keyboard ioctl, PCM audio |
 | Filesystem          | In-memory node tree; FAT16/FAT32 imported read-only          |
 | Network             | Polling Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS in the kernel |
 | Graphics            | Bochs/QEMU DISPI only, software framebuffer in the kernel    |
@@ -189,6 +189,16 @@ can still stall this loop.
 - The trusted compositor offers one window handle per process, text-cell
   frame submission (bounded copy-in) and blocking keyboard/mouse/resize/close
   events. The process table wakes only the blocked owner of a window.
+  It also accepts one bounded XRGB8888 surface per window, configured against
+  the current client rectangle and updated with validated, copied 64x64
+  tiles. The 512x320 surface cap bounds per-window kernel memory to 640 KiB;
+  resizing preserves the previous surface when allocation fails. The
+  compositor supplies a versioned semantic palette, while
+  `libraries/libc/widgets.c` lays out, rasterizes and dispatches buttons,
+  fields, scrollable lists and signal notifications in ring 3. Calculator,
+  About and Explorer use this library; the remaining text-cell clients can
+  migrate without changing the compositor. No app-supplied callbacks cross
+  into the compositor.
   Terminal, Explorer, Editor, Image Viewer, Media Player, Calculator,
   System Information, Control Panel and About are ring-3 programs using
   this ABI. Image Viewer

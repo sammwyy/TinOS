@@ -28,6 +28,12 @@ int tinos_gui_close(int handle);
 int tinos_gui_blit(int handle, const uint32_t *pixels,
                    unsigned width, unsigned height);
 int tinos_gui_timer(int handle, unsigned interval_ms);
+int tinos_gui_surface_size(int handle, tinos_gui_size_t *size);
+int tinos_gui_surface_config(int handle, unsigned width, unsigned height);
+int tinos_gui_surface_tile(int handle, unsigned x, unsigned y,
+                           unsigned width, unsigned height,
+                           const uint32_t *pixels);
+int tinos_gui_theme(tinos_gui_theme_t *theme);
 int tinos_audio_open(unsigned sample_rate);
 int tinos_audio_write(int handle, const int16_t *samples, unsigned frames);
 int tinos_audio_control(int handle, unsigned command);

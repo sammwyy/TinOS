@@ -21,6 +21,8 @@ typedef struct {
     bool console_attached;
     uint32_t *pixels;
     uint32_t pixel_width, pixel_height;
+    uint32_t *surface;
+    uint32_t surface_width, surface_height;
     uint32_t timer_interval;
     uint64_t next_timer;
 } gui_client_t;
@@ -54,6 +56,13 @@ static void user_draw(window_t *window, rect_t area)
 {
     gui_client_t *client = window->priv;
     gfx_fill_rect(area.x, area.y, area.w, area.h, COLOR_TERMINAL_BG);
+    if (client->surface) {
+        gfx_blit_image(rect_make(area.x, area.y, client->surface_width,
+                                 client->surface_height),
+                       client->surface, client->surface_width,
+                       client->surface_height);
+        return;
+    }
     if (client->pixels)
         gfx_blit_image(rect_make(area.x + 8, area.y + 2 * FONT_H,
                                 client->pixel_width, client->pixel_height),
@@ -117,6 +126,8 @@ static void user_close(window_t *window)
     process_wake_console_output(client->pid);
     kfree(client->pixels);
     client->pixels = NULL;
+    kfree(client->surface);
+    client->surface = NULL;
     client->head = client->tail = 0;
     enqueue(client, (tinos_gui_event_t){ .type = TINOS_GUI_CLOSE });
 }
@@ -204,7 +215,83 @@ void desktop_user_window_release(uint32_t pid)
     if (client->window)
         wm_close(client->window);
     kfree(client->pixels);
+    kfree(client->surface);
     memset(client, 0, sizeof(*client));
+}
+
+int desktop_user_window_size(uint32_t pid, int handle,
+                             tinos_gui_size_t *size)
+{
+    gui_client_t *client = client_for(pid);
+    if (!size || handle != 1 || !client || !client->window)
+        return -1;
+    rect_t area = wm_client_rect(client->window);
+    size->width = area.w;
+    size->height = area.h;
+    return 0;
+}
+
+int desktop_user_window_surface_config(uint32_t pid, int handle,
+                                       uint32_t width, uint32_t height)
+{
+    gui_client_t *client = client_for(pid);
+    if (handle != 1 || !client || !client->window ||
+        !width || !height ||
+        width > TINOS_GUI_SURFACE_MAX_WIDTH ||
+        height > TINOS_GUI_SURFACE_MAX_HEIGHT)
+        return -1;
+    rect_t area = wm_client_rect(client->window);
+    if (width > (uint32_t)area.w || height > (uint32_t)area.h)
+        return -1;
+    if (client->surface && client->surface_width == width &&
+        client->surface_height == height)
+        return 0;
+    size_t bytes = (size_t)width * height * sizeof(uint32_t);
+    uint32_t *replacement = krealloc(client->surface, bytes);
+    if (!replacement)
+        return -1;
+    memset(replacement, 0, bytes);
+    client->surface = replacement;
+    client->surface_width = width;
+    client->surface_height = height;
+    wm_invalidate(client->window);
+    return 0;
+}
+
+int desktop_user_window_surface_tile(uint32_t pid,
+                                     const tinos_gui_tile_t *tile,
+                                     const uint32_t *pixels)
+{
+    gui_client_t *client = client_for(pid);
+    if (!tile || !pixels || tile->handle != 1 || !client ||
+        !client->window || !client->surface ||
+        !tile->width || !tile->height ||
+        tile->width > TINOS_GUI_TILE_MAX_WIDTH ||
+        tile->height > TINOS_GUI_TILE_MAX_HEIGHT ||
+        tile->x >= client->surface_width ||
+        tile->y >= client->surface_height ||
+        tile->width > client->surface_width - tile->x ||
+        tile->height > client->surface_height - tile->y)
+        return -1;
+    for (unsigned row = 0; row < tile->height; row++)
+        for (unsigned col = 0; col < tile->width; col++)
+            client->surface[(size_t)(tile->y + row) *
+                            client->surface_width + tile->x + col] =
+                pixels[(size_t)row * tile->width + col] | 0xff000000u;
+    wm_invalidate(client->window);
+    return 0;
+}
+
+void desktop_user_window_theme(tinos_gui_theme_t *theme)
+{
+    *theme = (tinos_gui_theme_t){
+        .revision = 1,
+        .background = COLOR_WINDOW_BG, .surface = COLOR_PANEL_LIGHT,
+        .foreground = COLOR_TEXT, .muted = COLOR_TEXT_DIM,
+        .accent = COLOR_ACCENT_DARK, .accent_text = RGB(0xff, 0xff, 0xff),
+        .border = COLOR_BORDER, .selection = COLOR_SELECTION,
+        .danger = COLOR_DANGER,
+    };
 }
 
 int desktop_user_window_blit(uint32_t pid, int handle, const uint32_t *pixels,

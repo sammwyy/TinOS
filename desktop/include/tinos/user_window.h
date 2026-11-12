@@ -21,5 +21,13 @@ void desktop_user_window_child_exit(uint32_t pid, uint32_t child, int status);
 int desktop_user_window_blit(uint32_t pid, int handle, const uint32_t *pixels,
                              uint32_t width, uint32_t height);
 int desktop_user_window_timer(uint32_t pid, int handle, uint32_t interval_ms);
+int desktop_user_window_size(uint32_t pid, int handle,
+                             tinos_gui_size_t *size);
+int desktop_user_window_surface_config(uint32_t pid, int handle,
+                                       uint32_t width, uint32_t height);
+int desktop_user_window_surface_tile(uint32_t pid,
+                                     const tinos_gui_tile_t *tile,
+                                     const uint32_t *pixels);
+void desktop_user_window_theme(tinos_gui_theme_t *theme);
 
 #endif

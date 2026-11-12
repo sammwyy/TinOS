@@ -165,7 +165,7 @@ kernel: $(KERNEL)
 # from older builds are never read, even if they remain under build/native.
 RAMFS := $(BUILD)/ramfs.tar
 USERLAND_APPS := hello fault badptr echo fpu io df textwrite cat fdtest \
-                 spin spawn spawn_badarg multi gui_security stream \
+                 spin spawn spawn_badarg multi gui_security surfaceprobe stream \
                  libprobe libtamper pcm_demo chainprobe chainopen chainclose \
                  tlsprobe gdprobe gd_consumer_probe versionprobe versionopen \
                  largeprobe
@@ -262,6 +262,8 @@ check: test $(ISO)
 	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 4 --boot-default --no-desktop
 	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 16 --vga cirrus --boot-default --no-desktop --retry-desktop
 	python3 tests/qemu/low_memory_gui_test.py --iso $(ISO)
+	python3 tests/qemu/surface_widget_test.py --iso $(ISO) --mem 8
+	python3 tests/qemu/surface_widget_test.py --iso $(ISO) --mem 16
 	python3 tests/qemu/bootloader_test.py --iso $(ISO)
 	python3 tests/qemu/user_process_test.py --iso $(ISO)
 	python3 tests/qemu/process_preemption_test.py --iso $(ISO)

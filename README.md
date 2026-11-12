@@ -216,8 +216,9 @@ The TinOS boot menu has three selections (Down/Up, then Enter):
 
 The start menu lists `/apps/gui/*.elf` under *Programs* and launches each
 through the process loader. Applications use `int 0x80` to open a window,
-submit bounded text-cell frames and block while awaiting keyboard/mouse
-events. Terminal supports `ls`, `cd`, `pwd`, `cat`, `echo`, `touch`, `mkdir`,
+submit bounded text-cell frames or tiled XRGB8888 surfaces, and block while
+awaiting keyboard/mouse/resize events. Terminal supports `ls`, `cd`, `pwd`,
+`cat`, `echo`, `touch`, `mkdir`,
 `rm`, `edit`, `view`, `play`, `run`, `clear` and `exit`. Explorer browses directories,
 previews text, opens `.bmp` in Image Viewer, `.wav` in Media Player and files in the editor
 with `E`; the editor saves
@@ -230,6 +231,24 @@ wakes them when Terminal reads it, without busy-waiting in the kernel.
 Calculator handles bounded integer arithmetic; System Information reads
 system status through a validated syscall. Control Panel changes the
 keyboard between US and ES through an `ioctl` on the console descriptor.
+
+`libraries/libc/include/tinos/widgets.h` provides a ring-3 UI toolkit:
+column/row layouts, banners, panels, labels, editable fields, selectable
+lists and buttons. Row layouts stack vertically when their minimum widths
+do not fit. Widget actions and
+signal subscriptions run entirely in the owning process; a changed signal
+marks the view dirty, and `tinos_widget_flush()` paints it on demand.
+Colors come from the compositor's semantic system palette; an application
+can override its local palette without changing the system theme. Calculator
+and About use this toolkit, as does Explorer with a scrollable file list.
+The compositor validates window ownership,
+geometry, and each copied 64x64-maximum pixel tile. A window surface is at
+most 512x320 pixels to bound RAM on 8 MiB machines; if growth fails during
+resize, the old surface remains usable. Existing text and BMP image APIs
+remain available. This is a small immediate-mode/repaint-on-change toolkit,
+not React, CSS or a complete retained widget ecosystem: the other apps still
+need their visual interfaces ported, and system-wide theme switching is
+not implemented yet.
 
 The mouse (if present - QEMU provides a PS/2 mouse by default) can click the
 Start button and menu entries, focus windows, drag them by the title bar,
@@ -679,8 +698,10 @@ not linked into the kernel, and the fixed-slot arena is no longer reserved.
 The former GUI app sources remain under `apps/` for porting, but are
 neither installed nor executable in this build. `make native-apps` fails
 intentionally. The current GUI extension uses process-scoped integer
-window handles, copied text cells and blocking event delivery; GUI calls can
-also submit bounded, copied RGBA pixel buffers. Filesystem calls use file
+window handles, copied text cells and blocking event delivery. Apps can
+also submit a bounded RGBA image or update a bounded XRGB window surface
+through copied pixel tiles; no pointer to app code enters the compositor.
+Filesystem calls use file
 descriptors and path-based metadata. Writes are limited to
 64 KiB per file, the installed `/apps` tree is read-only to userspace,
 and persistent disk writes, pipes and PTYs are not yet implemented.
