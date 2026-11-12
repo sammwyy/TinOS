@@ -53,6 +53,8 @@ typedef struct {
     bool started;
     bool wants_input;
     bool blocked_output;
+    bool blocked_audio;
+    uint32_t audio_threshold;
     uintptr_t blocked_address;
     uintptr_t blocked_gui_address;
     uint64_t deadline;
@@ -137,7 +139,7 @@ bool process_feed_key(const key_event_t *key)
                 p->input[p->input_tail] = ch;
                 p->input_tail = next;
             }
-            if (p->state == PROCESS_BLOCKED &&
+            if (p->state == PROCESS_BLOCKED && p->blocked_address &&
                 p->input_head != p->input_tail)
                 p->state = PROCESS_READY;
         }
@@ -174,6 +176,32 @@ NORETURN void process_block_console_output(regs_t *frame)
     running->blocked_output = true;
     running->state = PROCESS_BLOCKED;
     arch_leave_user(0);
+}
+
+NORETURN void process_block_audio(regs_t *frame, uint32_t maximum)
+{
+    KASSERT(running != NULL && (frame->cs & 3) == 3);
+    memcpy(&running->frame, frame, sizeof(*frame));
+    running->audio_threshold = maximum;
+    running->blocked_audio = true;
+    running->state = PROCESS_BLOCKED;
+    klog("[proc] pid %u waiting for PCM queue\n", running->pid);
+    arch_leave_user(0);
+}
+
+void process_audio_wake(void)
+{
+    for (size_t i = 0; i < PROCESS_MAX; i++) {
+        process_t *p = &processes[i];
+        if (p->state != PROCESS_BLOCKED || !p->blocked_audio)
+            continue;
+        int ready = user_audio_wait_ready(p->pid, 1, p->audio_threshold);
+        if (ready == 0)
+            continue;
+        p->frame.eax = ready < 0 ? (uint32_t)-1 : 0;
+        p->blocked_audio = false;
+        p->state = PROCESS_READY;
+    }
 }
 
 void process_wake_console_output(uint32_t parent_pid)

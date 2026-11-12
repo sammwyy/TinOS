@@ -5,7 +5,7 @@ BUILD := $(ROOT)/build/userland
 LIBC_BUILD := $(ROOT)/build/libc
 LIB_BUILD := $(ROOT)/build/userland/lib
 LIBC_APPS := cat fdtest spin spawn spawn_badarg multi gui_security stream \
-             libprobe libtamper
+             libprobe libtamper pcm_demo
 LIBC_ELFS := $(addprefix $(BUILD)/,$(addsuffix .elf,$(LIBC_APPS)))
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
             image_viewer media_player

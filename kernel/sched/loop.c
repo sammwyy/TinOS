@@ -11,6 +11,7 @@
 bool kernel_loop_step(kernel_ui_tick_t ui_tick, void *context)
 {
     audio_poll();
+    process_audio_wake();
     /* Keep deferred work bounded so input and drawing get a turn. */
     bus_dispatch(16);
     async_run(8);

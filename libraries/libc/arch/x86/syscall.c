@@ -175,6 +175,23 @@ int tinos_audio_control(int handle, unsigned command)
     return invoke(TINOS_SYS_AUDIO_CONTROL, (unsigned)handle, command, 0);
 }
 
+int tinos_pcm_open(const tinos_pcm_format_t *format)
+{
+    return invoke(TINOS_SYS_PCM_OPEN, (unsigned)format, 0, 0);
+}
+
+int tinos_pcm_write(int handle, const void *data, unsigned frames)
+{
+    return invoke(TINOS_SYS_AUDIO_WRITE, (unsigned)handle,
+                  (unsigned)data, frames);
+}
+
+int tinos_pcm_wait(int handle, unsigned maximum_queued_frames)
+{
+    return invoke(TINOS_SYS_PCM_WAIT, (unsigned)handle,
+                  maximum_queued_frames, 0);
+}
+
 int tinos_dlopen(const char *name)
 {
     unsigned length = path_length(name);

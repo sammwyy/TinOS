@@ -69,6 +69,10 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
 - [x] Provide a process-owned stereo PCM device with validated, copied
       buffers and cleanup on exit; port Media Player with userspace PCM WAV
       decoding and GUI timer events, including an 8 MiB test.
+- [x] Extend raw PCM userspace playback to interleaved U8/S16 mono/stereo
+      at 8–48 kHz. Validate/copy up to 256 frames per write; convert input
+      to stereo S16 and block `pcm_wait` callers without stopping the TTY.
+      Verify all four formats at 8 and 16 MiB.
 - [x] Build BMP/WAV decoders as ELF32 shared objects, load them through
       bounded `DT_NEEDED`/eager relocation or `dlopen`/`dlsym`, share
       read-only physical code pages and keep per-process writable data.
@@ -715,7 +719,8 @@ Depends on Phase 2 (processes, IPC, shared memory, VT handoff).
       ring buffers that the desktop loop drains directly.
 - [ ] Keyboard layout handling moves out of the PS/2 driver into userspace
       (driver emits key codes).
-- [ ] Audio device node with a PCM write interface; the mixer moves to
+- [ ] Expose the existing PCM syscall handle through an audio device node
+      with a write interface; the mixer moves to
       userspace.
 - [ ] Socket syscalls for the network stack; `net_ping`, `net_dns_lookup`,
       DHCP control become userspace programs or a service.

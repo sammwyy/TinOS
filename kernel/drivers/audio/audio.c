@@ -400,12 +400,24 @@ void audio_stream_stop(void)
     spin_unlock_irqrestore(&audio_lock, saved);
 }
 
-size_t audio_stream_queued_frames(void) { return queued_frames; }
+size_t audio_stream_queued_frames(void)
+{
+    bool saved = spin_lock_irqsave(&audio_lock);
+    size_t queued = queued_frames;
+    spin_unlock_irqrestore(&audio_lock, saved);
+    return queued;
+}
 size_t audio_stream_capacity_frames(void)
 {
     return AC97_BUFFER_FRAMES * AC97_BUFFER_COUNT;
 }
-uint64_t audio_stream_position(void) { return played_frames; }
+uint64_t audio_stream_position(void)
+{
+    bool saved = spin_lock_irqsave(&audio_lock);
+    uint64_t position = played_frames;
+    spin_unlock_irqrestore(&audio_lock, saved);
+    return position;
+}
 
 void audio_stream_drain(void)
 {

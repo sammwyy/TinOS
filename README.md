@@ -126,6 +126,20 @@ submits bounded stereo frames through an audio handle. The ISO includes
 accepts Space to pause/resume and R to restart. Ogg/Vorbis decoding and
 playlists from the former player have not been ported.
 
+Other ring-3 applications can play raw PCM through
+`libraries/libc/include/tinos/libc.h`:
+`tinos_pcm_open()` accepts a fixed-width `tinos_pcm_format_t` with a sample
+rate of 8-48 kHz, one or two channels, and 8 or 16 bits per sample.
+Samples are interleaved unsigned U8 or signed little-endian S16. Call
+`tinos_pcm_write(handle, buffer, frames)` with at most 256 frames per call;
+it returns the number accepted and may return zero when the queue is full.
+`tinos_pcm_wait(handle, maximum_queued_frames)` blocks only that process
+until the queue reaches the threshold. Use `TINOS_AUDIO_DRAIN`, then wait
+with a zero threshold before closing the handle. The kernel converts mono
+and U8 input to stereo S16, owns the DMA buffer and releases the stream
+if the process exits or faults. This API currently provides playback only,
+not capture or a `/dev` audio node.
+
 For temporary artwork, create a numbered placeholder with:
 
 ```sh

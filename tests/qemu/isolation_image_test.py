@@ -33,7 +33,8 @@ def main():
     symbols = subprocess.check_output(["nm", "-g", args.kernel], text=True)
     for forbidden in ("tinos_abi_build", "load_native_apps", "apps_register"):
         assert forbidden not in symbols, forbidden
-    print("boot image contains only ring-3 ELF programs, media and no native ABI: OK")
+    print("boot image contains ring-3 ELF programs, shared objects, media "
+          "and no native ABI: OK")
 
 
 if __name__ == "__main__":

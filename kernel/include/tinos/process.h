@@ -39,6 +39,8 @@ bool process_cancel_input(void);
 int process_read_console(char *ch);
 NORETURN void process_block_console(regs_t *frame);
 NORETURN void process_block_console_output(regs_t *frame);
+NORETURN void process_block_audio(regs_t *frame, uint32_t maximum);
+void process_audio_wake(void);
 void process_wake_console_output(uint32_t parent_pid);
 int process_console_output(const void *data, size_t length);
 int process_console_send(uint32_t child_pid, uint8_t ch);

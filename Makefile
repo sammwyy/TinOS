@@ -166,7 +166,7 @@ kernel: $(KERNEL)
 RAMFS := $(BUILD)/ramfs.tar
 USERLAND_APPS := hello fault badptr echo fpu io df textwrite cat fdtest \
                  spin spawn spawn_badarg multi gui_security stream \
-                 libprobe libtamper
+                 libprobe libtamper pcm_demo
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
             image_viewer media_player
 USERLAND_LIBS := libtinosbmp.so libtinoswav.so
@@ -265,6 +265,8 @@ check: test $(ISO)
 	python3 tests/qemu/user_spawn_test.py --iso $(ISO) --mem 8
 	python3 tests/qemu/dynamic_link_test.py --iso $(ISO) --mem 8
 	python3 tests/qemu/dynamic_link_test.py --iso $(ISO) --mem 16
+	python3 tests/qemu/pcm_test.py --iso $(ISO) --mem 8
+	python3 tests/qemu/pcm_test.py --iso $(ISO) --mem 16
 
 # Build the kernel and ISO twice from a clean tree and compare the results.
 verify-reproducible:

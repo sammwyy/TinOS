@@ -43,7 +43,8 @@ static void start_track(void)
         close_track();
         return;
     }
-    audio = tinos_audio_open(wav.sample_rate);
+    tinos_pcm_format_t format = { wav.sample_rate, 2, 16 };
+    audio = tinos_pcm_open(&format);
     if (audio < 0) {
         error = "AC97 audio unavailable or busy";
         close_track();
@@ -67,7 +68,7 @@ static void send_samples(void)
         }
         if (!pending)
             break;
-        int sent = tinos_audio_write(audio, samples + pending_at * 2, pending);
+        int sent = tinos_pcm_write(audio, samples + pending_at * 2, pending);
         if (sent <= 0)
             break;
         pending -= (unsigned)sent;

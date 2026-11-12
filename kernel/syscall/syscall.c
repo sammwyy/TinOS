@@ -228,24 +228,46 @@ void syscall_dispatch(regs_t *frame)
     case TINOS_SYS_AUDIO_OPEN:
         frame->eax = (uint32_t)user_audio_open(process_current_pid(), frame->ebx);
         return;
+    case TINOS_SYS_PCM_OPEN: {
+        if (!process_user_buffer(frame->ebx, sizeof(tinos_pcm_format_t), false)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        tinos_pcm_format_t format;
+        memcpy(&format, (const void *)(uintptr_t)frame->ebx, sizeof(format));
+        frame->eax = (uint32_t)user_audio_open_format(process_current_pid(),
+                                                      &format);
+        return;
+    }
     case TINOS_SYS_AUDIO_WRITE: {
+        int frame_bytes = user_audio_frame_bytes(process_current_pid(),
+                                                (int)frame->ebx);
         if (!frame->edx || frame->edx > 256 ||
-            !process_user_buffer(frame->ecx, frame->edx * 2u * sizeof(int16_t),
+            frame_bytes < 0 ||
+            !process_user_buffer(frame->ecx, frame->edx * (size_t)frame_bytes,
                                  false)) {
             frame->eax = (uint32_t)-1;
             return;
         }
-        int16_t samples[256 * 2];
+        uint8_t samples[256 * 2 * sizeof(int16_t)];
         memcpy(samples, (const void *)(uintptr_t)frame->ecx,
-               frame->edx * 2u * sizeof(int16_t));
-        frame->eax = (uint32_t)user_audio_write(process_current_pid(), frame->ebx,
-                                                samples, frame->edx);
+               frame->edx * (size_t)frame_bytes);
+        frame->eax = (uint32_t)user_audio_write_raw(
+            process_current_pid(), frame->ebx, samples, frame->edx);
         return;
     }
     case TINOS_SYS_AUDIO_CONTROL:
         frame->eax = (uint32_t)user_audio_control(process_current_pid(),
                                                   frame->ebx, frame->ecx);
         return;
+    case TINOS_SYS_PCM_WAIT: {
+        int ready = user_audio_wait_ready(process_current_pid(),
+                                          frame->ebx, frame->ecx);
+        if (ready == 0)
+            process_block_audio(frame, frame->ecx);
+        frame->eax = ready < 0 ? (uint32_t)-1 : 0;
+        return;
+    }
     case TINOS_SYS_DLOPEN: {
         char name[FS_PATH_MAX];
         if (!copy_user_path(frame->ebx, frame->ecx, name)) {

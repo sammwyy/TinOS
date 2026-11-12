@@ -172,6 +172,12 @@ can still stall this loop.
   stereo frames per syscall to a single-owner PCM audio stream. GUI timer
   events pace its playback without busy-waiting in the kernel. The audio
   stream is stopped when its process exits, even on a fault or kill.
+  Other clients can open the same raw PCM device with a fixed-width format
+  (U8/S16, mono/stereo, 8–48 kHz). Each syscall validates and copies up to
+  256 frames; the trusted audio boundary converts them to stereo S16
+  before AC'97 DMA. `tinos_pcm_wait()` blocks only the owner process until
+  a chosen queue threshold is reached, with wakeups from the kernel loop.
+  There is no audio capture or virtual audio-device filesystem node yet.
   The terminal handles simple commands itself and bridges its children's
   fd 0/1/2 to a bounded parent-owned byte stream and input queue. Full
   streams block child writers; the compositor wakes them when the terminal
