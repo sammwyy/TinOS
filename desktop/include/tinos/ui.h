@@ -180,16 +180,14 @@ void text_input_draw(const text_input_t *input, rect_t r, const char *label,
 typedef struct {
     const char *name;
     const char *summary;
-    const char *category; /* start menu grouping, e.g. "Accessories" */
-    icon_t      icon;         /* used when custom_icon.pixels is NULL */
-    image_t     custom_icon;  /* decoded from the app's own icon file, if any */
-    window_t *(*launch)(const char *arg);
+    const char *category;
+    const char *path; /* userspace ELF pathname, never a kernel entry point */
+    icon_t      icon;
+    image_t     custom_icon;
 } app_entry_t;
 
 const app_entry_t *apps_registry(size_t *count);
-/* Adds an entry to the registry at runtime, e.g. for a native app that just
- * loaded from the ramfs. False when the registry is already full. */
-bool apps_register(const app_entry_t *entry);
+void apps_discover(void);
 /* Draws app->custom_icon if it decoded one, else falls back to app->icon. */
 void app_icon_draw(int x, int y, int size, const app_entry_t *app);
 

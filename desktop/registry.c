@@ -1,10 +1,14 @@
-/* Application registry: drives the start menu. */
+/* Userspace executable metadata for the start menu. */
+#include <tinos/fs.h>
+#include <tinos/string.h>
 #include <tinos/ui.h>
 
 #define REGISTRY_CAPACITY 16
 
 static app_entry_t registry[REGISTRY_CAPACITY];
 static size_t       registry_count;
+static char         registry_names[REGISTRY_CAPACITY][FS_NAME_MAX];
+static char         registry_paths[REGISTRY_CAPACITY][sizeof("/apps/") + FS_NAME_MAX];
 
 const app_entry_t *apps_registry(size_t *count)
 {
@@ -12,12 +16,31 @@ const app_entry_t *apps_registry(size_t *count)
     return registry;
 }
 
-bool apps_register(const app_entry_t *entry)
+void apps_discover(void)
 {
-    if (registry_count >= REGISTRY_CAPACITY)
-        return false;
-    registry[registry_count++] = *entry;
-    return true;
+    registry_count = 0;
+    fs_node_t *dir;
+    if (fs_resolve(fs_root(), "/apps", &dir) != FS_OK || dir->type != FS_DIR)
+        return;
+    for (fs_node_t *file = dir->children; file && registry_count < REGISTRY_CAPACITY;
+         file = file->next) {
+        size_t length = strlen(file->name);
+        if (file->type != FS_FILE || !file->data || length <= 4 ||
+            strcmp(file->name + length - 4, ".elf") != 0)
+            continue;
+        size_t slot = registry_count++;
+        strlcpy(registry_names[slot], file->name, sizeof(registry_names[slot]));
+        strlcpy(registry_paths[slot], "/apps/", sizeof(registry_paths[slot]));
+        strlcpy(registry_paths[slot] + sizeof("/apps/") - 1, file->name,
+                sizeof(registry_paths[slot]) - (sizeof("/apps/") - 1));
+        registry[slot] = (app_entry_t){
+            .name = registry_names[slot],
+            .summary = "",
+            .category = "Programs",
+            .path = registry_paths[slot],
+            .icon = ICON_FILE,
+        };
+    }
 }
 
 void app_icon_draw(int x, int y, int size, const app_entry_t *app)

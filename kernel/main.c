@@ -7,7 +7,6 @@
  * never returns.
  */
 
-#include <tinos/abi.h>
 #include <tinos/arch.h>
 #include <tinos/async.h>
 #include <tinos/audio.h>
@@ -21,7 +20,6 @@
 #include <tinos/desktop.h>
 #include <tinos/driver.h>
 #include <tinos/e1000.h>
-#include <tinos/elf.h>
 #include <tinos/fs.h>
 #include <tinos/gfx.h>
 #include <tinos/heap.h>
@@ -30,7 +28,6 @@
 #include <tinos/io.h>
 #include <tinos/kernel.h>
 #include <tinos/mm.h>
-#include <tinos/native_app.h>
 #include <tinos/net.h>
 #include <tinos/boot_info.h>
 #include <tinos/pci.h>
@@ -154,7 +151,7 @@ static void pause_ms(uint32_t ms)
 }
 
 /* Reserve bootloader payloads before the heap acquires its first frame. */
-static void reserve_native_app_memory(const boot_info_t *info)
+static void reserve_initrd(const boot_info_t *info)
 {
     if (info->initrd_end > info->initrd_start) {
         klog("[boot] ramfs module 0x%08x..0x%08x\n",
@@ -162,179 +159,14 @@ static void reserve_native_app_memory(const boot_info_t *info)
         pmm_reserve_range(info->initrd_start,
                           info->initrd_end - info->initrd_start);
     }
-    pmm_reserve_range(NATIVE_APP_BASE, NATIVE_APP_ARENA_SIZE);
 }
 
-static char *trim(char *s)
-{
-    while (*s == ' ' || *s == '\t')
-        s++;
-    size_t n = strlen(s);
-    while (n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\r'))
-        s[--n] = '\0';
-    return s;
-}
-
-/* app.conf is a flat key=value list (name=, summary=, category=, icon=);
- * blank lines and lines starting with # are ignored. icon, if present,
- * names a file in the same directory for load_icon() below - out of
- * app_entry_t's fields, only that one takes another pass to resolve.
- *
- * optimize("O0") is load-bearing: at -O2 with -mgeneral-regs-only (the
- * kernel's normal flags), GCC miscompiles this function - the values it
- * produces come out correct, but something about the code it generates
- * corrupts state that only shows up much later, as a hang the first time
- * the desktop calls into a loaded app's launch() after switching start
- * menu categories. Confirmed by bisection: reverting to -O0 for just this
- * function is enough to make it go away. */
-__attribute__((optimize("O0")))
-static void parse_manifest(const fs_node_t *node, app_entry_t *entry,
-                           char *icon_file, size_t icon_file_size)
-{
-    char   buf[1024];
-    size_t size = fs_size(node);
-    if (size >= sizeof(buf))
-        size = sizeof(buf) - 1;
-    memcpy(buf, fs_data(node), size);
-    buf[size] = '\0';
-
-    char *line = buf;
-    while (line) {
-        char *nl = strchr(line, '\n');
-        if (nl)
-            *nl = '\0';
-        char *l = trim(line);
-        char *eq = l[0] && l[0] != '#' ? strchr(l, '=') : NULL;
-        if (eq) {
-            *eq = '\0';
-            char *key   = trim(l);
-            char *value = trim(eq + 1);
-            if (!strcmp(key, "name"))
-                entry->name = kstrdup(value);
-            else if (!strcmp(key, "summary"))
-                entry->summary = kstrdup(value);
-            else if (!strcmp(key, "category"))
-                entry->category = kstrdup(value);
-            else if (!strcmp(key, "icon"))
-                strlcpy(icon_file, value, icon_file_size);
-        }
-        line = nl ? nl + 1 : NULL;
-    }
-}
-
-static image_t load_icon(const fs_node_t *app_dir, const char *icon_file)
-{
-    image_t image = { 0 };
-    if (!icon_file[0])
-        return image;
-    fs_node_t *icon_node = fs_child(app_dir, icon_file);
-    if (!icon_node)
-        return image;
-    const char *dot = strrchr(icon_file, '.');
-    image_decode(fs_data(icon_node), fs_size(icon_node), dot ? dot + 1 : "",
-                &image);
-    return image;
-}
-
-/* app_main()'s real signature: every field a loaded app needs to register
- * itself with, passed by value instead of through a pointer to memory this
- * function owns - a pointer handed across the ABI and written back
- * through, even copied out before the app returns, corrupted apps'
- * launch() calls later at unrelated, unpredictable points (confirmed by
- * bisecting against the previous commit). Passed as plain arguments, each
- * app still builds and owns its own local app_entry_t exactly as it did
- * before app.conf existed. */
-typedef void (*app_main_fn)(const tinos_abi_t *abi, const char *name,
-                            const char *summary, const char *category,
-                            icon_t icon, image_t custom_icon);
-
-/* Unpacks the ramfs module into /apps and runs the *.elf inside every
- * subdirectory there once, each at its own fixed slot in the
- * NATIVE_APP_BASE arena. A subdirectory's app.conf and icon file (see
- * parse_manifest() and load_icon() above) become the arguments passed to
- * its app_main(), which builds its own app_entry_t and registers it. */
-static size_t load_native_apps(const boot_info_t *info)
+static size_t import_userland(const boot_info_t *info)
 {
     if (info->initrd_end <= info->initrd_start)
         return 0;
-
-    const void *image = (const void *)(uintptr_t)info->initrd_start;
-    size_t      size   = info->initrd_end - info->initrd_start;
-    if (tar_extract(image, size, "/apps") == 0)
-        return 0;
-
-    tinos_abi_t abi = tinos_abi_build();
-    size_t      loaded = 0;
-    uint32_t    used_slots = 0;
-    fs_node_t  *apps_dir;
-    if (fs_resolve(fs_root(), "/apps", &apps_dir) != FS_OK)
-        return 0;
-
-    for (fs_node_t *dir = apps_dir->children; dir; dir = dir->next) {
-        if (dir->type != FS_DIR)
-            continue;
-
-        fs_node_t *elf_node = NULL;
-        for (fs_node_t *child = dir->children; child; child = child->next) {
-            size_t len = strlen(child->name);
-            if (child->type == FS_FILE && len > 4 &&
-                strcmp(child->name + len - 4, ".elf") == 0) {
-                elf_node = child;
-                break;
-            }
-        }
-        if (!elf_node) {
-            klog("[boot] apps: %s has no .elf, skipped\n", dir->name);
-            continue;
-        }
-
-        app_entry_t entry = {
-            .name = dir->name, .summary = "", .category = "Other",
-            .icon = ICON_FILE,
-        };
-        char        icon_file[64] = "";
-        fs_node_t  *manifest = fs_child(dir, "app.conf");
-        if (manifest)
-            parse_manifest(manifest, &entry, icon_file, sizeof(icon_file));
-        entry.custom_icon = load_icon(dir, icon_file);
-
-        void *elf_entry = NULL;
-        uintptr_t entry_address;
-        if (!elf_entry_address(fs_data(elf_node), fs_size(elf_node),
-                               &entry_address) ||
-            entry_address < NATIVE_APP_BASE ||
-            entry_address - NATIVE_APP_BASE >= NATIVE_APP_ARENA_SIZE) {
-            klog("[boot] apps: invalid address in %s\n", elf_node->name);
-            continue;
-        }
-        size_t slot = (entry_address - NATIVE_APP_BASE) / NATIVE_APP_SLOT_SIZE;
-        uintptr_t slot_base = NATIVE_APP_BASE + slot * NATIVE_APP_SLOT_SIZE;
-        if (!pmm_range_is_ram(slot_base, NATIVE_APP_SLOT_SIZE)) {
-            klog("[boot] apps: %s slot is outside usable RAM\n", elf_node->name);
-            continue;
-        }
-        if (slot_base < info->initrd_end &&
-            info->initrd_start < slot_base + NATIVE_APP_SLOT_SIZE) {
-            klog("[boot] apps: %s slot overlaps the ramfs module\n",
-                 elf_node->name);
-            continue;
-        }
-        if (used_slots & (1u << slot)) {
-            klog("[boot] apps: duplicate slot in %s\n", elf_node->name);
-            continue;
-        }
-        if (!elf_load(fs_data(elf_node), fs_size(elf_node), slot_base,
-                      NATIVE_APP_SLOT_SIZE, &elf_entry)) {
-            klog("[boot] apps: failed to load %s\n", elf_node->name);
-            continue;
-        }
-        used_slots |= 1u << slot;
-        ((app_main_fn)elf_entry)(&abi, entry.name, entry.summary,
-                                 entry.category, entry.icon,
-                                 entry.custom_icon);
-        loaded++;
-    }
-    return loaded;
+    return tar_extract((const void *)(uintptr_t)info->initrd_start,
+                       info->initrd_end - info->initrd_start, "/apps");
 }
 
 void kmain(uint32_t magic, uint32_t info_addr)
@@ -385,7 +217,7 @@ void kmain(uint32_t magic, uint32_t info_addr)
 
     /* Memory */
     pmm_init(info);
-    reserve_native_app_memory(info);
+    reserve_initrd(info);
     heap_init();
     async_init();
     bus_init();
@@ -436,13 +268,12 @@ void kmain(uint32_t magic, uint32_t info_addr)
     boot_note("vfs: %u nodes in tree", (uint32_t)fs_node_count());
     pause_ms(BOOT_STEP_DELAY_MS);
 
-    /* Native applications */
-    size_t native_apps = load_native_apps(info);
-    if (native_apps)
-        boot_step("apps: loaded %u native app(s) from the ramfs",
-                  (uint32_t)native_apps);
+    /* Executables remain data until launched through the ring-3 loader. */
+    size_t executables = import_userland(info);
+    if (executables)
+        boot_step("userland: imported %u ELF32 file(s)", (uint32_t)executables);
     else
-        boot_note("apps: no native apps loaded");
+        boot_note("userland: no executable archive loaded");
     pause_ms(BOOT_STEP_DELAY_MS);
 
     /* Optional self test */

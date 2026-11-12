@@ -1,10 +1,9 @@
 # TinOS
 
-A small graphical operating system for QEMU, written from scratch: its own
-32-bit kernel, VGA graphics driver, window manager, in-memory filesystem and
-shell. It boots through its own BIOS El Torito loader, prints a text-mode
-start-up log, selects a supported framebuffer resolution, and hands over to a
-desktop with a taskbar, a start menu, a terminal, a file explorer and an editor.
+A small operating system for QEMU, written from scratch: its own 32-bit
+kernel, VGA graphics driver, window manager, in-memory filesystem and text
+shell. It boots through its own BIOS El Torito loader and can start an
+optional desktop with a taskbar and a start menu for ring-3 programs.
 
 It is not based on Linux and contains no Linux userspace: the bootloader
 uses BIOS services for disk and memory discovery, then enters the kernel,
@@ -58,13 +57,13 @@ lists processes, `kill <pid>` stops a running process, and `reap <pid>` collects
 its exit status. The PIT preempts ring-3 CPU loops every 5 ms, so even
 `run /apps/spin.elf` does not block the console. A process reading from the
 keyboard sleeps until a key arrives without busy-polling or blocking the
-kernel; Ctrl+C stops that reader. The desktop and nine existing native apps
-remain kernel-linked/ring 0.
+kernel; Ctrl+C stops that reader. The desktop and text shell remain kernel
+services, but application ELF files can execute only in ring 3.
 
-With 16 MiB of QEMU RAM the text console and graphical desktop load the
-bundled apps. An 8 MiB graphical boot runs at 640x480 with the app archive.
-At 4 MiB the loader skips that archive and boots into the text console; the
-graphical desktop and native apps do not fit. Graphics also falls back to
+At 8 MiB of QEMU RAM the graphical desktop can launch bundled ring-3
+programs from its menu (currently with serial output, not GUI windows).
+At 4 MiB the loader skips the executable archive and boots into the text
+console. Graphics also falls back to
 the console on unsupported video hardware. This BIOS boot image is currently
 for optical ISO media, not UEFI or a raw USB disk.
 
@@ -107,13 +106,9 @@ shell atlas.  The legacy `icon_t` values remain as compatibility handles, but
 `widget_icon()` resolves them exclusively to those named bitmap resources;
 custom code can use `widget_icon_name(x, y, size, "name")` directly.
 
-Image files with `.jpg`, `.jpeg`, `.png`, or `.webp` extensions open in the
-Image Viewer from the File Explorer.  The viewer uses the file contents to
-select a registered decoder, renders RGBA pixels with transparency, and fits
-the image proportionally to its window.  PNG and JPEG decoding is provided by
-the vendored `stb_image` library; WebP decoding is provided by the vendored
-`simplewebp` library.  Both libraries use the TinOS heap and do not depend on
-host filesystem or libc services.
+The former graphical File Explorer and Image Viewer are disabled until they
+can run as isolated clients. Their source remains under `apps/` for porting;
+neither program is built into the boot image.
 
 For temporary artwork, create a numbered placeholder with:
 
@@ -159,11 +154,11 @@ registers of the standard VGA adapter. `-m 256` is a comfortable default;
 TinOS runs in far less.
 
 The default QEMU run uses an AC'97 device with the PipeWire audio backend, so
-Media Player audio and `beep` are audible through the host sound server. Set `AUDIODEV`,
+`beep` is audible through the host sound server. Set `AUDIODEV`,
 for example to `driver=pa,id=tinos-audio` or `driver=none,id=tinos-audio`, when
 another backend is required. Automated headless tests select `none` explicitly.
-The `doremi` shell command remains a blocking AC'97 hardware test; music
-playback and controls are provided by Media Player.
+The `doremi` shell command remains a blocking AC'97 hardware test. The
+former graphical Media Player is not included until its userspace port.
 
 The TinOS boot menu has three selections (Down/Up, then Enter):
 
@@ -186,26 +181,25 @@ The TinOS boot menu has three selections (Down/Up, then Enter):
 | `Right` / `Left` | focus the category's apps / return to the categories |
 | `Esc` | close the start menu |
 
-The start menu groups the applications into collapsible categories
-(*Accessories*, *Multimedia* and *System*): opening a category with `Enter` or a click unfolds
-its apps underneath, and the power actions sit at the bottom.
-
-The Control Panel replaces the old Network Config window. It provides a
-sidebar with Network, Display, Sound and Keyboard categories; Network includes
-DHCP/manual IPv4 configuration and DNS/ping diagnostics.
-
-Subsystem settings publish typed notifications through the kernel event bus.
-The Control Panel subscribes to those notifications so changes made by another
-module are reflected in the open panel.
+The start menu lists ELF32 programs under *Programs* and starts each one
+through the process loader. Until the desktop has a userspace window and
+terminal protocol, programs write to the serial log rather than a GUI window.
+The old graphical Control Panel, Terminal, Editor and Explorer are not
+available; their code is kept only as a porting reference.
 | `Alt+Tab` | switch to the next window |
 | `Alt+F4` | close the focused window |
-| `Ctrl+Alt+T` / `Ctrl+Alt+E` | new terminal / new file explorer |
 
 The mouse (if present - QEMU provides a PS/2 mouse by default) can click the
 Start button and menu entries, focus windows, drag them by the title bar,
 resize them by dragging the grip in the bottom-right corner, press the
 minimise and close buttons in the title bar, and click taskbar buttons to
 raise or minimise a window.
+
+### Retired Graphical Apps
+
+The sections below describe historical ring-0 GUI programs. They are not
+built, installed or runnable in the current ISO. Their eventual userspace
+ports need a desktop client protocol rather than access to kernel pointers.
 
 ### Calculator
 
@@ -257,8 +251,8 @@ editor window.
 
 ## Shell
 
-The shell operates on the in-memory filesystem shared by every application:
-a file created in the terminal appears in the file explorer, and vice versa.
+The VGA text shell operates on the in-memory filesystem shared with ring-3
+programs.
 
 ### Built-in commands
 
@@ -504,7 +498,7 @@ to the nearest surviving ancestor.
 | Libraries | `libraries/image/` | PNG, JPEG and WebP decoding on top of stb_image/simplewebp; own kernel thread, real SSE2 |
 | Libraries | `libraries/audio/` | WAV and Ogg Vorbis decoding, codec dispatch; own kernel thread, real SSE2 |
 | Desktop | `desktop/` | window manager, widgets, icons, application registry, taskbar/start menu/event loop |
-| Applications | `apps/`, `kernel/proc/elf.c`, `kernel/core/abi.c`, `kernel/fs/tar.c` | terminal, file explorer, text editor, image viewer, media player, calculator, control panel, system information, about - each its own freestanding ELF binary (own Makefile, own linker script), bundled into `build/ramfs.tar`, handed to the kernel as an initrd and loaded at boot (see below) |
+| Applications | `userland/bin/`, `kernel/proc/`, `kernel/fs/tar.c` | ELF32 programs packed into the initrd and started in ring 3; `apps/` is an unbuilt porting reference |
 
 Each self-contained unit owns its own public headers under its own
 `include/tinos/` tree - `kernel/include/tinos/` for the kernel core (shared
@@ -550,8 +544,8 @@ compiled natively and unit-tested on the host.
 **The desktop and text shell remain kernel services.** A kernel-owned loop
 advances workers and preemptible ring-3 programs before calling an optional
 TTY or desktop tick. A CPU-bound userspace program cannot monopolize the
-console, and a keyboard read parks only its caller. Legacy ring-0 apps and
-UI callbacks can still block the loop if they never return; per-CPU run
+console, and a keyboard read parks only its caller. Kernel UI callbacks
+can still block the loop if they never return; per-CPU run
 queues and userspace services remain future work.
 
 **Asynchronous workers and kernel threads.** `kernel/core/async.c` provides a
@@ -632,52 +626,25 @@ an API that can later absorb virtual-to-physical mappings. The e1000 driver
 backs the current Ethernet stack; networking is intentionally a small
 polling-oriented kernel service rather than a userspace socket subsystem.
 
-**Native apps: fixed-address ELF, no processes.** Every application under
-`apps/` is its own freestanding ELF32 binary, built by `apps/Makefile`
-against `apps/link.ld`, which links it at a fixed address inside the
-arena `kernel/include/tinos/native_app.h` reserves (`kernel/arch/x86/
-pmm.c` never hands those frames to anything else). `make` bundles every
-app's `.elf` into `build/ramfs.tar`; the BIOS loader places it in RAM as
-an initrd, and at boot `kernel/fs/tar.c`
-unpacks it into `/apps` and `kernel/proc/elf.c` copies each `.elf`'s
-`PT_LOAD` segments to their literal (fixed, pre-reserved) `p_vaddr` -
-correct only because paging identity-maps the whole address space, so
-there is no relocation processing to do.
-
-Each app is a separate link, so it cannot call a kernel function by
-symbol - the kernel and app binaries never see each other's symbol tables.
-Instead `kernel/core/abi.c` builds a small table of function pointers
-(`kernel/include/tinos/abi.h`) and hands it to the app's entry point;
-`apps/lib/shim.c` wraps each one in a function of the same name as the
-real kernel call, so an app's own source calls e.g. `wm_open()` or
-`gfx_text()` completely normally and only its build differs. An app whose
-window needs to open a different app (the explorer opening a file in the
-editor, a shell command opening the file explorer) looks that app up in
-the shared registry by name instead, since it cannot call that other
-app's ELF by symbol either. This still runs in ring 0 with no memory
-protection - a crashing app can corrupt the kernel exactly like anything
-else in it - so it buys build-time and load-time separation, not
-isolation. The separate programs in `userland/bin/` use the new ring-3
-loader, but these nine desktop applications have not been migrated.
-
-Preemption is deliberately still a separate step: the PIT must save and
-restore a thread context instead of only marking events pending, and the
-kernel needs a run queue, locks and a decision about what "task" even means
-here (each window? each app tick?). That touches the PIT ISR
-(`kernel/arch/x86/pit.c`), the GDT/TSS setup, and the desktop event loop
-all at once, and every one of the 32 shell built-ins and 5 applications
-would need to be re-audited for what they assume about not being
-interrupted mid-callback. Given the theoretical (not observed) nature of
-the risk, that rewrite is out of proportion to attempt as an incremental
-change - it is a separate project, not a fix to fold into this one.
+**Application isolation.** Only the ELF32 files from `userland/bin/` are
+packed into the initrd. `kernel/proc/process.c` checks each executable,
+allocates a private address space and enters ring 3; the desktop start menu
+stores paths, not function pointers, and starts programs through that same
+process loader. The old fixed-address loader and function-pointer ABI are
+not linked into the kernel, and the fixed-slot arena is no longer reserved.
+The former GUI app sources remain under `apps/` for porting, but they are
+neither installed nor executable in this build. `make native-apps` fails
+intentionally. Userspace GUI windows and desktop-facing syscalls are not
+implemented yet.
 
 ## Error handling
 
-Every CPU exception is fatal and reported: the handler paints a panic screen
+Kernel CPU exceptions are fatal and reported: the handler paints a panic screen
 with the exception name, error code, faulting `EIP`, `CR2` and a full
 register dump, writes the same text to the serial port, and halts. The panic
 path also works before the graphics stack is up (it falls back to the VGA
-text console) and refuses to recurse.
+text console) and refuses to recurse. User-originated exceptions instead
+terminate only the affected process.
 
 You can see it on purpose:
 
@@ -747,8 +714,8 @@ make check     # the above plus the scripted QEMU boot/GUI session
 Written for this project: the kernel and all of its subsystems (boot code,
 descriptor tables, interrupt handling, timer/RTC, memory management, PCI
 scan, VGA/DISPI driver, graphics engine, keyboard and mouse drivers,
-filesystem, shell and parser, window manager, widgets, and all five
-applications), the build system, the test harnesses and this documentation.
+filesystem, shell and parser, window manager, widgets and userspace
+programs), the build system, the test harnesses and this documentation.
 
 Reused: `libgcc` for 64-bit division helpers; the glyph shapes in
 `kernel/gfx/font8x16.c`, which `tools/mkfont.py` rasterised once from
@@ -763,8 +730,7 @@ kernel/
   arch/x86/      GDT, IDT, interrupt stubs, PIC, PIT, RTC, CPU, reset,
                  page tables, physical memory allocator, boot.S - every
                  target's own arch/<ARCH> tree looks like this one
-  core/          logging, panic, clock glue, system info, locks, timers,
-                 the driver model and the native app ABI table
+  core/          logging, panic, clock glue, system info, locks, timers
   sched/         kernel threads, mutexes and events
   proc/          the ELF loader
   drivers/       drivers by device class: bus (PCI), block (ATA,
@@ -781,9 +747,8 @@ kernel/
   include/tinos/  public headers for all of the above
 desktop/         window manager, widgets, icons, application registry,
                  taskbar/start menu/event loop
-apps/            every application, each its own standalone ELF binary
-                 with its own Makefile and linker script, loaded from the
-                 ramfs at boot (see "Native apps" above)
+userland/bin/    programs built against libc for ring 3
+apps/            retired ring-0 GUI sources; not built or installed
 libraries/       image (PNG/JPEG/WebP) and audio (WAV/Vorbis) codecs
 tests/host/      native unit tests and the kernel-service shims
 tests/kernel/    in-kernel self-test (linked into the kernel image)
@@ -791,8 +756,8 @@ tests/qemu/      QEMU test driver and screen OCR
 tools/           run script, USB image helper, icon and font generators
 ```
 
-Empty placeholder directories (`userland/`, `libraries/{libc,gfx,ui}`,
-`kernel/{syscall,ipc,tty}`, `ports/`, `toolchain/`, `docs/`) belong to the
+Empty placeholder directories (`userland/{init,sh}`, `libraries/{gfx,ui}`,
+`kernel/ipc`, `ports/`, `toolchain/`, `docs/`) belong to the
 target layout described in [ARCHITECTURE.md](ARCHITECTURE.md).
 ```
 

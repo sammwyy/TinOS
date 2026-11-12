@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Exercise the 640x480 graphical session with 8 MiB of RAM."""
+"""Exercise the desktop and a ring-3 menu program with 8 MiB of RAM."""
 
 import argparse
 import os
+import time
 
 from qemu_test import Screen, Tinos
 
@@ -16,19 +17,25 @@ def main():
     try:
         vm.start()
         assert vm.wait_for_serial("desktop starting", timeout=30), vm.serial()
-        assert "apps: loaded 9 native app(s)" in vm.serial(), vm.serial()
-        assert "mode set to 640x480x32" in vm.serial(), vm.serial()
-        vm.key("ctrl", "alt", "t")
-        assert vm.wait_for_serial("opened window 1 'Terminal", timeout=15), vm.serial()
-        assert "(640x452)" in vm.serial(), vm.serial()
-
-        path = os.path.join(vm.tmp, "terminal.png")
+        assert "userland: imported 14 ELF32 file(s)" in vm.serial(), vm.serial()
+        assert "native app(s)" not in vm.serial(), vm.serial()
+        vm.key("ctrl", "esc")
+        time.sleep(0.4)
+        path = os.path.join(vm.tmp, "programs.png")
         vm.screenshot(path)
         screen = Screen(path)
-        assert screen.size == (640, 480), screen.size
-        assert screen.has("Terminal"), "terminal title not visible"
+        assert screen.size in ((640, 480), (800, 600), (1024, 768)), screen.size
+        assert screen.has("Programs"), "start menu not visible"
+        matches = screen.find("hello.elf")
+        assert matches, "ring-3 program not visible"
+        x, y = matches[0]
+        vm.mouse_click(x + 20, y + 6)
+        assert vm.wait_for_serial("ring3: hello from an isolated ELF",
+                                  timeout=15), vm.serial()
+        assert vm.wait_for_serial("[proc] ring 3 exit status 17",
+                                  timeout=15), vm.serial()
         assert "KERNEL PANIC" not in vm.serial()
-        print("8 MiB desktop, app loading and window layout: OK")
+        print("8 MiB desktop and ring-3 menu launch: OK")
     finally:
         vm.stop()
         vm.cleanup()

@@ -6,6 +6,8 @@ Boots the ISO in a headless QEMU, drives it through the QMP monitor
 can be exercised without a human at the keyboard.
 
     tests/qemu/qemu_test.py --iso build/tinos.iso            run the full scenario
+    tests/qemu/qemu_test.py --legacy                         run the retired
+                                                    ring-0 app scenario
     tests/qemu/qemu_test.py --shots-dir /tmp/shots          keep the screenshots
     tests/qemu/qemu_test.py --interactive 20                boot and idle, taking
                                                        one screenshot per second
@@ -294,7 +296,7 @@ class Screen:
         return self.image.crop(box)
 
 
-def run_scenario(iso, shots_dir):
+def run_legacy_scenario(iso, shots_dir):
     os.makedirs(shots_dir, exist_ok=True)
     vm = Tinos(iso, serial=os.path.join(shots_dir, "serial.log"), verbose=False)
     c = Checker()
@@ -679,6 +681,56 @@ def run_scenario(iso, shots_dir):
     return 0 if not c.failures else 1
 
 
+def run_scenario(iso, shots_dir):
+    os.makedirs(shots_dir, exist_ok=True)
+    vm = Tinos(iso, serial=os.path.join(shots_dir, "serial.log"), verbose=False)
+    c = Checker()
+
+    def shot(name):
+        time.sleep(0.4)
+        path = os.path.join(shots_dir, name + ".png")
+        vm.screenshot(path)
+        return Screen(path)
+
+    try:
+        vm.start()
+        c.check(vm.wait_for_serial("userland: imported 14 ELF32 file(s)",
+                                    timeout=30), "boot imports only ring-3 programs")
+        c.check(vm.wait_for_serial("desktop starting", timeout=30),
+                "desktop starts without native apps")
+        log = vm.serial()
+        c.check("native app(s)" not in log, "no native app loader runs")
+        desk = shot("desktop")
+        c.check(desk.size == (1024, 768), "desktop renders at 1024x768")
+        c.check(desk.has("Start"), "taskbar remains available")
+
+        vm.key("ctrl", "esc")
+        menu = shot("programs")
+        for label in ("Programs", "hello.elf", "Restart", "Shut Down"):
+            c.check(menu.has(label), "start menu shows " + label)
+        c.check(menu.missing("Terminal"), "old ring-0 terminal is unavailable")
+
+        hits = menu.find("hello.elf")
+        if c.check(bool(hits), "ring-3 executable is selectable"):
+            x, y = hits[0]
+            vm.mouse_click(x + 20, y + 6)
+            c.check(vm.wait_for_serial("ring3: hello from an isolated ELF",
+                                       timeout=15), "menu launches ring-3 process")
+            c.check(vm.wait_for_serial("[proc] ring 3 exit status 17", timeout=15),
+                    "process exits without affecting the desktop")
+
+        vm.key("ctrl", "esc")
+        after = shot("desktop-after-process")
+        c.check(after.has("Programs"), "desktop accepts input after process exit")
+        c.check("KERNEL PANIC" not in vm.serial(), "no kernel panic")
+    finally:
+        vm.stop()
+        vm.cleanup()
+
+    print("\n%d checks, %d failures" % (c.checks, len(c.failures)))
+    return 0 if not c.failures else 1
+
+
 def run_interactive(iso, seconds, shots_dir):
     os.makedirs(shots_dir, exist_ok=True)
     vm = Tinos(iso, serial=os.path.join(shots_dir, "serial.log"))
@@ -700,6 +752,8 @@ def main():
     ap.add_argument("--shots-dir", default="build/test-shots")
     ap.add_argument("--interactive", type=int, default=0,
                     help="boot and screenshot once per second for N seconds")
+    ap.add_argument("--legacy", action="store_true",
+                    help="run the retired ring-0 GUI app scenario")
     args = ap.parse_args()
 
     if not os.path.exists(args.iso):
@@ -707,6 +761,8 @@ def main():
         return 2
     if args.interactive:
         return run_interactive(args.iso, args.interactive, args.shots_dir)
+    if args.legacy:
+        return run_legacy_scenario(args.iso, args.shots_dir)
     return run_scenario(args.iso, args.shots_dir)
 
 

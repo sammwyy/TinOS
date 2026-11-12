@@ -16,9 +16,10 @@ code.
 
 ### 1.1 Summary
 
-The kernel, text shell, desktop, codecs and nine native desktop apps still
-share one ring-0 address space. Separately linked programs under
-`userland/bin/` run in ring 3 through `run <path>`. Up to four jobs can be
+The kernel, text shell, desktop and codecs still share ring 0. No application
+ELF executes there: the former native GUI apps are disabled, their ABI is
+not linked and the initrd contains only `userland/bin/` executables.
+They run in ring 3 through `run <path>` or the desktop menu. Up to four jobs can be
 resident on the boot processor; PIT preemption lets the console run even
 when a user program loops. They have console I/O and read-only access to
 memory-backed files through private integer descriptors.
@@ -29,7 +30,7 @@ exit without blocking the boot processor.
 |---------------------|--------------------------------------------------------------|
 | CPU target          | i386 (`-m32`), protected mode                                |
 | Boot                | TinOS El Torito loader, BIOS only, VGA text console at handoff |
-| Privilege           | Kernel/desktop/native apps ring 0; `run` programs ring 3     |
+| Privilege           | Kernel/shell/desktop ring 0; executable apps ring 3          |
 | Paging              | Supervisor identity map (PSE); 4 KiB user pages per process  |
 | Memory isolation    | Ring-3 programs cannot access the kernel or each other       |
 | Processes           | Four slots, distinct address spaces and kernel stacks; BSP-only scheduling |
@@ -51,11 +52,11 @@ TinOS BIOS loader (boot/x86/loader.asm, El Torito boot image)
   -> kernel/main.c kmain()
        serial, VGA text console
        GDT, IDT, PIC, FPU/SSE, identity paging, PIT, RTC
-       PMM (reserves ramfs module + native app arena), heap
+       PMM (reserves the initrd), heap
        async pool, event bus, threads, timers, driver model
        SMP bring-up
        PS/2 keyboard + mouse, ATA PIO, tmpfs root, FAT mounts
-       load_native_apps(): untar ramfs into /apps, ELF-load and call each app_main()
+       import_userland(): expose ring-3 ELF files under /apps without executing them
        PCI scan, driver binding (e1000, virtio-blk, AC'97), UHCI, network + DHCP
        if tinos.mode=text: tty_start(); kernel_loop_run(tty_step)
        desktop command resumes kmain
@@ -127,8 +128,8 @@ returning from the text loop and starting the desktop loop.
   filesystem and network stack have no SMP-safe locking.
 
 The loop still uses budgeted pull scheduling on the BSP, not per-CPU run
-queues. UI callbacks and legacy native apps remain ring 0: a callback that
-never returns can still stall this loop.
+queues. Trusted kernel UI callbacks remain ring 0: one that never returns
+can still stall this loop.
 
 ### 1.5 Desktop, libraries and applications
 
@@ -136,35 +137,27 @@ never returns can still stall this loop.
   event loop) is compiled and linked **into the kernel image**.
 - `libraries/image` and `libraries/audio` (stb_image, simplewebp, stb_vorbis
   wrappers) are also linked into the kernel, with per-directory SSE2 flags.
-- `apps/<name>/` each build to a separate `ET_EXEC` ELF32 linked at a fixed
-  128 KiB slot starting at `0x00600000` (`apps/Makefile`,
-  `kernel/include/tinos/native_app.h`), at most 12 slots.
-- The apps are packed into `ramfs.tar`, unpacked into `/apps` at boot, copied
-  to their link address by `kernel/proc/elf.c`, and their `app_main()` is
-  called once in kernel context. It registers an `app_entry_t` with a
-  `launch` callback; from then on the desktop calls into app code directly.
-- The tar-backed files refer directly to the reserved initrd. Writes
-  allocate private buffers so the original archive remains unchanged.
-  The module remains reserved for the lifetime of these files.
-- The ELF loader validates the entire program-header table before copying
-  segments. Each app is restricted to its own slot, and duplicate slots
-  are rejected at boot. This does not isolate apps from one another at
-  runtime.
-- App slots must fit the boot information's usable-memory map and must not overlap
-  the ramfs module; apps outside physical RAM are skipped.
-- Apps call the kernel through `tinos_abi_t` (`kernel/include/tinos/abi.h`),
-  a struct of roughly 130 function pointers. `apps/lib/shim.c` re-exports
-  each one under the kernel function's own name.
-- Apps include kernel-internal headers and compile several kernel source
-  files (`string.c`, `printf.c`, `path.c`, `spinlock.c`, `stream.c`) directly
-  into their own binary.
+- `userland/bin/` produces freestanding ELF32 programs against
+  `libraries/libc/`; the boot image packages only these binaries.
+- The initrd is imported as read-only backing for files in `/apps`. A
+  write detaches the file into private heap storage. The module stays
+  reserved while borrowed data exists.
+- The desktop registry stores copied executable paths and names, never
+  callbacks from application code. Menu selections call `process_spawn()`
+  after resolving the file; ELF validation and page mappings are shared with
+  the text console's `run` command.
+- Former fixed-slot `apps/` sources and the function-pointer ABI remain in
+  the repository as porting references, but are excluded from the boot
+  image and kernel link. No fixed-slot physical arena is reserved.
+- The desktop does not yet provide windows, input events or visible stdout
+  to user processes; menu-launched programs write to serial.
 
 ### 1.6 Dependency direction today
 
 ```
-apps  ->  kernel headers + desktop headers + library headers  (via ABI table)
-kernel/core/abi.c  ->  desktop, libraries/image, libraries/audio, kernel/sh
-kernel/main.c      ->  desktop_start()/kernel_loop_run(), image_decode(), app manifest parsing
+userland/bin       ->  libraries/libc + kernel/include/uapi/tinos
+kernel/main.c      ->  desktop_start()/kernel_loop_run(), codec registration
+desktop/registry.c ->  filesystem executable paths (not app code)
 desktop            ->  kernel internals (gfx, fs, net, threads, input, shell)
 ```
 
@@ -180,8 +173,8 @@ removed or replaced independently.
 - In-kernel self-test (`tests/kernel/`) selected by the `selftest` kernel command-line flag.
 - Scripted QEMU session with screenshot OCR (`make check`, `tests/qemu/qemu_test.py`).
 - Current memory acceptance in QEMU: 4 MiB boots the text console without
-  bundled apps, 8 MiB supports the 640x480 desktop with apps, and 16 MiB
-  supports the regular 1024x768 desktop. With an unsupported display
+  the executable archive; 8 MiB starts the desktop with ring-3 menu
+  programs (resolution selected from available RAM). With an unsupported display
   adapter, boot continues into the VGA text console.
 
 ---
@@ -342,8 +335,8 @@ What moves where:
 | `desktop/window.c`, `desktop/desktop.c` | `desktop/` (compositor process)          |
 | `desktop/widgets.c`, text input widget  | `libraries/ui/` (linked into each app)   |
 | `kernel/gfx/` drawing primitives, font  | `libraries/gfx/` (kernel keeps a minimal console renderer) |
-| `desktop/registry.c` + `app.conf` parsing in `kernel/main.c` | `desktop/` scans `/apps/*/app.conf` itself |
-| `apps/*` `launch` callbacks in kernel context | separate processes spawned by the desktop |
+| `desktop/registry.c` scans `/apps/*.elf` | userspace desktop scans versioned manifests itself |
+| retired `apps/*` sources | ported userspace clients of the desktop protocol |
 
 Widgets belong in a library rather than in `desktop/` because apps link
 against them; the compositor only needs windows, buffers and input routing.
@@ -376,7 +369,7 @@ code that will move there; the prerequisite for each move is listed in the
 boot/                      BIOS El Torito loader and kernel linker script
 kernel/
   arch/x86/                CPU and platform bring-up
-  core/                    logging, panic, locks, timers, driver model, app ABI table
+  core/                    logging, panic, locks, timers, driver model
   mm/                      heap, DMA                         <- allocator part of arch/x86/pmm.c
   sched/                   threads, mutexes, events
   proc/                    ELF loader; later processes and exec
@@ -409,7 +402,7 @@ libraries/
   ui/        (placeholder) <- desktop/widgets.c
   image/, audio/           codecs (still linked into the kernel)
 desktop/                   window manager, widgets, taskbar (still linked into the kernel)
-apps/                      GUI applications
+apps/                      retired GUI sources, awaiting userspace ports
 ports/       (placeholder) third-party package recipes
 toolchain/   (placeholder) cross-compiler and sysroot scripts
 third_party/               vendored libraries

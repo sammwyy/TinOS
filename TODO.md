@@ -1,7 +1,7 @@
 # TinOS TODO
 
-Technical backlog for turning TinOS from a single-address-space ring-0 system
-into a kernel with a userspace, a text-mode base system and an optional
+Technical backlog for turning TinOS into a kernel with a userspace,
+a text-mode base system and an optional
 desktop process. The target design is described in
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -28,14 +28,13 @@ kernel.
 | `kernel/sh/{shell,parse,stream,regex}.c` | `userland/sh/` | Phase 2: processes, syscalls, libc, pipes |
 | `kernel/sh/commands.c` (split per command) | `userland/bin/` | Same as above, plus `spawn`/`wait` |
 | `kernel/include/tinos/{sh,regex}.h` | `userland/sh/` | With `kernel/sh` |
-| `apps/lib/shim.[ch]` (replaced, not moved) | `libraries/libc/` | After all nine native apps use the minimal syscall library (now created) |
+| `apps/lib/shim.[ch]` (retired, not moved) | `libraries/libc/` | Port each app against the userspace libc, without the old shim |
 | `kernel/lib/{string,printf}.c` (userspace copy) | `libraries/libc/` | Phase 2: libc build and sysroot exist; kernel keeps its own copy |
 | `kernel/fs/path.c` (userspace copy) | `libraries/libc/` | Same as above |
 | `kernel/gfx/gfx.c`, `font8x16.c` | `libraries/gfx/` | Phase 2 console done (kernel has its own text renderer) and Phase 3 framebuffer device exists |
 | `kernel/include/tinos/gfx.h` | `libraries/gfx/include/tinos/` | With `kernel/gfx` |
 | `desktop/widgets.c`, widget and `text_input_*` part of `desktop/include/tinos/ui.h` | `libraries/ui/` | Phase 3: client protocol defined, `libraries/gfx` draws into arbitrary buffers |
-| `parse_manifest()`, `load_icon()`, `load_native_apps()` in `kernel/main.c` | `desktop/` | Phase 3: desktop is a process and can read `/apps` through the VFS |
-| `kernel/core/abi.c`, `kernel/include/tinos/{abi,native_app}.h` | deleted | Phase 3: every app is a process |
+| Retired `kernel/core/abi.c`, `kernel/include/tinos/{abi,native_app}.h` | remove after preserving porting references | The kernel no longer links the ABI or reserves the arena |
 | `libraries/image`, `libraries/audio` (leave the kernel link; no path change) | - | Phase 3: apps link them directly |
 | `resources/icons` generated atlas (`icons_generated.[ch]`) | image files in the root filesystem | Phase 3: desktop loads icons at runtime |
 | `kernel/drivers/video/vga_text.c` console logic | `kernel/tty/` | Phase 2: TTY core and console driver interface exist |
@@ -51,48 +50,33 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
 
 ## Phase 0 - Fixes on the current code base
 
-### Unexplained memory corruption
+### Retired native app path
 
-`kernel/main.c` carries two workarounds for corruption whose root cause was
-never found. Both were found by bisection, not diagnosis.
-
-- [ ] Root-cause the `__attribute__((optimize("O0")))` on `parse_manifest()`
-      (`kernel/main.c`). The comment attributes it to a GCC miscompile; a
-      compiler bug is the least likely explanation. Symptom: hang on the
-      first `launch()` call after switching start-menu categories.
-- [ ] Root-cause why `app_main()` has to take its fields by value instead of
-      a pointer to an `app_entry_t` (`app_main_fn` comment in `kernel/main.c`).
-- [ ] Ruled out so far: slot overflow. All nine app ELFs are 12-23 KiB against
-      a 128 KiB slot.
-- [ ] Candidates not yet checked:
-  - `parse_manifest()` stores `kstrdup()` results in `entry`, but the
-    defaults (`dir->name`, string literals) have different lifetimes; check
-    who frees or retains `name`/`summary`/`category` in `desktop/registry.c`.
-  - `app_entry_t` / `image_t` struct layout or calling-convention mismatch
-    between kernel and app builds: the kernel uses `-mgeneral-regs-only`,
-    `apps/Makefile` does not, and `libraries/` use `-msse2 -mstackrealign`.
-  - Stack alignment or stack depth when app code is entered from the boot
-    stack versus from a 16 KiB thread stack.
-  - Heap corruption from `kernel/fs/tar.c` or `image_decode()` during
-    `load_native_apps()`; run the same path under the host ASan harness.
+- [x] Remove the fixed-address app loader, `app_main()` call, and the
+      `parse_manifest()` optimization exception from the kernel boot path.
+- [x] Exclude `kernel/core/abi.c` from the kernel link and prevent the
+      default build from compiling or packing `apps/` native ELFs.
+- [x] Stop reserving the fixed-slot physical arena. `apps/` remains only
+      as source material for safe userspace ports.
+- [x] Replace `app_entry_t.launch` callbacks in the desktop registry with
+      executable paths. Start menu selections use `process_spawn()` and
+      share the ring-3 ELF validation and address-space setup with `run`.
+- [ ] Port the retired graphical programs to userspace. Until a framebuffer
+      device, client protocol and GUI libraries exist, only text/serial
+      output is available to menu-launched processes.
 - [ ] Add heap canaries / redzones and a `heap_check()` callable from the
       self-test and from the panic path (`kernel/mm/heap.c`).
 - [ ] Add stack guard words to thread stacks and check them on context switch
       (`kernel/sched/thread.c`).
 
-### App loader and ABI
+### Application loader and ABI
 
-- [x] Validate each app's ELF against its own slot, not the entire arena.
-- [x] Reject overflowing ELF program-header and segment bounds before writing
-      any segments. Host tests exercise invalid headers and out-of-slot loads.
-- [x] Reject two apps linked to the same slot at load time.
-- [ ] Slot addresses are assigned by hand in `apps/Makefile`
-      (`NATIVE_APP_SLOT_*`) and `NATIVE_APP_MAX_COUNT` is 12. Generate the
-      assignment, or build apps as position-independent and relocate at load.
-- [ ] `tinos_abi_t` has no version or size field. Add `abi_version` and
-      `abi_size` as the first members and reject mismatching apps.
-- [ ] Freeze field order in `tinos_abi_t`: append only, never insert.
-- [x] Correct the native app count in `native_app.h`.
+- [x] Package only `userland/bin/` ELF32 programs; verify the boot image
+      contains no native app directories or linked ABI symbols.
+- [x] Keep the legacy `native-apps` make target disabled, even when stale
+      native artifacts remain in the build directory.
+- [ ] Move file and network codecs out of ring 0 as their graphical clients
+      migrate; retaining a parser in the kernel is not a userspace boundary.
 
 ### Low-memory i386 boot
 
@@ -100,18 +84,15 @@ The target is a usable text or graphical session on i386 PCs with 4-16 MiB
 of physical RAM. The current prototype still needs SSE2 and Bochs DISPI for
 graphics; this is not yet a claim of support for arbitrary PCs.
 
-- [x] Keep app slots inside physical RAM: check each slot against the
-      boot information memory map before writing executable pages, and reject a
-      slot overlapping the initrd module.
-- [x] Relink nine bundled apps to 128 KiB slots at 6 MiB (previously 1 MiB
-      slots starting at 16 MiB); enforce slot size at link time. This is a
-      transitional fixed-address scheme pending per-process relocation.
+- [x] Retire the fixed native-app arena and its physical-memory reservation.
+      The 8 MiB GUI now has room for the executable archive and a back buffer
+      without loading any ring-0 app code.
 - [x] Place the initrd deterministically immediately after the kernel; the
       BIOS loader does not drop the module under memory pressure.
 - [x] Grow heap in 256 KiB minimum arenas rather than reserving 4 MiB at
       initialization; allow a 16 MiB machine to boot the full desktop.
 - [x] Replace GRUB/Multiboot2 with a TinOS El Torito BIOS loader. At 4 MiB
-      it omits the native-app initrd, enters the kernel in protected mode
+      it omits the executable initrd, enters the kernel in protected mode
       and boots the TTY. The previous GRUB2 relocator failed before handoff.
 - [ ] Implement a BIOS disk boot path (raw USB/HDD image). The current boot
       image uses El Torito CD-ROM BIOS services and is not a USB bootloader.
@@ -122,10 +103,10 @@ graphics; this is not yet a claim of support for arbitrary PCs.
       verify ACPI RSDP before use, A20 activation fallback, EDD/ATAPI
       compatibility, disk read errors and a memory bound for every
       kernel/initrd write. QEMU exercises only one BIOS implementation.
-- [ ] Avoid loading and unpacking graphical apps during text-only boot; a
-      later `desktop` command should load them on demand if RAM permits.
-- [x] Exercise the 640x480 fallback at 8 MiB with the desktop and a terminal
-      window clamped to the available workspace.
+- [x] Avoid loading native graphical apps during text-only boot. The
+      initrd imports only ring-3 programs and the desktop launcher reads
+      their metadata without executing them at boot.
+- [x] Exercise the 8 MiB desktop and ring-3 start-menu launch in QEMU.
 - [ ] Set a minimum usable GUI resolution and memory budget per app. The
       desktop back buffer needs 3 MiB at 1024x768x32 or 1.2 MiB at
       640x480x32, before any window cache or decoded image.
@@ -136,10 +117,9 @@ graphics; this is not yet a claim of support for arbitrary PCs.
       before changing the video mode.
 - [ ] Choose display modes from adapter capabilities and use a tested
       small-screen desktop layout, rather than fixed fallback dimensions.
-- [x] Bind files in the ramfs to the reserved initrd instead of
-      copying every ELF/icon/manifest into a second heap buffer. On write,
-      allocate a private copy. An 8 MiB boot with nine apps now has about
-      2672 KiB free before graphics and starts a 640x480 desktop.
+- [x] Bind userspace ELF files in ramfs to the reserved initrd instead of
+      copying them into a second heap buffer. On write, allocate a private
+      copy.
 - [ ] Continue reducing the compositor and per-window surface memory
       footprint: every opened window currently allocates a cached
       32-bit surface in addition to the desktop back buffer.
@@ -155,14 +135,8 @@ graphics; this is not yet a claim of support for arbitrary PCs.
 
 ### Build
 
-- [ ] Kernel and app `CFLAGS` are duplicated in `Makefile` and
-      `apps/Makefile` and already differ (`-mgeneral-regs-only`,
-      `-Wno-address-of-packed-member`). Move shared flags to one included
-      `.mk` file.
-- [ ] `apps/Makefile` has no header dependency tracking (`-MMD -MP`); a
-      header change does not rebuild apps.
-- [ ] `apps/Makefile` treats every directory under `apps/` except `lib` as an
-      app. Make the app list explicit or require `app.conf` to be present.
+- [ ] Define a shared kernel/userland toolchain configuration, without
+      reactivating the retired `apps/Makefile` native build.
 - [ ] `HOST_BIN` is rebuilt as one compile of all sources; split into objects.
 - [ ] `distclean` is an alias of `clean`.
 - [ ] Generate `compile_commands.json` instead of hand-maintaining `.clangd`.
@@ -206,7 +180,8 @@ graphics; this is not yet a claim of support for arbitrary PCs.
 - [x] Add a kernel-owned scheduler/idle loop on the boot processor, with
       bounded service polling and an optional TTY/desktop tick. The boot-menu
       self-test runs a worker through the loop without either UI.
-- [ ] Move blocking legacy ring-0 UI/native app work out of the loop.
+- [x] Remove native ring-0 application code from the boot image and runtime.
+- [ ] Move blocking trusted kernel UI work out of the loop.
 - [x] Move `kernel/core/thread.c` and `sync.c` to `kernel/sched/`.
 - [ ] Replace the `thread_run(budget)` pull model with per-CPU run queues and
       preemptive switching on every CPU.
@@ -526,7 +501,7 @@ Testing:
 - [x] `run <ELF32 file>` allocates a separate page directory with supervisor
       kernel mappings, 4 KiB user pages and a user stack; it validates the ELF,
       enters ring 3 and frees the address space on return. Initial programs
-      live in `userland/bin/`; the nine native desktop apps still run in ring 0.
+      live in `userland/bin/`; the retired GUI sources in `apps/` do not run.
 - [x] Preempt i386 user execution with the PIT and resume its saved register
       frame in a later slice. Up to four processes have separate address
       spaces and kernel stacks on the BSP; `run` returns a PID immediately.
@@ -600,19 +575,18 @@ Testing:
 - [ ] Define complete public error codes and versioned structs before adding
       richer filesystem or graphical APIs; `-1` is currently the only public
       error return.
-- [ ] No kernel pointers across the boundary. Today's ABI exposes
-      `fs_node_t *`, `window_t *`, `kernel_thread_t *`, `shell_t *`,
-      `audio_decoder_t *`; replace with integer handles / file descriptors.
-- [ ] No callbacks from kernel into app code. Today's ABI takes
-      `bus_listener_fn`, `fs_io_complete_fn`, `thread_entry_fn` and
-      `app_entry_t.launch`; replace with events the process reads.
+- [x] Expose only integer descriptors, PID values and validated user buffers
+      in the active syscall ABI. The old kernel-pointer ABI source is unlinked.
+- [x] Remove app callbacks from the active desktop registry: an executable
+      pathname is the only menu launch target. Keep kernel-internal callbacks
+      limited to trusted UI code until the compositor moves to userspace.
 - [ ] **(decision)** POSIX-like syscall surface (eases porting) or a native
       one with a POSIX layer in libc.
 - [ ] Initial set: `open close read write lseek stat fstat readdir mkdir
       unlink rename`, `mmap munmap`, `spawn/exec exit wait getpid`,
       `pipe dup2`, `poll`, `clock_gettime nanosleep`, `ioctl`.
-- [ ] Delete `kernel/core/abi.c`, `kernel/include/tinos/abi.h`,
-      `native_app.h` and the fixed-slot arena once apps are processes.
+- [ ] Remove retired ABI/arena headers and sources after porting the `apps/`
+      examples; they are no longer linked, built or reserved by the boot path.
 
 ### VFS
 
@@ -699,9 +673,10 @@ Depends on Phase 2 (processes, IPC, shared memory, VT handoff).
 ### Decouple the kernel from the desktop
 
 - [ ] Remove `#include <tinos/desktop.h>`, `<tinos/ui.h>`, `<tinos/image.h>`
-      and `<tinos/codec.h>` from `kernel/main.c` and `kernel/core/abi.c`.
-- [ ] Move `parse_manifest()`, `load_icon()` and `load_native_apps()` out of
-      `kernel/main.c`; the desktop scans `/apps/*/app.conf` itself.
+      and `<tinos/codec.h>` from `kernel/main.c` as the desktop migrates.
+- [x] Remove `parse_manifest()`, `load_icon()` and `load_native_apps()` from
+      kernel boot. The desktop currently discovers plain `/apps/*.elf` paths;
+      a userspace desktop will parse versioned manifests once VFS syscalls exist.
 - [ ] `audio_codecs_init()` and `image_codecs_init()` leave `kmain()`.
 - [ ] `desktop_shutdown()` becomes a `reboot`/`poweroff` syscall.
 - [ ] Remove `desktop` and `libraries` from the kernel's `SRCS_C` and
@@ -740,8 +715,10 @@ Depends on Phase 2 (processes, IPC, shared memory, VT handoff).
       draws into one global back buffer).
 - [ ] `libraries/ui/`: move `desktop/widgets.c` and the text-input widget
       here; add an event loop and window wrapper over the protocol.
-- [ ] `desktop/registry.c`: app registry built from manifests; apps are
-      launched with `spawn`, not a `launch` function pointer.
+- [x] `desktop/registry.c`: app entries are executable paths, not `launch`
+      callbacks; all menu launches use the ring-3 `process_spawn` path.
+- [ ] Add safe, versioned userspace manifest metadata and GUI application
+      communication once the compositor client protocol exists.
 - [ ] Notifications, wallpaper and other `desktop_*` calls become protocol
       requests.
 - [ ] Starting the desktop from a TTY and exiting back to it; restart after a

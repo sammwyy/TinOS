@@ -28,7 +28,7 @@ def main():
         assert "graphics mode active" not in vm.serial()
         assert "KERNEL PANIC" not in vm.serial()
         if args.mem == 16:
-            assert "apps: loaded 9 native app(s)" in vm.serial()
+            assert "userland: imported 14 ELF32 file(s)" in vm.serial()
 
         vm.line("pwd")
         time.sleep(0.3)

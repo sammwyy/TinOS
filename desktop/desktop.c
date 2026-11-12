@@ -20,6 +20,7 @@
 #include <tinos/kernel.h>
 #include <tinos/net.h>
 #include <tinos/printf.h>
+#include <tinos/process.h>
 #include <tinos/sh.h>
 #include <tinos/string.h>
 #include <tinos/ui.h>
@@ -387,6 +388,8 @@ static void menu_rebuild_rows(void);
 
 static icon_t menu_category_icon(const char *name)
 {
+    if (strcmp(name, "Programs") == 0)
+        return ICON_FILE;
     if (strcmp(name, "Accessories") == 0)
         return ICON_FOLDER;
     if (strcmp(name, "System") == 0)
@@ -477,7 +480,7 @@ static int menu_height(void)
         if (count > app_count)
             app_count = count;
     }
-    int submenu_height = app_count * MENU_ITEM_H + 12;
+    int submenu_height = MENU_HEADER_H + 6 + app_count * MENU_ITEM_H + 8;
     if (submenu_height > height)
         height = submenu_height;
     return height + 6;
@@ -671,6 +674,23 @@ static void menu_move_app(int delta)
     menu_dirty = true;
 }
 
+static void launch_program(const app_entry_t *app)
+{
+    fs_node_t *file;
+    if (!app || !app->path ||
+        fs_resolve(fs_root(), app->path, &file) != FS_OK ||
+        file->type != FS_FILE || !file->data) {
+        desktop_notify("Executable unavailable");
+        return;
+    }
+    const char *argv[] = { app->path };
+    int pid = process_spawn(file->data, fs_size(file), 1, argv);
+    if (pid < 0)
+        desktop_notify("Cannot start %s", app->name);
+    else
+        desktop_notify("Started %s (pid %d); output on serial", app->name, pid);
+}
+
 static void menu_activate(size_t index)
 {
     if (index >= menu_row_count)
@@ -682,8 +702,7 @@ static void menu_activate(size_t index)
         menu_open = false;
         wm_invalidate_all();
         taskbar_dirty = true;
-        if (row->app && row->app->launch)
-            row->app->launch(NULL);
+        launch_program(row->app);
         break;
     case ROW_CATEGORY:
         menu_app_index = 0;
@@ -765,20 +784,6 @@ NORETURN void desktop_shutdown(bool reboot)
 
 /* Input handling */
 
-/* Each application is its own ELF, so this can only reach one by looking
- * it up in the registry, by the name shown in the start menu - same as
- * menu_activate() above. */
-static window_t *launch_named(const char *name, const char *arg)
-{
-    size_t              count;
-    const app_entry_t *apps = apps_registry(&count);
-    for (size_t i = 0; i < count; i++) {
-        if (!strcmp(apps[i].name, name))
-            return apps[i].launch(arg);
-    }
-    return NULL;
-}
-
 static bool handle_global_key(const key_event_t *ev)
 {
     /* Start menu navigation swallows keys while it is open. */
@@ -806,11 +811,11 @@ static bool handle_global_key(const key_event_t *ev)
                 const app_entry_t *apps = apps_registry(&app_count);
                 size_t app_i = cat_app_at(menu_rows[menu_index].cat,
                                           (size_t)menu_app_index);
-                if (app_i != SIZE_MAX && apps[app_i].launch) {
+                if (app_i != SIZE_MAX) {
                     menu_open = false;
                     wm_invalidate_all();
                     taskbar_dirty = true;
-                    apps[app_i].launch(NULL);
+                    launch_program(&apps[app_i]);
                 }
             } else {
                 menu_activate((size_t)menu_index);
@@ -853,16 +858,6 @@ static bool handle_global_key(const key_event_t *ev)
             wm_close(focused);
         taskbar_dirty = true;
         return true;
-    }
-    if ((ev->mods & KMOD_CTRL) && (ev->mods & KMOD_ALT)) {
-        if (ev->ch == 't' || ev->ch == 'T') {
-            launch_named("Terminal", NULL);
-            return true;
-        }
-        if (ev->ch == 'e' || ev->ch == 'E') {
-            launch_named("File Explorer", NULL);
-            return true;
-        }
     }
     return false;
 }
@@ -911,8 +906,7 @@ static void handle_mouse_event(const mouse_event_t *ev)
                         menu_open = false;
                         wm_invalidate_all();
                         taskbar_dirty = true;
-                        if (apps[app_i].launch)
-                            apps[app_i].launch(NULL);
+                        launch_program(&apps[app_i]);
                     }
                     return;
                 }
@@ -1031,6 +1025,7 @@ static bool pending_full;
 void desktop_start(void)
 {
     wm_init();
+    apps_discover();
     build_menu();
     mouse_set_bounds(gfx_width(), gfx_height());
 

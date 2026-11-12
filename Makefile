@@ -63,17 +63,15 @@ LIBGCC  := $(shell $(CC) -m32 -print-libgcc-file-name)
 # kernel/arch/$(ARCH)/drivers.mk) selects files under kernel/drivers/.
 # tests/kernel holds the in-kernel self-test.
 # Everything under kernel/arch/$(ARCH) is that target's own: CPU/platform
-# bring-up, page tables and the boot stub. apps/ is excluded entirely: every
-# application is its own freestanding ELF binary, built by apps/Makefile
-# and loaded from the ramfs at boot instead of linked into the kernel
-# image (see the "native apps" target below).
-SRCS_C := $(sort kernel/main.c \
+# bring-up, page tables and the boot stub. The retired native-app ABI is not
+# linked into the kernel; only the ELF32 userspace path can run app images.
+SRCS_C := $(filter-out kernel/core/abi.c,$(sort kernel/main.c \
                   $(shell find kernel/core kernel/sched kernel/proc kernel/syscall \
                           kernel/fs kernel/gfx kernel/lib kernel/mm \
                           kernel/net kernel/sh kernel/tty tests/kernel \
                           desktop libraries/image libraries/audio -name '*.c') \
                   $(addprefix kernel/drivers/,$(ARCH_DRIVERS)) \
-                  $(shell find kernel/arch/$(ARCH) -name '*.c'))
+                  $(shell find kernel/arch/$(ARCH) -name '*.c')))
 SRCS_S := $(sort $(shell find kernel/arch/$(ARCH) -name '*.S'))
 OBJS   := $(patsubst %.c,$(BUILD)/%.c.o,$(SRCS_C)) \
           $(patsubst %.S,$(BUILD)/%.S.o,$(SRCS_S))
@@ -162,20 +160,17 @@ $(KERNEL): $(OBJS) $(ICON_GEN_OBJ) $(ICON_GEN_STAMP) boot/linker.ld
 
 kernel: $(KERNEL)
 
-# --- native apps and the ramfs --------------------------------------
-# apps/<name>/ each build to their own package directory - an ELF plus the
-# app.conf manifest and optional icon.png next to it (own Makefile, own
-# linker script - see apps/Makefile); ramfs.tar bundles those directories
-# (everything under $(NATIVE_BUILD) except its obj/ intermediates) for
-# the TinOS loader to hand to the kernel as an initrd, which
-# kernel/fs/tar.c unpacks into /apps and kernel/proc/elf.c loads and runs
-# (see kernel/main.c's load_native_apps()).
-NATIVE_BUILD := $(BUILD)/native
-RAMFS        := $(BUILD)/ramfs.tar
+# --- isolated userspace and initrd -----------------------------------
+# Only ring-3 ELF32 programs are included. Generated native-app artifacts
+# from older builds are never read, even if they remain under build/native.
+RAMFS := $(BUILD)/ramfs.tar
+USERLAND_APPS := hello fault badptr echo fpu io df textwrite cat fdtest \
+                 spin spawn spawn_badarg multi
 
 .PHONY: native-apps
 native-apps:
-	$(MAKE) -C apps BUILD=$(abspath $(NATIVE_BUILD))
+	@echo "native ring-0 apps are disabled; port apps/ sources to userland/bin/" >&2
+	@false
 
 .PHONY: userland-apps
 userland-apps:
@@ -185,25 +180,11 @@ userland-apps:
 # --mtime/--owner/--group/--sort keep the archive's bytes independent of
 # build-machine clock and user IDs, matching the ISO's own reproducibility
 # guarantees below.
-$(RAMFS): native-apps userland-apps
+$(RAMFS): userland-apps
 	@mkdir -p $(dir $@)
-	@cp $(BUILD)/userland/hello.elf $(NATIVE_BUILD)/hello.elf
-	@cp $(BUILD)/userland/fault.elf $(NATIVE_BUILD)/fault.elf
-	@cp $(BUILD)/userland/badptr.elf $(NATIVE_BUILD)/badptr.elf
-	@cp $(BUILD)/userland/echo.elf $(NATIVE_BUILD)/echo.elf
-	@cp $(BUILD)/userland/fpu.elf $(NATIVE_BUILD)/fpu.elf
-	@cp $(BUILD)/userland/io.elf $(NATIVE_BUILD)/io.elf
-	@cp $(BUILD)/userland/df.elf $(NATIVE_BUILD)/df.elf
-	@cp $(BUILD)/userland/textwrite.elf $(NATIVE_BUILD)/textwrite.elf
-	@cp $(BUILD)/userland/cat.elf $(NATIVE_BUILD)/cat.elf
-	@cp $(BUILD)/userland/fdtest.elf $(NATIVE_BUILD)/fdtest.elf
-	@cp $(BUILD)/userland/spin.elf $(NATIVE_BUILD)/spin.elf
-	@cp $(BUILD)/userland/spawn.elf $(NATIVE_BUILD)/spawn.elf
-	@cp $(BUILD)/userland/spawn_badarg.elf $(NATIVE_BUILD)/spawn_badarg.elf
-	@cp $(BUILD)/userland/multi.elf $(NATIVE_BUILD)/multi.elf
-	@cd $(NATIVE_BUILD) && tar --format=ustar --sort=name --mtime=@0 \
+	@cd $(BUILD)/userland && tar --format=ustar --sort=name --mtime=@0 \
 		--owner=0 --group=0 --numeric-owner -cf $(abspath $@) \
-		$$(ls | grep -v '^obj$$')
+		$(addsuffix .elf,$(USERLAND_APPS))
 
 # --- BIOS El Torito ISO ------------------------------------------------
 $(BOOT_IMAGE): $(KERNEL) $(RAMFS) boot/x86/loader.asm boot/x86/build_image.py
@@ -249,6 +230,7 @@ test: $(HOST_BIN)
 	@$(HOST_BIN)
 
 check: test $(ISO)
+	python3 tests/qemu/isolation_image_test.py --kernel $(KERNEL) --initrd $(RAMFS)
 	tests/qemu/qemu_test.py --iso $(ISO)
 	python3 tests/qemu/text_mode_test.py --iso $(ISO)
 	python3 tests/qemu/text_mode_test.py --iso $(ISO) --mem 16
