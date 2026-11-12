@@ -39,9 +39,12 @@
 #define DT_FINI_ARRAYSZ 28
 #define DT_PREINIT_ARRAY 32
 #define DT_PREINIT_ARRAYSZ 33
+#define DT_GNU_HASH 0x6ffffef5
 #define DT_VERSYM 0x6ffffff0
 #define DT_VERDEF 0x6ffffffc
+#define DT_VERDEFNUM 0x6ffffffd
 #define DT_VERNEED 0x6ffffffe
+#define DT_VERNEEDNUM 0x6fffffff
 #define R_386_32 1u
 #define R_386_GLOB_DAT 6u
 #define R_386_JUMP_SLOT 7u
@@ -341,7 +344,7 @@ int dynlink_open(const char *name, user_space_t *space, dynlink_state_t *state)
 }
 
 typedef struct {
-    uint32_t strtab, strsz, symtab, syment, hash, rel, relsz, relent;
+    uint32_t strtab, strsz, symtab, syment, hash, gnu_hash, rel, relsz, relent;
     uint32_t jmprel, pltrelsz;
     uint32_t pltrel;
     uint32_t init, init_array, init_array_size;
@@ -369,6 +372,7 @@ static bool read_dynamic(uintptr_t address, size_t bytes, dynamic_info_t *info)
         case DT_SYMTAB: info->symtab = entries[i].value; break;
         case DT_SYMENT: info->syment = entries[i].value; break;
         case DT_HASH: info->hash = entries[i].value; break;
+        case DT_GNU_HASH: info->gnu_hash = entries[i].value; break;
         case DT_REL: info->rel = entries[i].value; break;
         case DT_RELSZ: info->relsz = entries[i].value; break;
         case DT_RELENT: info->relent = entries[i].value; break;
@@ -387,7 +391,9 @@ static bool read_dynamic(uintptr_t address, size_t bytes, dynamic_info_t *info)
         case DT_PREINIT_ARRAYSZ:
         case DT_VERSYM:
         case DT_VERDEF:
+        case DT_VERDEFNUM:
         case DT_VERNEED:
+        case DT_VERNEEDNUM:
             return false;
         default:
             break;
@@ -407,6 +413,79 @@ static bool string_at(const char *strings, uint32_t size, uint32_t offset,
             return true;
         }
     return false;
+}
+
+static bool dynamic_range(uintptr_t base, uint32_t offset, size_t length)
+{
+    if (base)
+        return offset < LIB_REGION_SIZE &&
+               length <= LIB_REGION_SIZE - offset;
+    return offset >= USER_BASE && offset < USER_BASE + 0x100000u &&
+           length <= USER_BASE + 0x100000u - offset;
+}
+
+static bool dynamic_symbol_count(const user_space_t *space, uintptr_t base,
+                                 const dynamic_info_t *info, uint32_t *count)
+{
+    if (info->hash) {
+        if (!dynamic_range(base, info->hash, 8) ||
+            !mapped(space, base + info->hash, 8, false))
+            return false;
+        *count = ((const uint32_t *)(base + info->hash))[1];
+        return *count > 0 && *count <= 128;
+    }
+    if (!info->gnu_hash ||
+        !dynamic_range(base, info->gnu_hash, 16) ||
+        !mapped(space, base + info->gnu_hash, 16, false))
+        return false;
+    const uint32_t *header = (const uint32_t *)(base + info->gnu_hash);
+    uint32_t buckets = header[0], first = header[1], bloom = header[2];
+    if (!buckets || buckets > 128 || !bloom || bloom > 32 ||
+        !first || first > 128)
+        return false;
+    size_t table_size = 16 + (size_t)(bloom + buckets) * sizeof(uint32_t);
+    if (!dynamic_range(base, info->gnu_hash, table_size) ||
+        !mapped(space, base + info->gnu_hash, table_size, false))
+        return false;
+    const uint32_t *bucket = (const uint32_t *)(base + info->gnu_hash +
+                                                16 + bloom * 4u);
+    uint32_t maximum = first;
+    for (uint32_t i = 0; i < buckets; i++) {
+        if (!bucket[i])
+            continue;
+        if (bucket[i] < first || bucket[i] >= 128)
+            return false;
+        bool terminated = false;
+        for (uint32_t n = bucket[i]; n < 128; n++) {
+            size_t end = table_size + ((size_t)n - first + 1) * 4u;
+            if (!dynamic_range(base, info->gnu_hash, end) ||
+                !mapped(space, base + info->gnu_hash + end - 4, 4, false))
+                return false;
+            uint32_t chain = *(const uint32_t *)(base + info->gnu_hash +
+                                                 end - 4);
+            if (n + 1 > maximum)
+                maximum = n + 1;
+            if (chain & 1u) {
+                terminated = true;
+                break;
+            }
+        }
+        if (!terminated)
+            return false;
+    }
+    /* Undefined symbols are not in GNU hash buckets; a contiguous dynsym
+     * followed by dynstr also bounds the executable's import table. */
+    if (info->strtab > info->symtab &&
+        !(info->gnu_hash > info->symtab &&
+          info->gnu_hash < info->strtab)) {
+        uint32_t bytes = info->strtab - info->symtab;
+        if (bytes % sizeof(symbol_t) == 0 &&
+            bytes / sizeof(symbol_t) >= maximum &&
+            bytes / sizeof(symbol_t) <= 128)
+            maximum = bytes / sizeof(symbol_t);
+    }
+    *count = maximum;
+    return true;
 }
 
 static bool export_symbol(const shared_library_t *library,
@@ -433,18 +512,14 @@ static bool export_symbol(const shared_library_t *library,
             return false;
         dynamic_info_t info;
         if (!read_dynamic(dyn, ph[i].filesz, &info) ||
-            !info.hash || !info.strtab || !info.symtab ||
+            (!info.hash && !info.gnu_hash) || !info.strtab || !info.symtab ||
             !info.strsz || info.strsz > 4096 ||
             info.syment != sizeof(symbol_t) ||
-            info.hash > LIB_REGION_SIZE - 8 ||
             info.strtab > LIB_REGION_SIZE - info.strsz ||
             info.symtab >= LIB_REGION_SIZE)
             return false;
-        uintptr_t hash = library->base + info.hash;
-        if (!mapped(space, hash, 8, false))
-            return false;
-        uint32_t symbols = ((const uint32_t *)hash)[1];
-        if (!symbols || symbols > 128 ||
+        uint32_t symbols = 0;
+        if (!dynamic_symbol_count(space, library->base, &info, &symbols) ||
             !mapped(space, library->base + info.strtab, info.strsz, false) ||
             !mapped(space, library->base + info.symtab,
                     symbols * sizeof(symbol_t), false))
@@ -507,15 +582,13 @@ static bool link_relocations(const program_header_t *ph, unsigned phnum,
         (info->pltrelsz && (!info->jmprel || info->pltrel != DT_REL)))
         return false;
     if (!library_range(info->strtab, info->strsz) ||
-        !library_range(info->hash, 8) ||
         !library_range(info->symtab, sizeof(symbol_t)) ||
         (info->relsz && !library_range(info->rel, info->relsz)) ||
         (info->pltrelsz && !library_range(info->jmprel, info->pltrelsz)) ||
-        !mapped(space, base + info->strtab, info->strsz, false) ||
-        !mapped(space, base + info->hash, 8, false))
+        !mapped(space, base + info->strtab, info->strsz, false))
         return false;
-    uint32_t symbols = ((const uint32_t *)(base + info->hash))[1];
-    if (!symbols || symbols > 128 ||
+    uint32_t symbols = 0;
+    if (!dynamic_symbol_count(space, base, info, &symbols) ||
         !library_range(info->symtab, symbols * sizeof(symbol_t)) ||
         !mapped(space, base + info->symtab, symbols * sizeof(symbol_t),
                 false))
@@ -657,7 +730,7 @@ static bool link_library(unsigned slot, user_space_t *space,
     dynamic_info_t info;
     if (!read_dynamic(library->base + dynamic->vaddr,
                       dynamic->filesz, &info) ||
-        !info.hash || !info.strtab || !info.symtab ||
+        (!info.hash && !info.gnu_hash) || !info.strtab || !info.symtab ||
         !info.strsz || info.strsz > 4096 ||
         info.syment != sizeof(symbol_t) ||
         !library_range(info.strtab, info.strsz) ||
@@ -702,13 +775,13 @@ bool dynlink_load(const void *image, size_t size, user_space_t *space,
     dynamic_info_t info;
     if (!read_dynamic(dynamic->vaddr, dynamic->filesz, &info) ||
         !info.needed_count || info.strsz > 4096 || !info.strsz ||
-        !info.strtab || !info.symtab || !info.hash ||
+        !info.strtab || !info.symtab || (!info.hash && !info.gnu_hash) ||
         info.syment != sizeof(symbol_t) ||
         !mapped(space, info.strtab, info.strsz, false) ||
-        !mapped(space, info.hash, 8, false))
+        !dynamic_range(0, info.symtab, sizeof(symbol_t)))
         return false;
-    uint32_t symbol_count = ((const uint32_t *)(uintptr_t)info.hash)[1];
-    if (!symbol_count || symbol_count > 128 ||
+    uint32_t symbol_count = 0;
+    if (!dynamic_symbol_count(space, 0, &info, &symbol_count) ||
         !mapped(space, info.symtab, symbol_count * sizeof(symbol_t), false))
         return false;
     const char *strings = (const char *)(uintptr_t)info.strtab;

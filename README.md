@@ -688,7 +688,9 @@ and persistent disk writes, pipes and PTYs are not yet implemented.
 **Shared libraries.** The ELF32 loader follows bounded `DT_NEEDED` chains
 and resolves `R_386_RELATIVE`, `R_386_32`, `R_386_GLOB_DAT` and
 `R_386_JUMP_SLOT` relocations in writable library pages before starting
-a process. Library code can call into another `.so` and use its own private
+a process. It accepts SysV `DT_HASH` and bounded GNU `DT_GNU_HASH` symbol
+tables, including libraries and executables linked with GNU hash alone.
+Library code can call into another `.so` and use its own private
 mutable state.
 Image Viewer and Media Player use `libtinosbmp.so` and `libtinoswav.so`
 for their userspace decoders. Programs can also call `tinos_dlopen()` and
@@ -700,7 +702,8 @@ privately. The bounded cache remains in RAM until reboot; on a system
 without an initrd, no objects are loaded. QEMU tests cover reusing a
 library at 8 and 16 MiB, private state across processes, dependency
 resolution, rejection of malformed relocation targets and missing
-dependencies, and a ring-3 write to shared code. `DT_INIT` and
+dependencies, invalid GNU hash tables, and a ring-3 write to shared code.
+`DT_INIT` and
 `DT_INIT_ARRAY` constructors run in dependency order through the TinOS
 userspace startup or `tinos_dlopen()` wrapper, never inside the kernel.
 

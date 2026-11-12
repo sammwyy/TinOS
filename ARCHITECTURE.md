@@ -145,7 +145,9 @@ can still stall this loop.
 - `kernel/proc/dynlink.c` follows bounded ELF32 `DT_NEEDED` chains,
   applies `R_386_RELATIVE`, `R_386_32`, `R_386_GLOB_DAT` and
   `R_386_JUMP_SLOT` only to private writable pages, and offers
-  `dlopen`/`dlsym`. Cyclic dependencies and invalid relocation targets fail
+  `dlopen`/`dlsym`. SysV `DT_HASH` and bounded GNU `DT_GNU_HASH` tables
+  support eager symbol lookup. Cyclic dependencies, invalid hash tables
+  and invalid relocation targets fail
   loading. At most eight 64 KiB ET_DYN objects occupy distinct user regions.
   `kernel/arch/x86/paging.c` maps their cached read-only physical frames
   into each process and gives each process private writable pages. Code

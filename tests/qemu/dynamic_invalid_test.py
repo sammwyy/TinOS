@@ -48,6 +48,18 @@ def invalid_initializer(image):
             return image
     raise AssertionError("library has no initializer array")
 
+def invalid_gnu_hash(image):
+    headers = list(program_headers(image))
+    dynamic = next(ph for ph in headers if ph[0] == 2)
+    gnu_hash = next(value for tag, value in struct.iter_unpack(
+        "<II", image[dynamic[1]:dynamic[1] + dynamic[4]])
+        if tag == 0x6ffffef5)
+    segment = next(ph for ph in headers if ph[0] == 1 and
+                   ph[2] <= gnu_hash and gnu_hash - ph[2] + 16 <= ph[4])
+    offset = segment[1] + gnu_hash - segment[2]
+    struct.pack_into("<I", image, offset, 0xffffffff)
+    return image
+
 
 def boot_variant(source, kernel, loader, mode, temp):
     archive_path = temp / "ramfs.tar"
@@ -55,7 +67,9 @@ def boot_variant(source, kernel, loader, mode, temp):
             archive_path, "w", format=tarfile.USTAR_FORMAT) as output:
         for member in archive:
             data = archive.extractfile(member).read()
-            if member.name == "lib/libtinoschain.so":
+            if member.name == "lib/libtinostate.so" and mode == "hash":
+                data = invalid_gnu_hash(bytearray(data))
+            elif member.name == "lib/libtinoschain.so" and mode != "hash":
                 modified = bytearray(data)
                 if mode == "relocation":
                     data = invalid_relocation(modified)
@@ -106,11 +120,12 @@ def main():
     parser.add_argument("--initrd", default="build/ramfs.tar")
     parser.add_argument("--loader", default="boot/x86/loader.asm")
     args = parser.parse_args()
-    for mode in ("relocation", "dependency", "initializer"):
+    for mode in ("relocation", "dependency", "initializer", "hash"):
         with tempfile.TemporaryDirectory(prefix="tinos-invalid-so-") as path:
             boot_variant(args.initrd, pathlib.Path(args.kernel),
                          pathlib.Path(args.loader), mode, pathlib.Path(path))
-    print("invalid library relocation, dependency and initializer rejected: OK")
+    print("invalid library relocation, dependency, initializer and "
+          "GNU hash rejected: OK")
 
 
 if __name__ == "__main__":

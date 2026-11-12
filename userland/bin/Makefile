@@ -37,7 +37,7 @@ $(LIB_BUILD)/libtinostate.so $(LIB_BUILD)/libtinoschain.so &: \
     $(wildcard $(ROOT)/userland/lib/include/tinos/*.h)
 	$(MAKE) -C $(ROOT)/userland/lib
 
-$(BUILD)/%.o: %.c
+$(BUILD)/%.o: %.c Makefile
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -77,9 +77,9 @@ $(BUILD)/gui/media_player.elf: $(BUILD)/media_player.o \
 		$(LIBC_BUILD)/libtinos.a -L$(LIB_BUILD) -ltinoswav
 
 $(BUILD)/chainprobe.elf: $(BUILD)/chainprobe.o $(LIBC_BUILD)/crt0.o \
-    $(LIBC_BUILD)/libtinos.a $(LIB_BUILD)/libtinoschain.so link.ld
+    $(LIBC_BUILD)/libtinos.a $(LIB_BUILD)/libtinoschain.so link.ld Makefile
 	$(LD) -m elf_i386 -nostdlib -z noexecstack -z now --build-id=none \
-		--no-dynamic-linker --hash-style=sysv -rpath-link $(LIB_BUILD) \
+		--no-dynamic-linker --hash-style=gnu -rpath-link $(LIB_BUILD) \
 		-T link.ld -o $@ \
 		$(LIBC_BUILD)/crt0.o $(BUILD)/chainprobe.o \
 		$(LIBC_BUILD)/libtinos.a -L$(LIB_BUILD) -ltinoschain

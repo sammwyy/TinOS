@@ -85,6 +85,9 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
 - [x] Execute bounded `DT_INIT`/`DT_INIT_ARRAY` constructors from TinOS
       `crt0` or `dlopen` in ring 3, after relocating dependencies, with
       malformed initializer rejection and 8/16 MiB tests.
+- [x] Resolve ELF32 symbols with either bounded SysV `DT_HASH` or GNU
+      `DT_GNU_HASH`; test GNU-only shared objects and executables and reject
+      malformed GNU hash tables without a kernel fault.
 - [ ] Extend the dynamic ABI with ring-3 destructors, TLS,
       symbol versions, optional unload and more flexible address-space
       allocation. Reject unsupported ELF metadata instead of skipping it.

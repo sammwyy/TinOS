@@ -11,26 +11,26 @@ LIBS := $(BUILD)/libtinosbmp.so $(BUILD)/libtinoswav.so \
 .PHONY: all
 all: $(LIBS)
 
-$(BUILD)/%.o: %.c
+$(BUILD)/%.o: %.c Makefile
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD)/libtinosbmp.so: $(BUILD)/bmp.o
+$(BUILD)/libtinosbmp.so: $(BUILD)/bmp.o Makefile
 	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
 		--hash-style=sysv --build-id=none -soname libtinosbmp.so \
 		-o $@ $<
 
-$(BUILD)/libtinoswav.so: $(BUILD)/wav.o
+$(BUILD)/libtinoswav.so: $(BUILD)/wav.o Makefile
 	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
 		--hash-style=sysv --build-id=none -soname libtinoswav.so \
 		-o $@ $<
 
-$(BUILD)/libtinostate.so: $(BUILD)/state.o
+$(BUILD)/libtinostate.so: $(BUILD)/state.o Makefile
 	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
-		--hash-style=sysv --build-id=none -soname libtinostate.so \
+		--hash-style=gnu --build-id=none -soname libtinostate.so \
 		-o $@ $<
 
-$(BUILD)/libtinoschain.so: $(BUILD)/chain.o $(BUILD)/libtinostate.so
+$(BUILD)/libtinoschain.so: $(BUILD)/chain.o $(BUILD)/libtinostate.so Makefile
 	$(LD) -m elf_i386 -shared -nostdlib -z noexecstack -z now \
 		--hash-style=sysv --build-id=none -soname libtinoschain.so \
 		-o $@ $(BUILD)/chain.o -L$(BUILD) -ltinostate
