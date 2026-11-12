@@ -1,18 +1,17 @@
 #include <tinos/arch.h>
-#include <tinos/async.h>
-#include <tinos/audio.h>
-#include <tinos/bus.h>
 #include <tinos/console.h>
 #include <tinos/fs.h>
 #include <tinos/input.h>
 #include <tinos/kernel.h>
 #include <tinos/process.h>
 #include <tinos/sh.h>
-#include <tinos/thread.h>
-#include <tinos/timer.h>
 #include <tinos/tty.h>
 
 #define TTY_LINE_MAX 512
+
+static shell_t *tty_shell;
+static char tty_line[TTY_LINE_MAX];
+static size_t tty_line_length;
 
 static void tty_prompt(shell_t *sh)
 {
@@ -55,59 +54,52 @@ static bool tty_execute(shell_t *sh, const char *line)
     return false;
 }
 
-void tty_run(void)
+void tty_start(void)
 {
-    shell_t *sh = shell_create("/");
-    if (!sh)
+    tty_shell = shell_create("/");
+    if (!tty_shell)
         panic("cannot allocate text shell");
+    tty_line_length = 0;
 
     vga_text_clear();
     vga_text_write("TinOS text console\nType 'help' for commands or 'desktop' for graphics.\n\n");
     klog("[tty] text console ready\n");
-    tty_prompt(sh);
+    tty_prompt(tty_shell);
+}
 
-    char line[TTY_LINE_MAX];
-    size_t len = 0;
-    for (;;) {
-        audio_poll();
-        bus_dispatch(16);
-        async_run(8);
-        thread_run(8);
-        process_schedule();
-        fs_io_poll();
-        ktimer_poll(4);
-
-        key_event_t key;
-        while (keyboard_poll(&key)) {
-            if ((key.mods & KMOD_CTRL) && (key.ch == 'c' || key.ch == 'C')) {
-                vga_text_write("^C\n");
-                process_cancel_input();
-                len = 0;
-                tty_prompt(sh);
-            } else if (process_feed_key(&key)) {
-                continue;
-            } else if (key.code == KEY_BACKSPACE) {
-                if (len) {
-                    len--;
-                    vga_text_putc('\b');
-                }
-            } else if (key.code == KEY_ENTER) {
-                line[len] = '\0';
-                vga_text_putc('\n');
-                if (tty_execute(sh, line)) {
-                    shell_destroy(sh);
-                    klog("[tty] starting desktop\n");
-                    return;
-                }
-                len = 0;
-                tty_prompt(sh);
-            } else if (key.ch >= ' ' && key.ch <= '~' &&
-                       len + 1 < sizeof(line)) {
-                line[len++] = key.ch;
-                vga_text_putc(key.ch);
+bool tty_step(void *context)
+{
+    UNUSED(context);
+    key_event_t key;
+    while (keyboard_poll(&key)) {
+        if ((key.mods & KMOD_CTRL) && (key.ch == 'c' || key.ch == 'C')) {
+            vga_text_write("^C\n");
+            process_cancel_input();
+            tty_line_length = 0;
+            tty_prompt(tty_shell);
+        } else if (process_feed_key(&key)) {
+            continue;
+        } else if (key.code == KEY_BACKSPACE) {
+            if (tty_line_length) {
+                tty_line_length--;
+                vga_text_putc('\b');
             }
+        } else if (key.code == KEY_ENTER) {
+            tty_line[tty_line_length] = '\0';
+            vga_text_putc('\n');
+            if (tty_execute(tty_shell, tty_line)) {
+                shell_destroy(tty_shell);
+                tty_shell = NULL;
+                klog("[tty] starting desktop\n");
+                return true;
+            }
+            tty_line_length = 0;
+            tty_prompt(tty_shell);
+        } else if (key.ch >= ' ' && key.ch <= '~' &&
+                   tty_line_length + 1 < sizeof(tty_line)) {
+            tty_line[tty_line_length++] = key.ch;
+            vga_text_putc(key.ch);
         }
-
-        arch_idle();
     }
+    return false;
 }

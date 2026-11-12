@@ -10,8 +10,6 @@
  */
 
 #include <tinos/arch.h>
-#include <tinos/audio.h>
-#include <tinos/async.h>
 #include <tinos/bus.h>
 #include <tinos/desktop.h>
 #include <tinos/fs.h>
@@ -22,12 +20,9 @@
 #include <tinos/kernel.h>
 #include <tinos/net.h>
 #include <tinos/printf.h>
-#include <tinos/process.h>
 #include <tinos/sh.h>
 #include <tinos/string.h>
 #include <tinos/ui.h>
-#include <tinos/thread.h>
-#include <tinos/timer.h>
 
 #define MENU_WIDTH      160
 #define MENU_SUBMENU_W  220
@@ -1029,9 +1024,11 @@ static void composite(bool full)
         draw_notification();
 }
 
-/* Event loop */
+/* Display state shared by successive kernel loop ticks. */
+static uint64_t last_frame;
+static bool pending_full;
 
-void desktop_run(void)
+void desktop_start(void)
 {
     wm_init();
     build_menu();
@@ -1047,91 +1044,79 @@ void desktop_run(void)
     gfx_present();
     cursor_restore();
 
-    uint64_t last_frame   = 0;
-    bool     pending_full = false;
+    last_frame = 0;
+    pending_full = false;
+}
 
-    for (;;) {
-        bool dirty = false;
+bool desktop_step(void *context)
+{
+    UNUSED(context);
+    bool dirty = false;
+    int mx, my;
 
-        audio_poll();
-        bus_dispatch(16);
-
-        /* Future network/storage workers execute outside interrupt context.
-         * The budget prevents one busy subsystem from starving the GUI. */
-        async_run(8);
-        /* Storage workers are deliberately limited to one cooperative slice
-         * per frame.  A USB/FAT operation may be slow, so several resumptions
-         * here would make the desktop appear frozen even though interrupts
-         * remain enabled. */
-        thread_run(8);
-        process_schedule();
-        fs_io_poll();
-        ktimer_poll(4);
-
-        /* Keyboard */
-        key_event_t key;
-        while (keyboard_poll(&key)) {
-            if (handle_global_key(&key))
-                dirty = true;
-            else if (wm_handle_key(&key))
-                dirty = true;
-        }
-
-        /* Mouse */
-        mouse_event_t mouse;
-        bool          moved = false;
-        while (mouse_poll(&mouse)) {
-            handle_mouse_event(&mouse);
-            moved = true;
-        }
-
-        /* Application ticks */
-        for (window_t *w = wm_bottom(); w; w = w->above)
-            if (w->cls->on_tick && w->cls->on_tick(w)) {
-                wm_invalidate(w);
-                dirty = true;
-            }
-
-        /* Clock */
-        uint32_t second = (uint32_t)(timer_ticks() / 1000);
-        if (second != last_clock_second) {
-            last_clock_second = second;
-            taskbar_dirty     = true;
-            dirty             = true;
-        }
-
-        /* Notification expiry */
-        if (notification[0] && timer_ticks() > notification_until) {
-            notification[0] = '\0';
-            wm_invalidate_all();
+    /* Keyboard */
+    key_event_t key;
+    while (keyboard_poll(&key)) {
+        if (handle_global_key(&key))
             dirty = true;
-        }
-
-        /* A full repaint may be requested in a frame we end up skipping, so
-         * the request has to survive until we actually draw. */
-        pending_full |= wm_take_full_redraw();
-        if (wm_any_dirty() || taskbar_dirty || menu_dirty)
+        else if (wm_handle_key(&key))
             dirty = true;
-
-        uint64_t now = timer_ticks();
-        if ((dirty || moved) && now - last_frame >= 15) {
-            last_frame = now;
-
-            /* Repair the area the cursor covered in the previous frame. */
-            if (!rect_empty(cursor_rect))
-                gfx_mark_dirty(cursor_rect.x, cursor_rect.y, cursor_rect.w,
-                               cursor_rect.h);
-            if (dirty || pending_full) {
-                composite(pending_full);
-                pending_full = false;
-            }
-
-            mouse_get_position(&mx, &my);
-            cursor_save_and_draw(mx, my);
-            gfx_present();
-            cursor_restore();
-        }
-
-        arch_idle();
     }
+
+    /* Mouse */
+    mouse_event_t mouse;
+    bool moved = false;
+    while (mouse_poll(&mouse)) {
+        handle_mouse_event(&mouse);
+        moved = true;
+    }
+
+    /* Application ticks */
+    for (window_t *w = wm_bottom(); w; w = w->above)
+        if (w->cls->on_tick && w->cls->on_tick(w)) {
+            wm_invalidate(w);
+            dirty = true;
+        }
+
+    /* Clock */
+    uint32_t second = (uint32_t)(timer_ticks() / 1000);
+    if (second != last_clock_second) {
+        last_clock_second = second;
+        taskbar_dirty     = true;
+        dirty             = true;
+    }
+
+    /* Notification expiry */
+    if (notification[0] && timer_ticks() > notification_until) {
+        notification[0] = '\0';
+        wm_invalidate_all();
+        dirty = true;
+    }
+
+    /* A full repaint may be requested in a frame we end up skipping, so
+     * the request has to survive until we actually draw. */
+    pending_full |= wm_take_full_redraw();
+    if (wm_any_dirty() || taskbar_dirty || menu_dirty)
+        dirty = true;
+
+    uint64_t now = timer_ticks();
+    if ((dirty || moved) && now - last_frame >= 15) {
+        last_frame = now;
+
+        /* Repair the area the cursor covered in the previous frame. */
+        if (!rect_empty(cursor_rect))
+            gfx_mark_dirty(cursor_rect.x, cursor_rect.y, cursor_rect.w,
+                           cursor_rect.h);
+        if (dirty || pending_full) {
+            composite(pending_full);
+            pending_full = false;
+        }
+
+        mouse_get_position(&mx, &my);
+        cursor_save_and_draw(mx, my);
+        gfx_present();
+        cursor_restore();
+    }
+
+    return false;
 }

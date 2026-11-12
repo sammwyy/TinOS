@@ -57,11 +57,11 @@ TinOS BIOS loader (boot/x86/loader.asm, El Torito boot image)
        PS/2 keyboard + mouse, ATA PIO, tmpfs root, FAT mounts
        load_native_apps(): untar ramfs into /apps, ELF-load and call each app_main()
        PCI scan, driver binding (e1000, virtio-blk, AC'97), UHCI, network + DHCP
-       if tinos.mode=text: tty_run() on VGA; run executes ELF32 in ring 3
+       if tinos.mode=text: tty_start(); kernel_loop_run(tty_step)
        desktop command resumes kmain
        try gfx_init(1024x768, 800x600, 640x480)
-       if no supported mode or not enough RAM: tty_run() on VGA
-       otherwise: VGA text disabled; desktop_run() <- never returns
+       if no supported mode or not enough RAM: tty_start(); kernel_loop_run(tty_step)
+       otherwise: VGA text disabled; desktop_start(); kernel_loop_run(desktop_step)
 ```
 
 The text console runs the existing in-kernel shell without the graphics
@@ -90,8 +90,8 @@ Floating-point instructions trap until per-process FPU state exists.
 |-------------|---------------------------------------|-------|
 | Arch        | `kernel/arch/x86/`                    | boot stub, GDT, IDT, ISR stubs, PIC, PIT, RTC, CPUID, paging, PMM, ACPI, LAPIC, SMP trampoline, context switch |
 | Core        | `kernel/core/`                        | spinlocks, async state machines, timers, event bus, driver model, logging, panic, app ABI table |
-| Scheduling  | `kernel/sched/`                       | kernel threads, mutexes/events |
-| Loader      | `kernel/proc/`                        | native and ring-3 ELF loaders, synchronous process lifecycle |
+| Scheduling  | `kernel/sched/`                       | kernel loop, threads, mutexes/events |
+| Loader      | `kernel/proc/`                        | native and ring-3 ELF loaders, asynchronous process lifecycle |
 | Syscalls    | `kernel/syscall/`, `kernel/include/uapi/tinos/` | `int 0x80` ABI, user pointer validation |
 | Userspace   | `libraries/libc/`, `userland/bin/`   | freestanding crt0, syscall stubs and ELF32 command-line programs |
 | Memory      | `kernel/mm/`                          | first-fit coalescing heap, DMA buffers |
@@ -104,17 +104,19 @@ Floating-point instructions trap until per-process FPU state exists.
 
 ### 1.4 Scheduling
 
-Kernel threads have private stacks and are preemptible from the PIT, but they
-are not driven by an independent scheduler loop:
+Kernel threads have private stacks and are preemptible from the PIT. On the
+boot processor, `kernel/sched/loop.c` owns the idle loop and pumps bounded
+audio, bus, async, thread, process, filesystem and timer work before calling
+an optional UI tick. `tty_step()` and `desktop_step()` handle only their
+respective input and display state; the same loop advances workers when no
+UI callback is installed. The boot flow changes from text to graphics by
+returning from the text loop and starting the desktop loop.
 
-- On the boot processor, threads run when the **desktop event loop** or
-  **text console loop** calls `thread_run(8)` (`desktop/desktop.c` or
-  `kernel/tty/tty.c`).
-- The same loops call `process_schedule()`. It runs one READY ring-3 job at
-  a time for at most 5 ms. PIT interrupts save the user register frame
-  and resume the kernel loop; a syscall that reaches the deadline also
-  yields before returning to ring 3. Each job retains its address space
-  and kernel stack across slices. Jobs cannot run on application processors.
+- The loop calls `process_schedule()` for one READY ring-3 job at a time
+  for at most 5 ms. PIT interrupts save the user register frame and resume
+  the kernel loop; a syscall that reaches the deadline also yields before
+  returning to ring 3. Each job retains its address space and kernel stack
+  across slices. Jobs cannot run on application processors.
 - On application processors, `smp.c:ap_entry()` loops on `thread_run(4)`.
 - The BSP can preempt ring-3 jobs while an AP runs kernel workers; APs do not
   enter ring 3 until they have their own TSS and privilege-transition stack.
@@ -124,9 +126,9 @@ are not driven by an independent scheduler loop:
 - `thread_spawn_pinned()` restricts a thread to the boot processor because the
   filesystem and network stack have no SMP-safe locking.
 
-Consequence: kernel and user scheduling on the boot processor still depend on
-an active TTY or desktop event loop. A kernel-owned idle/scheduler loop is
-needed before either UI can stop driving the system.
+The loop still uses budgeted pull scheduling on the BSP, not per-CPU run
+queues. UI callbacks and legacy native apps remain ring 0: a callback that
+never returns can still stall this loop.
 
 ### 1.5 Desktop, libraries and applications
 
@@ -162,7 +164,7 @@ needed before either UI can stop driving the system.
 ```
 apps  ->  kernel headers + desktop headers + library headers  (via ABI table)
 kernel/core/abi.c  ->  desktop, libraries/image, libraries/audio, kernel/sh
-kernel/main.c      ->  desktop_run(), image_decode(), app manifest parsing
+kernel/main.c      ->  desktop_start()/kernel_loop_run(), image_decode(), app manifest parsing
 desktop            ->  kernel internals (gfx, fs, net, threads, input, shell)
 ```
 

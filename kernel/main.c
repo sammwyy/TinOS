@@ -35,6 +35,7 @@
 #include <tinos/boot_info.h>
 #include <tinos/pci.h>
 #include <tinos/printf.h>
+#include <tinos/runloop.h>
 #include <tinos/selftest.h>
 #include <tinos/smp.h>
 #include <tinos/string.h>
@@ -480,8 +481,10 @@ void kmain(uint32_t magic, uint32_t info_addr)
               (uint32_t)device_count(), (uint32_t)bound);
     boot_note("net: %s", network ? "dhcp configured" : "unavailable");
 
-    if (strstr(boot_cmdline, "tinos.mode=text"))
-        tty_run();
+    if (strstr(boot_cmdline, "tinos.mode=text")) {
+        tty_start();
+        kernel_loop_run(tty_step, NULL);
+    }
 
     boot_note("mm: %u KiB free before graphics",
               (uint32_t)(pmm_free_bytes() / 1024));
@@ -509,13 +512,15 @@ void kmain(uint32_t magic, uint32_t info_addr)
             break;
 
         boot_fail("no supported framebuffer mode or insufficient RAM");
-        tty_run();
+        tty_start();
+        kernel_loop_run(tty_step, NULL);
     }
     vga_text_disable(); /* text console memory is no longer displayed */
     klog("[boot] graphics mode active, entering desktop\n");
 
     /* Desktop */
-    desktop_run();
+    desktop_start();
+    kernel_loop_run(desktop_step, NULL);
 
-    panic("desktop_run() returned unexpectedly");
+    panic("desktop loop returned unexpectedly");
 }

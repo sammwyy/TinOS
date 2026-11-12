@@ -5,8 +5,8 @@
 #include <tinos/kernel.h>
 #include <tinos/types.h>
 
-/* Runs the desktop event loop; never returns. */
-void desktop_run(void);
+void desktop_start(void);
+bool desktop_step(void *context);
 
 /* Paints a farewell screen and then resets or powers off the machine. */
 NORETURN void desktop_shutdown(bool reboot);

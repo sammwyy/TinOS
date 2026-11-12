@@ -547,17 +547,18 @@ rather than three megabytes.
 fall out naturally - and it is why the whole shell and filesystem can be
 compiled natively and unit-tested on the host.
 
-**The desktop and text shell remain kernel services.** Their event loops
-poll the kernel's workers and preemptible threads. The new ring-3 programs
-run synchronously: the caller waits for an `exit` or a user-mode exception.
-A CPU-bound userspace program can still stall the session; a process
-scheduler, waitable handles and services in userspace remain future work.
+**The desktop and text shell remain kernel services.** A kernel-owned loop
+advances workers and preemptible ring-3 programs before calling an optional
+TTY or desktop tick. A CPU-bound userspace program cannot monopolize the
+console, and a keyboard read parks only its caller. Legacy ring-0 apps and
+UI callbacks can still block the loop if they never return; per-CPU run
+queues and userspace services remain future work.
 
 **Asynchronous workers and kernel threads.** `kernel/core/async.c` provides a
 stackless state-machine API for short operations, while `kernel/sched/thread.c`
 and `kernel/arch/x86/context.S` provide real kernel threads with private
 stacks. Async tasks and threads are both run outside interrupt handlers, and
-the desktop gives each subsystem a bounded scheduling budget. Threads can
+the kernel loop gives each subsystem a bounded scheduling budget. Threads can
 call `thread_yield()`, `thread_sleep()` and `thread_exit()`; networking can
 therefore use a blocking-looking worker API without blocking the GUI. The PIT
 can preempt a running worker, while explicit yields and blocking calls
@@ -592,7 +593,7 @@ the boot processor's own flat GDT, enters 32-bit protected mode, and calls
 into `smp.c:ap_entry()`, which activates the shared identity-mapped page
 directory, enables its own FPU/SSE, loads the shared IDT, brings up its
 own local APIC, and then runs `thread_run()` in a loop forever, pulling
-work from the same `threads[]` pool the boot processor's desktop tick
+work from the same `threads[]` pool the boot processor's kernel loop
 does. `kernel/core/spinlock.c` gives the scheduler (and the heap and the
 physical frame allocator, both former `irq_save()`-only critical sections
 that a second core running concurrently would have raced) real cross-core
@@ -729,13 +730,13 @@ make check     # the above plus the scripted QEMU boot/GUI session
 * The filesystem is session-oriented: imported FAT volumes are read-only and
   the writable base tree is not persisted back to disk.
 * There are no user accounts or permissions, userspace signals or kill syscall,
-  independently scheduled kernel idle loop,
+  per-CPU run queues,
   NTFS support, or USB host controllers beyond the current UHCI path.
   The ring-3 syscall ABI has console I/O, read-only access to memory-backed
   files, `getpid`, `spawn`, `wait`, and `exit`; it has no writable files or
-  graphical APIs. Up to four processes share the boot processor while the
-  kernel's TTY or desktop event loop runs. Ring-3 floating-point instructions
-  currently trap; an independent FPU context is still pending.
+  graphical APIs. Up to four processes share the boot processor while its
+  kernel-owned loop runs. Ring-3 floating-point instructions currently trap;
+  an independent FPU context is still pending.
 * The RTC is read directly, so the taskbar clock follows the host clock via
   `-rtc base=localtime`; without that flag QEMU reports UTC.
 * Only the Bochs/QEMU DISPI graphics interface is supported. On hardware or

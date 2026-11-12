@@ -198,14 +198,15 @@ graphics; this is not yet a claim of support for arbitrary PCs.
 
 ### Scheduler independent of the desktop
 
-- [x] The text console drives the existing thread, async and timer pollers
-      without starting graphics (`kernel/tty/tty.c`).
+- [x] The text console runs without starting graphics; kernel services no
+      longer depend on its input loop (`kernel/sched/loop.c`).
 - [x] Commit the state of the worker that actually returns to the scheduler
       after PIT preemption, not the worker originally dispatched. The
-      boot-menu kernel self-test exercises this transition (196 checks).
-- [ ] The boot processor still only runs threads when the desktop or text
-      console polls `thread_run(8)`. Add a kernel-owned idle/scheduler loop
-      independent of either UI.
+      boot-menu kernel self-test exercises this transition.
+- [x] Add a kernel-owned scheduler/idle loop on the boot processor, with
+      bounded service polling and an optional TTY/desktop tick. The boot-menu
+      self-test runs a worker through the loop without either UI.
+- [ ] Move blocking legacy ring-0 UI/native app work out of the loop.
 - [x] Move `kernel/core/thread.c` and `sync.c` to `kernel/sched/`.
 - [ ] Replace the `thread_run(budget)` pull model with per-CPU run queues and
       preemptive switching on every CPU.
@@ -537,9 +538,11 @@ Testing:
       syscall or burns a time slice polling for the next character.
 - [ ] Replace the single stdin owner with a TTY line discipline and
       process-group/foreground-job policy, including backspace and raw mode.
-- [ ] Move scheduling and idle handling out of the TTY/desktop event loops.
-      Both currently call `process_schedule()`; user jobs do not yet have a
-      kernel-owned run queue, wait queue, or scheduling on an AP.
+- [x] Move scheduling and idle handling out of the TTY/desktop event loops
+      into `kernel/sched/loop.c`, so both interfaces can be replaced without
+      replacing the scheduler.
+- [ ] Add kernel-owned run/wait queues and schedule user jobs on APs after
+      per-CPU privilege-transition stacks and locking are in place.
 - [x] Add parent-child relationships and `getpid`, `spawn`, `wait` syscalls.
       Parents wait without blocking the kernel, child statuses are retained
       until wait, and exiting parents orphan their children to the kernel.
@@ -682,7 +685,8 @@ Testing:
       desktop IPC requests.
 - [x] `tinos.mode=text` boots an interactive VGA shell, and its `desktop`
       command starts the existing graphical session (still ring 0).
-- [ ] `kmain()` ends by starting `init`, not `desktop_run()`.
+- [ ] `kmain()` ends by starting `init`, rather than entering the desktop's
+      kernel loop directly.
 - [ ] Complete kernel command line parsing for `tinos.mode=text|desktop`,
       `init=`, `root=`; current text mode checks for a substring.
 

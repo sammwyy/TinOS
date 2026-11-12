@@ -17,6 +17,7 @@
 #include <tinos/mm.h>
 #include <tinos/path.h>
 #include <tinos/queue.h>
+#include <tinos/runloop.h>
 #include <tinos/selftest.h>
 #include <tinos/sh.h>
 #include <tinos/string.h>
@@ -143,6 +144,26 @@ static void test_threads(void)
           "thread exits and releases its stack");
     check(thread && thread_join(thread) == 0,
           "thread_join reaps a completed thread");
+}
+
+static void loop_probe_entry(void *arg)
+{
+    *(volatile uint32_t *)arg = 1;
+}
+
+static void test_kernel_loop(void)
+{
+    volatile uint32_t progressed = 0;
+    kernel_thread_t *worker = thread_spawn_pinned("loop-selftest",
+                                                  loop_probe_entry,
+                                                  (void *)&progressed);
+    check(worker != NULL, "kernel loop test starts a worker");
+    if (!worker)
+        return;
+    check(!kernel_loop_step(NULL, NULL) && progressed == 1,
+          "kernel loop schedules workers without a console or desktop");
+    if (progressed)
+        check(thread_join(worker) == 0, "kernel loop worker is reaped");
 }
 
 static void test_sync_and_queue(void)
@@ -333,6 +354,7 @@ int selftest_run(void)
 
     test_heap();
     test_threads();
+    test_kernel_loop();
     test_sync_and_queue();
     test_preemption();
     test_paths();
