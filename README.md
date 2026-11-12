@@ -55,8 +55,9 @@ kernel memory. `run` returns to the shell with a PID immediately; `jobs`
 lists processes, `kill <pid>` stops a running process, and `reap <pid>` collects
 its exit status. The PIT preempts ring-3 CPU loops every 5 ms, so even
 `run /apps/spin.elf` does not block the console. A process reading from the
-keyboard receives input until it exits; Ctrl+C stops that reader. The
-desktop and nine existing native apps remain kernel-linked/ring 0.
+keyboard sleeps until a key arrives without busy-polling or blocking the
+kernel; Ctrl+C stops that reader. The desktop and nine existing native apps
+remain kernel-linked/ring 0.
 
 With 16 MiB of QEMU RAM the text console and graphical desktop load the
 bundled apps. An 8 MiB graphical boot runs at 640x480 with the app archive.

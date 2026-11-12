@@ -59,8 +59,10 @@ void syscall_dispatch(regs_t *frame)
             frame->eax = (uint32_t)-1;
             return;
         }
-        frame->eax = (uint32_t)process_read_console(
-            (char *)(uintptr_t)frame->ecx);
+        int result = process_read_console((char *)(uintptr_t)frame->ecx);
+        if (result == PROCESS_INPUT_WAIT)
+            process_block_console(frame);
+        frame->eax = (uint32_t)result;
         return;
     }
     case TINOS_SYS_WRITE:

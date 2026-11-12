@@ -69,11 +69,14 @@ From the VGA text console, `run` loads a validated ELF32 into a fresh
 address space, copies arguments onto the user stack, assigns a PID and
 returns to the prompt. Each process has a 16 KiB kernel stack for its
 BSP TSS transitions. Its mapped pages and open-file snapshots are freed on
-exit; `jobs` can inspect its status until `reap` collects it. User faults
+exit; `jobs` can inspect its status until `reap` collects it or a full table
+reuses an exited slot. User faults
 terminate only the affected process. `int 0x80` validates mapped user
 buffers, copies pathnames into the kernel and reads file data through a
-kernel bounce buffer. Keyboard reads return `TINOS_ERR_AGAIN` instead of
-blocking the kernel; the TTY forwards input to a process waiting for stdin.
+kernel bounce buffer. A keyboard read parks the calling process in BLOCKED
+state and saves its syscall frame. A key wakes the process and completes
+the read without blocking the kernel. The TTY forwards input to the reader
+until it exits or Ctrl+C cancels it.
 Floating-point instructions trap until per-process FPU state exists.
 
 ### 1.3 Kernel subsystems

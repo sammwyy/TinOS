@@ -1237,6 +1237,7 @@ static int cmd_jobs(shell_t *sh, int argc, char **argv, stream_t *in,
     size_t count = process_list(jobs, PROCESS_MAX);
     for (size_t i = 0; i < count; i++) {
         const char *state = jobs[i].state == PROCESS_EXITED ? "exited" :
+                            jobs[i].state == PROCESS_BLOCKED ? "blocked" :
                             jobs[i].state == PROCESS_RUNNING ? "running" : "ready";
         stream_printf(out, "%u %s", jobs[i].pid, state);
         if (jobs[i].state == PROCESS_EXITED)

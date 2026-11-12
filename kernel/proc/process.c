@@ -11,7 +11,6 @@
 #include <tinos/string.h>
 #include <tinos/thread.h>
 #include <tinos/user_vm.h>
-#include <uapi/tinos/syscall.h>
 
 extern int arch_enter_user(uintptr_t entry, uintptr_t stack);
 extern int arch_resume_user(const regs_t *frame);
@@ -40,6 +39,7 @@ typedef struct {
     int status;
     bool started;
     bool wants_input;
+    uintptr_t blocked_address;
     uint64_t deadline;
     char input[PROCESS_INPUT_SIZE];
     unsigned input_head, input_tail;
@@ -73,7 +73,8 @@ bool process_user_buffer(uintptr_t address, size_t length, bool writable)
 bool process_wants_input(void)
 {
     for (size_t i = 0; i < PROCESS_MAX; i++)
-        if (processes[i].state == PROCESS_READY &&
+        if ((processes[i].state == PROCESS_READY ||
+             processes[i].state == PROCESS_BLOCKED) &&
             processes[i].wants_input)
             return true;
     return false;
@@ -83,7 +84,8 @@ bool process_feed_key(const key_event_t *key)
 {
     for (size_t i = 0; i < PROCESS_MAX; i++) {
         process_t *p = &processes[i];
-        if (p->state != PROCESS_READY || !p->wants_input)
+        if ((p->state != PROCESS_READY && p->state != PROCESS_BLOCKED) ||
+            !p->wants_input)
             continue;
         char ch = key->code == KEY_ENTER ? '\n' : key->ch;
         if (ch) {
@@ -92,6 +94,9 @@ bool process_feed_key(const key_event_t *key)
                 p->input[p->input_tail] = ch;
                 p->input_tail = next;
             }
+            if (p->state == PROCESS_BLOCKED &&
+                p->input_head != p->input_tail)
+                p->state = PROCESS_READY;
         }
         return true;
     }
@@ -104,10 +109,19 @@ int process_read_console(char *ch)
         return -1;
     running->wants_input = true;
     if (running->input_head == running->input_tail)
-        return TINOS_ERR_AGAIN;
+        return PROCESS_INPUT_WAIT;
     *ch = running->input[running->input_head];
     running->input_head = (running->input_head + 1) % PROCESS_INPUT_SIZE;
     return 1;
+}
+
+NORETURN void process_block_console(regs_t *frame)
+{
+    KASSERT(running != NULL && (frame->cs & 3) == 3);
+    memcpy(&running->frame, frame, sizeof(*frame));
+    running->blocked_address = frame->ecx;
+    running->state = PROCESS_BLOCKED;
+    arch_leave_user(0);
 }
 
 size_t process_list(process_info_t *out, size_t capacity)
@@ -325,6 +339,13 @@ void process_schedule(void)
     p->state = PROCESS_RUNNING;
     p->deadline = timer_ticks() + PROCESS_SLICE_TICKS;
     user_space_activate(&p->space);
+    if (p->blocked_address) {
+        KASSERT(p->input_head != p->input_tail);
+        *(char *)p->blocked_address = p->input[p->input_head];
+        p->input_head = (p->input_head + 1) % PROCESS_INPUT_SIZE;
+        p->frame.eax = 1;
+        p->blocked_address = 0;
+    }
     gdt_set_kernel_stack((uintptr_t)p->kernel_stack +
                          PROCESS_KERNEL_STACK_FRAMES * 4096);
     arch_user_fpu_disable();
@@ -352,7 +373,8 @@ bool process_kill(uint32_t pid)
 {
     for (size_t i = 0; i < PROCESS_MAX; i++) {
         process_t *p = &processes[i];
-        if (p->pid != pid || p->state != PROCESS_READY)
+        if (p->pid != pid ||
+            (p->state != PROCESS_READY && p->state != PROCESS_BLOCKED))
             continue;
         p->status = 130;
         p->state = PROCESS_EXITED;
@@ -366,7 +388,8 @@ bool process_kill(uint32_t pid)
 bool process_cancel_input(void)
 {
     for (size_t i = 0; i < PROCESS_MAX; i++)
-        if (processes[i].state == PROCESS_READY &&
+        if ((processes[i].state == PROCESS_READY ||
+             processes[i].state == PROCESS_BLOCKED) &&
             processes[i].wants_input)
             return process_kill(processes[i].pid);
     return false;

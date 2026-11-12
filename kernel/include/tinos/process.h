@@ -7,11 +7,13 @@
 #include <tinos/types.h>
 
 #define PROCESS_MAX 4
+#define PROCESS_INPUT_WAIT (-2)
 
 typedef enum {
     PROCESS_UNUSED,
     PROCESS_READY,
     PROCESS_RUNNING,
+    PROCESS_BLOCKED,
     PROCESS_EXITED,
 } process_state_t;
 
@@ -31,6 +33,7 @@ bool process_wants_input(void);
 bool process_feed_key(const key_event_t *key);
 bool process_cancel_input(void);
 int process_read_console(char *ch);
+NORETURN void process_block_console(regs_t *frame);
 void process_on_tick(regs_t *frame);
 void process_maybe_preempt(regs_t *frame);
 bool process_active(void);

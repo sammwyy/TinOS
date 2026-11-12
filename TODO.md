@@ -530,6 +530,11 @@ Testing:
       frame in a later slice. Up to four processes have separate address
       spaces and kernel stacks on the BSP; `run` returns a PID immediately.
       `jobs`, `kill` and `reap` control them from the text console.
+- [x] Park a process in BLOCKED state on empty keyboard input and wake it
+      from the TTY when a key arrives. The kernel never waits inside the
+      syscall or burns a time slice polling for the next character.
+- [ ] Replace the single stdin owner with a TTY line discipline and
+      process-group/foreground-job policy, including backspace and raw mode.
 - [ ] Move scheduling and idle handling out of the TTY/desktop event loops.
       Both currently call `process_schedule()`; user jobs do not yet have a
       kernel-owned run queue, wait queue, or scheduling on an AP.
@@ -575,7 +580,7 @@ Testing:
 
 ### Syscall interface
 
-- [x] `int 0x80` ring-3 syscall gate with `exit`, nonblocking keyboard `read`,
+- [x] `int 0x80` ring-3 syscall gate with `exit`, process-blocking keyboard `read`,
       console `write`, and read-only `open`/`read`/`close` for memory-backed
       VFS files.
 - [ ] Add a fast syscall entry if useful after the ABI stabilizes.
@@ -584,8 +589,8 @@ Testing:
 - [x] Build a separate `libraries/libc/` with i386 syscall stubs and `crt0`;
       `userland/bin/cat.c` uses no kernel-private headers.
 - [ ] Define complete public error codes and versioned structs before adding
-      richer filesystem or graphical APIs; `-1` and `TINOS_ERR_AGAIN` are
-      currently the only error returns.
+      richer filesystem or graphical APIs; `-1` is currently the only public
+      error return.
 - [ ] No kernel pointers across the boundary. Today's ABI exposes
       `fs_node_t *`, `window_t *`, `kernel_thread_t *`, `shell_t *`,
       `audio_decoder_t *`; replace with integer handles / file descriptors.
