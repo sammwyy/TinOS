@@ -1,18 +1,26 @@
 #include <tinos/arch.h>
+#include <tinos/audio.h>
 #include <tinos/console.h>
 #include <tinos/fs.h>
+#include <tinos/gfx.h>
 #include <tinos/kernel.h>
 #include <tinos/input.h>
+#include <tinos/net.h>
 #include <tinos/process.h>
 #include <tinos/sh.h>
 #include <tinos/syscall.h>
 #include <tinos/string.h>
+#include <tinos/ui.h>
 #include <tinos/user_window.h>
 #include <tinos/user_audio.h>
 #include <uapi/tinos/desktop.h>
+#include <uapi/tinos/settings.h>
 #include <uapi/tinos/syscall.h>
 
 extern NORETURN void arch_leave_user(int status);
+
+static uint8_t clipboard[TINOS_CLIPBOARD_MAX];
+static uint32_t clipboard_size, clipboard_kind;
 
 static bool copy_user_path(uintptr_t address, size_t length,
                            char path[FS_PATH_MAX])
@@ -160,9 +168,146 @@ void syscall_dispatch(regs_t *frame)
             keyboard_set_layout(frame->edx == TINOS_KBD_US ?
                                 KEYBOARD_LAYOUT_US : KEYBOARD_LAYOUT_ES);
             frame->eax = 0;
+        } else if (frame->ebx == 0 &&
+                   frame->ecx == TINOS_IOCTL_AUDIO_GET &&
+                   process_user_buffer(frame->edx,
+                                       sizeof(tinos_audio_settings_t), true)) {
+            tinos_audio_settings_t settings = {
+                .volume = audio_get_volume(), .muted = audio_is_muted(),
+            };
+            memcpy((void *)(uintptr_t)frame->edx, &settings, sizeof(settings));
+            frame->eax = 0;
+        } else if (frame->ebx == 0 &&
+                   frame->ecx == TINOS_IOCTL_AUDIO_SET &&
+                   process_user_buffer(frame->edx,
+                                       sizeof(tinos_audio_settings_t), false)) {
+            tinos_audio_settings_t settings;
+            memcpy(&settings, (const void *)(uintptr_t)frame->edx,
+                   sizeof(settings));
+            if (settings.volume > 100 || settings.muted > 1) {
+                frame->eax = (uint32_t)-1;
+            } else {
+                audio_set_volume((uint8_t)settings.volume);
+                audio_set_muted(settings.muted != 0);
+                frame->eax = 0;
+            }
+        } else if (frame->ebx == 0 && frame->ecx == TINOS_IOCTL_NET_GET &&
+                   process_user_buffer(frame->edx,
+                                       sizeof(tinos_net_settings_t), true)) {
+            const net_config_t *config = net_config();
+            tinos_net_settings_t settings = {
+                .address = config->address, .netmask = config->netmask,
+                .gateway = config->gateway, .dns = config->dns,
+                .configured = config->configured, .available = net_available(),
+            };
+            memcpy((void *)(uintptr_t)frame->edx, &settings, sizeof(settings));
+            frame->eax = 0;
+        } else if (frame->ebx == 0 && frame->ecx == TINOS_IOCTL_NET_MANUAL &&
+                   process_user_buffer(frame->edx,
+                                       sizeof(tinos_net_settings_t), false)) {
+            tinos_net_settings_t settings;
+            memcpy(&settings, (const void *)(uintptr_t)frame->edx,
+                   sizeof(settings));
+            uint32_t inverse = ~settings.netmask;
+            frame->eax = settings.address && settings.netmask &&
+                !(inverse & (inverse + 1)) &&
+                net_configure_manual(settings.address, settings.netmask,
+                                     settings.gateway, settings.dns) ?
+                0 : (uint32_t)-1;
+        } else if (frame->ebx == 0 && frame->ecx == TINOS_IOCTL_NET_DHCP) {
+            frame->eax = net_request_dhcp() ? 0 : (uint32_t)-1;
+        } else if (frame->ebx == 0 && frame->ecx == TINOS_IOCTL_NET_PING &&
+                   frame->edx) {
+            uint32_t elapsed = 0;
+            frame->eax = net_ping(frame->edx, 250, &elapsed) ?
+                         elapsed : (uint32_t)-1;
+        } else if (frame->ebx == 0 && frame->ecx == TINOS_IOCTL_NET_DNS &&
+                   process_user_buffer(frame->edx,
+                                       sizeof(tinos_dns_probe_t), true)) {
+            tinos_dns_probe_t probe;
+            memcpy(&probe, (const void *)(uintptr_t)frame->edx,
+                   sizeof(probe));
+            bool valid = false;
+            for (unsigned i = 1; i < sizeof(probe.host); i++)
+                if (probe.host[i] == '\0') {
+                    valid = true;
+                    break;
+                }
+            probe.address = 0;
+            frame->eax = valid &&
+                net_dns_lookup(probe.host, &probe.address, 500) ?
+                0 : (uint32_t)-1;
+            memcpy((void *)(uintptr_t)frame->edx, &probe, sizeof(probe));
+        } else if (frame->ebx == 0 &&
+                   frame->ecx == TINOS_IOCTL_WALLPAPER_GET) {
+            frame->eax = desktop_wallpaper_mode();
+        } else if (frame->ebx == 0 && frame->ecx == TINOS_IOCTL_WALLPAPER &&
+                   frame->edx <= TINOS_WALLPAPER_GRADIENT) {
+            if (frame->edx == TINOS_WALLPAPER_SOLID)
+                desktop_set_wallpaper(DESKTOP_WALLPAPER_SOLID,
+                                      RGB(0x24, 0x35, 0x52),
+                                      RGB(0x24, 0x35, 0x52));
+            else if (frame->edx == TINOS_WALLPAPER_GRADIENT)
+                desktop_set_wallpaper(DESKTOP_WALLPAPER_GRADIENT,
+                                      RGB(0x48, 0x2f, 0x70),
+                                      RGB(0x16, 0x1b, 0x30));
+            else
+                desktop_set_wallpaper(DESKTOP_WALLPAPER_DEFAULT,
+                                      COLOR_DESKTOP_TOP, COLOR_DESKTOP_BOTTOM);
+            frame->eax = 0;
+        } else if (frame->ebx == 0 && frame->ecx == TINOS_IOCTL_DISPLAY_MODE &&
+                   (frame->edx == (800u << 16 | 600u) ||
+                    frame->edx == (1024u << 16 | 768u))) {
+            unsigned width = frame->edx >> 16, height = frame->edx & 0xffffu;
+            if (gfx_resize(width, height)) {
+                mouse_set_bounds(gfx_width(), gfx_height());
+                wm_invalidate_all();
+                frame->eax = 0;
+            } else {
+                frame->eax = (uint32_t)-1;
+            }
         } else {
             frame->eax = (uint32_t)-1;
         }
+        return;
+    case TINOS_SYS_RENAME:
+    case TINOS_SYS_COPY: {
+        char source[FS_PATH_MAX], destination[FS_PATH_MAX];
+        if (!copy_user_path(frame->ebx, frame->ecx, source) ||
+            !copy_user_path(frame->edx, frame->esi, destination)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        frame->eax = (uint32_t)process_file_transfer(
+            source, destination, frame->eax == TINOS_SYS_COPY);
+        return;
+    }
+    case TINOS_SYS_CLIPBOARD_SET:
+        if (!frame->ecx || frame->ecx > sizeof(clipboard) ||
+            frame->edx < TINOS_CLIPBOARD_TEXT ||
+            frame->edx > TINOS_CLIPBOARD_FILE_MOVE ||
+            !process_user_buffer(frame->ebx, frame->ecx, false)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        memcpy(clipboard, (const void *)(uintptr_t)frame->ebx, frame->ecx);
+        clipboard_size = frame->ecx;
+        clipboard_kind = frame->edx;
+        frame->eax = 0;
+        return;
+    case TINOS_SYS_CLIPBOARD_GET:
+        if (!clipboard_size || frame->ecx < clipboard_size ||
+            !process_user_buffer(frame->ebx, clipboard_size, true) ||
+            !process_user_buffer(frame->edx, sizeof(uint32_t), true)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        memcpy((void *)(uintptr_t)frame->ebx, clipboard, clipboard_size);
+        *(uint32_t *)(uintptr_t)frame->edx = clipboard_kind;
+        frame->eax = clipboard_size;
+        return;
+    case TINOS_SYS_SEEK:
+        frame->eax = (uint32_t)process_file_seek((int)frame->ebx, frame->ecx);
         return;
     case TINOS_SYS_MKDIR:
     case TINOS_SYS_UNLINK: {

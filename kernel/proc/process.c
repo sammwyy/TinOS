@@ -327,8 +327,11 @@ static bool writable_path(const char *path)
 {
     if (!path || path[0] != '/')
         return false;
-    fs_node_t *apps, *node;
+    fs_node_t *apps, *system, *drive, *node;
     if (fs_resolve(fs_root(), "/apps", &apps) != FS_OK)
+        return false;
+    if (fs_resolve(fs_root(), "/system", &system) != FS_OK ||
+        fs_resolve(fs_root(), "/drive", &drive) != FS_OK)
         return false;
     fs_result_t result = fs_resolve(fs_root(), path, &node);
     if (result == FS_ERR_NOENT) {
@@ -338,7 +341,9 @@ static bool writable_path(const char *path)
     } else if (result != FS_OK) {
         return false;
     }
-    return !fs_is_ancestor(apps, node);
+    return !fs_is_ancestor(apps, node) &&
+           !fs_is_ancestor(system, node) &&
+           !fs_is_ancestor(drive, node);
 }
 
 int process_file_open(const char *path, uint32_t flags)
@@ -429,6 +434,16 @@ int process_file_read(int fd, void *buffer, size_t length)
     return (int)length;
 }
 
+int process_file_seek(int fd, uint32_t offset)
+{
+    if (!running || fd < 3 || fd >= (int)ARRAY_SIZE(running->files) ||
+        !running->files[fd].open || running->files[fd].path ||
+        offset > running->files[fd].size)
+        return -1;
+    running->files[fd].offset = offset;
+    return (int)offset;
+}
+
 int process_file_write(int fd, const void *buffer, size_t length)
 {
     if (!running || fd < 3 || fd >= (int)ARRAY_SIZE(running->files) ||
@@ -459,6 +474,47 @@ int process_file_unlink(const char *path)
     if (!running || !writable_path(path))
         return -1;
     return fs_remove(fs_root(), path, false) == FS_OK ? 0 : -1;
+}
+
+static bool copy_fits(fs_node_t *node, size_t *bytes, unsigned *nodes,
+                      unsigned depth)
+{
+    if (depth >= 16 || ++*nodes > 128)
+        return false;
+    if (node->type == FS_FILE) {
+        size_t size = fs_size(node);
+        if (size > 256 * 1024 - *bytes)
+            return false;
+        *bytes += size;
+    } else {
+        for (fs_node_t *child = node->children; child; child = child->next)
+            if (!copy_fits(child, bytes, nodes, depth + 1))
+                return false;
+    }
+    return true;
+}
+
+int process_file_transfer(const char *source, const char *destination,
+                          bool copy)
+{
+    if (!running || !source || source[0] != '/' ||
+        !writable_path(destination) || (!copy && !writable_path(source)))
+        return -1;
+    fs_node_t *node, *existing;
+    if (fs_resolve(fs_root(), source, &node) != FS_OK ||
+        node == fs_root() ||
+        fs_resolve(fs_root(), destination, &existing) != FS_ERR_NOENT)
+        return -1;
+    if (copy) {
+        size_t bytes = 0;
+        unsigned nodes = 0;
+        if (!copy_fits(node, &bytes, &nodes, 0))
+            return -1;
+    }
+    fs_result_t result = copy ?
+        fs_copy(fs_root(), source, destination, true) :
+        fs_move(fs_root(), source, destination);
+    return result == FS_OK ? 0 : -1;
 }
 
 int process_file_close(int fd)

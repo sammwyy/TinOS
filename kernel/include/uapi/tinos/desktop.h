@@ -37,8 +37,17 @@
 #define TINOS_KEY_RIGHT 0x103u
 #define TINOS_KEY_PAGEUP 0x106u
 #define TINOS_KEY_PAGEDOWN 0x107u
+#define TINOS_KEY_HOME 0x104u
+#define TINOS_KEY_END 0x105u
 #define TINOS_KEY_DELETE 0x109u
+#define TINOS_KEY_F2 0x10cu
+#define TINOS_KEY_F5 0x10fu
 #define TINOS_MOD_CTRL 0x02u
+#define TINOS_MOD_SHIFT 0x01u
+
+/* MOUSE: code=pressed, mods low byte=held, next byte=released;
+ * ch is the signed wheel delta. Movement is sent only during a drag. */
+#define TINOS_GUI_MOUSE_LEFT 1u
 
 typedef struct {
     uint32_t type;

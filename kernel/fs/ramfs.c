@@ -639,8 +639,25 @@ fs_result_t fs_copy_node(fs_node_t *src, fs_node_t *dst_dir,
     node_link(dst_dir, copy);
 
     if (src->type == FS_FILE) {
-        const uint8_t *contents = fs_data(src);
-        r = contents ? fs_write(copy, contents, src->size) : FS_ERR_NOMEM;
+        r = FS_OK;
+        if (src->backend) {
+            uint8_t chunk[1024];
+            for (size_t offset = 0; offset < src->size; offset += sizeof(chunk)) {
+                size_t size = src->size - offset;
+                if (size > sizeof(chunk))
+                    size = sizeof(chunk);
+                if (!fs_read_at(src, offset, chunk, size)) {
+                    r = FS_ERR_INVAL;
+                    break;
+                }
+                r = fs_write_at(copy, offset, chunk, size);
+                if (r != FS_OK)
+                    break;
+            }
+        } else if (src->size) {
+            r = src->data ? fs_write(copy, src->data, src->size) :
+                            FS_ERR_INVAL;
+        }
         if (r != FS_OK) {
             fs_remove_node(copy, false);
             return r;

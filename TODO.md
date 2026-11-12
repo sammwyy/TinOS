@@ -76,13 +76,21 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
       metrics, Control Panel's sidebar/cards, Image Viewer's fitted canvas
       and Media Player's visualizer/transport. Scale initial surfaces to the
       8/16 MiB budget without enabling old ring-0 callbacks.
-- [ ] Complete the former apps' missing interactions behind userland APIs:
-      Explorer rename/clipboard/drag, Editor selection/undo/redo,
-      Control Panel's network/audio configuration and Media Player's
-      playlists and format support. Do not show unsupported controls as
-      working settings. Add accessible focus, Unicode and scalable rendering.
-      Add a trusted theme-setting service and notify views of palette changes;
-      only the default palette and per-view overrides exist today.
+- [x] Port the former apps' primary actions behind validated userspace APIs:
+      Explorer history, file creation, copy/cut/paste, no-overwrite rename,
+      same-window drag and confirmed delete; Editor selection, shared text
+      clipboard, bounded undo/redo and save; Control Panel's IPv4, audio,
+      wallpaper, display and keyboard actions; Media Player's WAV playlist,
+      seek, transport and volume. Exercise actions and invalid pointers
+      at 8/16 MiB in QEMU.
+- [ ] Finish the remaining visual/input work: cross-window drag/drop,
+      accessible focus, general Unicode text editing and scalable
+      rendering. Add a trusted theme-setting service and notify views of
+      palette changes; only wallpaper presets and per-view overrides
+      exist today. Add authorization for global settings changes.
+- [ ] Move DHCP/DNS/ping requests from blocking settings ioctls to a
+      process-scoped asynchronous service; retain pointer validation,
+      bounded requests and a responsive kernel loop on network timeouts.
 - [x] Add copied pixel surfaces (320x192 maximum, allocated per client)
       and a ring-3 BMP decoder for Image Viewer, including an 8 MiB GUI test.
 - [x] Provide a process-owned stereo PCM device with validated, copied
@@ -153,8 +161,8 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
 - [x] Bridge a Terminal's child stdin/stdout through bounded queues and
       process-scoped events. Block full writers, wake them when drained,
       report child exit, and allow a parent to kill its own child with Ctrl+C.
-- [ ] Port the advanced features of the former GUI apps: PNG/JPEG/WebP and
-      Ogg/Vorbis userspace decoders, playlists and controls. Remove the
+- [ ] Port the remaining media formats: PNG/JPEG/WebP and Ogg/Vorbis
+      userspace decoders and richer playlist formats. Remove the
       unused ring-0 codec implementations; add PTYs/pipes for arbitrary
       programs and shell pipelines.
 - [ ] Add heap canaries / redzones and a `heap_check()` callable from the

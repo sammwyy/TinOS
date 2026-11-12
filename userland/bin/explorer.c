@@ -10,7 +10,13 @@
 #define SIDEBAR_W 148
 #define ROW_H 20
 
-enum { ACTION_OPEN = 1, ACTION_UP, ACTION_EDIT, ACTION_DELETE, ACTION_REFRESH };
+enum {
+    ACTION_OPEN = 1, ACTION_UP, ACTION_EDIT, ACTION_DELETE, ACTION_REFRESH,
+    ACTION_BACK, ACTION_FORWARD, ACTION_HOME, ACTION_NEW_DIR,
+    ACTION_NEW_FILE, ACTION_RENAME, ACTION_COPY, ACTION_CUT, ACTION_PASTE,
+};
+enum { MODE_BROWSE, MODE_NEW_DIR, MODE_NEW_FILE, MODE_RENAME,
+       MODE_DELETE, MODE_LOCATION };
 
 static tinos_widget_view_t ui;
 static char cwd[PATH_CAP] = "/users/sammy";
@@ -21,6 +27,13 @@ static int preview;
 static char preview_path[PATH_CAP];
 static tinos_dirent_t home_dirs[8];
 static unsigned home_count;
+static char history[10][PATH_CAP];
+static unsigned history_count, history_at;
+static int mode, dragging, drag_moved;
+static unsigned drag_source;
+static unsigned last_click = MAX_ENTRIES, last_click_ms;
+static char form[PATH_CAP], notice[96];
+static void refresh(void);
 
 static const char *const toolbar_icons[] = {
     "back", "forward", "up", "home", "folder", "new",
@@ -36,16 +49,42 @@ static void join_path(const char *name, char path[PATH_CAP])
     tinos_strlcpy(path + length, name, PATH_CAP - length);
 }
 
-static void parent(void)
+static void parent(char path[PATH_CAP])
 {
-    unsigned length = strlen(cwd);
-    while (length > 1 && cwd[length - 1] != '/')
+    unsigned length = strlen(path);
+    while (length > 1 && path[length - 1] != '/')
         length--;
-    cwd[length > 1 ? length - 1 : 1] = '\0';
+    path[length > 1 ? length - 1 : 1] = '\0';
+}
+
+static void navigate(const char *path, bool remember)
+{
+    tinos_dirent_t node;
+    if (tinos_stat(path, &node) != 1 || node.type != TINOS_DIRENT_DIR) {
+        tinos_strlcpy(notice, "Directory not found", sizeof(notice));
+        ui.dirty = true;
+        return;
+    }
+    if (remember && strcmp(cwd, path) != 0) {
+        if (history_at + 1 < history_count)
+            history_count = history_at + 1;
+        if (history_count == 10) {
+            memmove(history[0], history[1], 9 * PATH_CAP);
+            history_count--;
+            history_at--;
+        }
+        tinos_strlcpy(history[history_count++], path, PATH_CAP);
+        history_at = history_count - 1;
+    }
+    tinos_strlcpy(cwd, path, sizeof(cwd));
+    selected = scroll = preview = 0;
+    notice[0] = '\0';
+    refresh();
 }
 
 static void refresh(void)
 {
+    last_click = MAX_ENTRIES;
     count = 0;
     for (unsigned index = 0; index < 128 && count < MAX_ENTRIES; index++) {
         tinos_dirent_t entry;
@@ -110,9 +149,7 @@ static void enter_selected(void)
     char path[PATH_CAP];
     join_path(entries[selected].name, path);
     if (entries[selected].type == TINOS_DIRENT_DIR) {
-        tinos_strlcpy(cwd, path, sizeof(cwd));
-        selected = scroll = 0;
-        refresh();
+        navigate(path, true);
     } else {
         size_t length = strlen(path);
         if (length >= 4 && strcmp(path + length - 4, ".bmp") == 0) {
@@ -244,21 +281,185 @@ static void paint(tinos_widget_view_t *view, tinos_canvas_t *canvas,
         tinos_canvas_fill(canvas, w - 108, list_y, 1, list_h, 0xc2c7cfu);
     tinos_canvas_fill(canvas, 0, h - STATUS_H, w, STATUS_H, theme->panel);
     tinos_canvas_fill(canvas, 0, h - STATUS_H, w, 1, theme->border);
-    tinos_canvas_text(canvas, 8, h - STATUS_H + 4, w - 16,
-                      preview ? "Esc or Up: return to directory" :
-                      "Enter open  Bksp up  E edit  Del delete  F5 refresh",
-                      theme->muted);
+    if (mode == MODE_DELETE) {
+        tinos_canvas_text(canvas, 8, h - STATUS_H + 4, w - 16,
+                          "Delete selected item? Enter yes / Esc cancel",
+                          theme->danger);
+    } else if (mode != MODE_BROWSE) {
+        const char *label = mode == MODE_NEW_DIR ? "New folder: " :
+                            mode == MODE_NEW_FILE ? "New file: " :
+                            mode == MODE_RENAME ? "Rename: " : "Go to: ";
+        tinos_canvas_text(canvas, 8, h - STATUS_H + 4, 100, label,
+                          theme->foreground);
+        tinos_canvas_text(canvas, 8 + (int)strlen(label) * 8,
+                          h - STATUS_H + 4, w - 22 - (int)strlen(label) * 8,
+                          form, theme->foreground);
+    } else {
+        tinos_canvas_text(canvas, 8, h - STATUS_H + 4, w - 16,
+                          notice[0] ? notice :
+                          preview ? "Esc or Up: return to directory" :
+                          "Enter open  Bksp up  Ctrl+N new  F2 rename",
+                          notice[0] ? theme->accent : theme->muted);
+    }
+}
+
+static void begin_prompt(int next_mode, const char *initial)
+{
+    mode = next_mode;
+    tinos_strlcpy(form, initial ? initial : "", sizeof(form));
+    ui.dirty = true;
+}
+
+static void set_notice(const char *text)
+{
+    tinos_strlcpy(notice, text, sizeof(notice));
+    ui.dirty = true;
+}
+
+static void finish_prompt(void)
+{
+    char path[PATH_CAP];
+    int action = mode;
+    mode = MODE_BROWSE;
+    if (action == MODE_LOCATION) {
+        navigate(form, true);
+        return;
+    }
+    if (action == MODE_DELETE) {
+        if (selected < count) {
+            join_path(entries[selected].name, path);
+            if (tinos_unlink(path) < 0)
+                set_notice("Cannot delete (directory may not be empty)");
+            else {
+                refresh();
+                set_notice("Deleted");
+            }
+        }
+        return;
+    }
+    if (!form[0] || strlen(form) >= sizeof(entries[0].name) ||
+        strcmp(form, ".") == 0 || strcmp(form, "..") == 0) {
+        set_notice("Invalid name");
+        return;
+    }
+    for (const char *at = form; *at; at++)
+        if (*at == '/') {
+            set_notice("A name cannot contain /");
+            return;
+        }
+    if (strlen(cwd) + strlen(form) + 2 > PATH_CAP) {
+        set_notice("Path is too long");
+        return;
+    }
+    join_path(form, path);
+    int result = -1;
+    if (action == MODE_NEW_DIR)
+        result = tinos_mkdir(path);
+    else if (action == MODE_NEW_FILE) {
+        tinos_dirent_t existing;
+        if (tinos_stat(path, &existing) != 1) {
+            int fd = tinos_open_flags(path, TINOS_O_CREAT | TINOS_O_WRONLY);
+            if (fd >= 0) {
+                tinos_close(fd);
+                result = 0;
+            }
+        }
+    } else if (action == MODE_RENAME && selected < count) {
+        char source[PATH_CAP];
+        join_path(entries[selected].name, source);
+        result = strcmp(path, source) == 0 ? 0 :
+                 tinos_rename(source, path);
+    }
+    if (result == 0) {
+        refresh();
+        set_notice("Done");
+    } else {
+        set_notice("Operation failed (name may already exist)");
+    }
+}
+
+static void copy_selection(bool move)
+{
+    if (selected >= count)
+        return;
+    char path[PATH_CAP];
+    join_path(entries[selected].name, path);
+    if (tinos_clipboard_set(path, strlen(path) + 1,
+            move ? TINOS_CLIPBOARD_FILE_MOVE :
+                   TINOS_CLIPBOARD_FILE_COPY) == 0)
+        set_notice(move ? "Cut: choose destination and paste" :
+                          "Copied: choose destination and paste");
+    else
+        set_notice("Clipboard unavailable");
+}
+
+static void paste(void)
+{
+    char source[PATH_CAP];
+    unsigned kind;
+    int size = tinos_clipboard_get(source, sizeof(source), &kind);
+    if (size < 2 || size > PATH_CAP || source[size - 1] != '\0' ||
+        strlen(source) != (unsigned)size - 1 || source[0] != '/' ||
+        (kind != TINOS_CLIPBOARD_FILE_COPY &&
+         kind != TINOS_CLIPBOARD_FILE_MOVE)) {
+        set_notice("No file in clipboard");
+        return;
+    }
+    const char *name = source;
+    for (const char *at = source; *at; at++)
+        if (*at == '/')
+            name = at + 1;
+    char target[PATH_CAP];
+    if (strlen(cwd) + strlen(name) + 2 > PATH_CAP) {
+        set_notice("Path is too long");
+        return;
+    }
+    join_path(name, target);
+    if (strcmp(source, target) == 0) {
+        if (kind == TINOS_CLIPBOARD_FILE_MOVE) {
+            set_notice("Already in this directory");
+            return;
+        }
+        size_t len = strlen(target);
+        if (len + 5 >= sizeof(target)) {
+            set_notice("Path is too long");
+            return;
+        }
+        tinos_strlcpy(target + len, "-copy", sizeof(target) - len);
+    }
+    int result = kind == TINOS_CLIPBOARD_FILE_COPY ?
+                 tinos_copy(source, target) : tinos_rename(source, target);
+    if (result < 0)
+        set_notice("Paste failed (already exists or exceeds memory limit)");
+    else {
+        refresh();
+        set_notice(kind == TINOS_CLIPBOARD_FILE_MOVE ? "Moved" : "Copied");
+    }
 }
 
 static void on_action(tinos_widget_view_t *view, unsigned id, void *context)
 {
     (void)view;
     (void)context;
-    if (id == ACTION_UP) {
+    if (id == ACTION_BACK || id == ACTION_FORWARD) {
+        if (id == ACTION_BACK && history_at)
+            history_at--;
+        else if (id == ACTION_FORWARD && history_at + 1 < history_count)
+            history_at++;
+        else
+            return;
+        navigate(history[history_at], false);
+    } else if (id == ACTION_HOME) {
+        navigate("/users/sammy", true);
+    } else if (id == ACTION_UP) {
         if (preview)
             preview = 0;
-        else
-            parent();
+        else {
+            char path[PATH_CAP];
+            tinos_strlcpy(path, cwd, sizeof(path));
+            parent(path);
+            navigate(path, true);
+        }
         selected = scroll = 0;
         refresh();
     } else if (id == ACTION_REFRESH) {
@@ -266,20 +467,28 @@ static void on_action(tinos_widget_view_t *view, unsigned id, void *context)
             render_preview();
         else
             refresh();
+    } else if (id == ACTION_PASTE) {
+        paste();
     } else if (preview) {
         return;
+    } else if (id == ACTION_NEW_DIR || id == ACTION_NEW_FILE) {
+        begin_prompt(id == ACTION_NEW_DIR ? MODE_NEW_DIR : MODE_NEW_FILE, "");
+    } else if (id == ACTION_COPY || id == ACTION_CUT) {
+        copy_selection(id == ACTION_CUT);
     } else if (id == ACTION_OPEN) {
         enter_selected();
     } else if (selected < count) {
         char path[PATH_CAP];
         join_path(entries[selected].name, path);
         if (id == ACTION_DELETE) {
-            tinos_unlink(path);
-            refresh();
+            begin_prompt(MODE_DELETE, "");
+        } else if (id == ACTION_RENAME) {
+            begin_prompt(MODE_RENAME, entries[selected].name);
         } else if (id == ACTION_EDIT &&
                    entries[selected].type == TINOS_DIRENT_FILE) {
             const char *args[] = { "/apps/gui/editor.elf", path };
-            tinos_spawn(args[0], 2, args);
+            if (tinos_spawn(args[0], 2, args) < 0)
+                set_notice("Unable to launch editor (low memory)");
         }
     }
 }
@@ -294,6 +503,8 @@ int main(int argc, char **argv)
     else if (tinos_stat(cwd, &directory) != 1 ||
              directory.type != TINOS_DIRENT_DIR)
         tinos_strlcpy(cwd, "/", sizeof(cwd));
+    history_count = 1;
+    tinos_strlcpy(history[0], cwd, PATH_CAP);
     tinos_system_info_t info;
     bool full_size = tinos_sysinfo(&info) == 0 &&
                      info.memory_total_kib >= 12288 &&
@@ -318,55 +529,148 @@ int main(int argc, char **argv)
             if (!preview)
                 refresh();
         }
-        if (event.type == TINOS_GUI_MOUSE && event.code == 1) {
+        if (event.type == TINOS_GUI_MOUSE && (int32_t)event.ch) {
+            int step = (int32_t)event.ch > 0 ? -3 : 3;
+            int max = (int)(preview ? preview_count : count) -
+                      (int)visible_rows();
+            int next = (int)scroll + step;
+            if (next < 0) next = 0;
+            if (next > max) next = max > 0 ? max : 0;
+            scroll = (unsigned)next;
+            ui.dirty = true;
+        }
+        if (event.type == TINOS_GUI_MOUSE && mode == MODE_BROWSE &&
+            (event.code & TINOS_GUI_MOUSE_LEFT)) {
             int sidebar = ui.width > 360 ? SIDEBAR_W : ui.width / 3;
             if (event.y >= 3 && event.y < TOOLBAR_H - 3 &&
                 event.x >= 4 && event.x < 4 + 11 * 29) {
                 int button = (event.x - 4) / 29;
-                if (button == 2)
-                    on_action(&ui, ACTION_UP, NULL);
-                else if (button == 3) {
-                    tinos_strlcpy(cwd, "/users/sammy", sizeof(cwd));
-                    selected = scroll = preview = 0;
-                    refresh();
-                } else if (button == 6)
-                    on_action(&ui, ACTION_EDIT, NULL);
-                else if (button == 7)
-                    on_action(&ui, ACTION_DELETE, NULL);
-                else if (button == 10)
-                    on_action(&ui, ACTION_REFRESH, NULL);
+                static const unsigned actions[] = {
+                    ACTION_BACK, ACTION_FORWARD, ACTION_UP, ACTION_HOME,
+                    ACTION_NEW_DIR, ACTION_NEW_FILE, ACTION_RENAME,
+                    ACTION_DELETE, ACTION_COPY, ACTION_PASTE, ACTION_REFRESH,
+                };
+                on_action(&ui, actions[button], NULL);
+            } else if (event.y >= TOOLBAR_H &&
+                       event.y < TOOLBAR_H + PATHBAR_H &&
+                       event.x >= 76) {
+                begin_prompt(MODE_LOCATION, cwd);
             } else if (event.y >= TOOLBAR_H + PATHBAR_H &&
                        event.y < (int)ui.height - STATUS_H) {
                 if (event.x < sidebar) {
                     int tree_y = TOOLBAR_H + PATHBAR_H + 28;
                     if (event.y < tree_y) {
-                        tinos_strlcpy(cwd, "/users/sammy", sizeof(cwd));
-                        selected = scroll = preview = 0;
-                        refresh();
+                        navigate("/users/sammy", true);
                     } else if (event.y < tree_y + (int)home_count * ROW_H) {
                         unsigned folder = (event.y - tree_y) / ROW_H;
-                        tinos_strlcpy(cwd, "/users/sammy/", sizeof(cwd));
-                        tinos_strlcpy(cwd + strlen(cwd),
+                        char destination[PATH_CAP] = "/users/sammy/";
+                        tinos_strlcpy(destination + strlen(destination),
                                       home_dirs[folder].name,
-                                      sizeof(cwd) - strlen(cwd));
-                        selected = scroll = preview = 0;
-                        refresh();
+                                      sizeof(destination) - strlen(destination));
+                        navigate(destination, true);
                     } else if (event.y >= tree_y + (int)home_count * ROW_H + 40) {
-                        tinos_strlcpy(cwd, "/drive/disk0", sizeof(cwd));
-                        selected = scroll = preview = 0;
-                        refresh();
+                        navigate("/drive/disk0", true);
                     }
                 } else {
                     unsigned row = (event.y - TOOLBAR_H - PATHBAR_H) / ROW_H;
                     unsigned index = scroll + row;
                     if (!preview && index < count) {
+                        tinos_system_info_t clock;
+                        unsigned now = tinos_sysinfo(&clock) == 0 ?
+                                       clock.uptime_ms : 0;
+                        bool double_click = last_click == index && now &&
+                            now - last_click_ms < 350;
                         selected = index;
-                        ui.dirty = true;
+                        last_click = index;
+                        last_click_ms = now;
+                        if (double_click) {
+                            dragging = 0;
+                            enter_selected();
+                        } else {
+                            dragging = 1;
+                            drag_source = index;
+                            drag_moved = 0;
+                            ui.dirty = true;
+                        }
+                    }
+                }
+            }
+        }
+        if (event.type == TINOS_GUI_MOUSE && dragging &&
+            (event.mods & TINOS_GUI_MOUSE_LEFT) && !event.code)
+            drag_moved = 1;
+        if (event.type == TINOS_GUI_MOUSE && dragging &&
+            (event.mods >> 8 & TINOS_GUI_MOUSE_LEFT)) {
+            dragging = 0;
+            int sidebar = ui.width > 360 ? SIDEBAR_W : ui.width / 3;
+            if (drag_moved && !preview && drag_source < count &&
+                event.x >= sidebar &&
+                event.y >= TOOLBAR_H + PATHBAR_H &&
+                event.y < (int)ui.height - STATUS_H) {
+                unsigned target = scroll +
+                    (event.y - TOOLBAR_H - PATHBAR_H) / ROW_H;
+                if (target < count && target != drag_source &&
+                    entries[target].type == TINOS_DIRENT_DIR) {
+                    char source[PATH_CAP], destination[PATH_CAP];
+                    join_path(entries[drag_source].name, source);
+                    join_path(entries[target].name, destination);
+                    size_t len = strlen(destination);
+                    if (len + 1 + strlen(entries[drag_source].name) <
+                        sizeof(destination)) {
+                        destination[len++] = '/';
+                        tinos_strlcpy(destination + len,
+                                      entries[drag_source].name,
+                                      sizeof(destination) - len);
+                        if (tinos_rename(source, destination) == 0) {
+                            refresh();
+                            set_notice("Moved into folder");
+                        } else
+                            set_notice("Move failed (destination exists)");
                     }
                 }
             }
         }
         if (event.type == TINOS_GUI_KEY) {
+            if (mode != MODE_BROWSE) {
+                if (event.code == TINOS_KEY_ESCAPE) {
+                    mode = MODE_BROWSE;
+                    ui.dirty = true;
+                } else if (event.code == TINOS_KEY_ENTER) {
+                    finish_prompt();
+                } else if (mode != MODE_DELETE) {
+                    size_t length = strlen(form);
+                    if ((event.mods & TINOS_MOD_CTRL) &&
+                        (event.ch == 'a' || event.ch == 'A'))
+                        form[0] = '\0';
+                    else if (event.code == TINOS_KEY_BACKSPACE && length)
+                        form[length - 1] = '\0';
+                    else if (event.ch >= 32 && event.ch < 127 &&
+                             length + 1 < sizeof(form)) {
+                        form[length] = (char)event.ch;
+                        form[length + 1] = '\0';
+                    }
+                    ui.dirty = true;
+                }
+                if (tinos_widget_flush(&ui) < 0)
+                    break;
+                continue;
+            }
+            if (event.mods & TINOS_MOD_CTRL) {
+                if (event.ch == 'c' || event.ch == 'C')
+                    on_action(&ui, ACTION_COPY, NULL);
+                else if (event.ch == 'x' || event.ch == 'X')
+                    on_action(&ui, ACTION_CUT, NULL);
+                else if (event.ch == 'v' || event.ch == 'V')
+                    on_action(&ui, ACTION_PASTE, NULL);
+                else if (event.ch == 'n' || event.ch == 'N')
+                    on_action(&ui, ACTION_NEW_DIR, NULL);
+                else if (event.ch == 't' || event.ch == 'T')
+                    on_action(&ui, ACTION_NEW_FILE, NULL);
+                ui.dirty = true;
+                if (tinos_widget_flush(&ui) < 0)
+                    break;
+                continue;
+            }
             if (event.code == TINOS_KEY_ESCAPE) {
                 if (!preview)
                     break;
@@ -375,6 +679,10 @@ int main(int argc, char **argv)
                 on_action(&ui, ACTION_UP, NULL);
             } else if (!preview && event.code == TINOS_KEY_DELETE) {
                 on_action(&ui, ACTION_DELETE, NULL);
+            } else if (!preview && event.code == TINOS_KEY_F2) {
+                on_action(&ui, ACTION_RENAME, NULL);
+            } else if (event.code == TINOS_KEY_F5) {
+                on_action(&ui, ACTION_REFRESH, NULL);
             } else if (!preview && (event.ch == 'e' || event.ch == 'E')) {
                 on_action(&ui, ACTION_EDIT, NULL);
             } else if (event.ch == 'r' || event.ch == 'R') {
@@ -385,8 +693,23 @@ int main(int argc, char **argv)
                 else if (!preview && event.code == TINOS_KEY_DOWN &&
                          selected + 1 < count)
                     selected++;
+                else if (!preview && event.code == TINOS_KEY_PAGEUP)
+                    selected = selected > visible_rows() ?
+                               selected - visible_rows() : 0;
+                else if (!preview && event.code == TINOS_KEY_PAGEDOWN)
+                    selected = count ?
+                        (selected + visible_rows() < count ?
+                         selected + visible_rows() : count - 1) : 0;
+                else if (!preview && event.code == TINOS_KEY_HOME)
+                    selected = 0;
+                else if (!preview && event.code == TINOS_KEY_END && count)
+                    selected = count - 1;
                 else if (!preview && event.code == TINOS_KEY_ENTER)
                     enter_selected();
+                if (selected < scroll)
+                    scroll = selected;
+                else if (selected >= scroll + visible_rows())
+                    scroll = selected - visible_rows() + 1;
                 ui.dirty = true;
             }
         }

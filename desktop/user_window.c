@@ -6,7 +6,7 @@
 #include <tinos/ui.h>
 #include <tinos/user_window.h>
 
-#define GUI_QUEUE 16
+#define GUI_QUEUE 64
 #define GUI_CONSOLE_BUFFER 4096
 
 typedef struct {
@@ -40,10 +40,28 @@ static gui_client_t *client_for(uint32_t pid)
 
 static void enqueue(gui_client_t *client, tinos_gui_event_t event)
 {
+    if (event.type == TINOS_GUI_TIMER) {
+        for (unsigned i = client->head; i != client->tail;
+             i = (i + 1) % GUI_QUEUE)
+            if (client->events[i].type == TINOS_GUI_TIMER)
+                return;
+    }
+    if (event.type == TINOS_GUI_MOUSE && !event.code &&
+        !(event.mods >> 8) && !(int32_t)event.ch &&
+        client->head != client->tail) {
+        unsigned last = (client->tail + GUI_QUEUE - 1) % GUI_QUEUE;
+        if (client->events[last].type == TINOS_GUI_MOUSE &&
+            !client->events[last].code &&
+            !(client->events[last].mods >> 8)) {
+            client->events[last] = event;
+            return;
+        }
+    }
     unsigned next = (client->tail + 1) % GUI_QUEUE;
     if (next == client->head) {
-        if (event.type == TINOS_GUI_KEY || event.type == TINOS_GUI_MOUSE ||
-            event.type == TINOS_GUI_RESIZE || event.type == TINOS_GUI_TIMER)
+        if (event.type == TINOS_GUI_TIMER ||
+            (event.type == TINOS_GUI_MOUSE && !event.code &&
+             !(event.mods >> 8)))
             return;
         client->head = (client->head + 1) % GUI_QUEUE;
     }
@@ -92,9 +110,12 @@ static bool user_key(window_t *window, const key_event_t *key)
 
 static bool user_mouse(window_t *window, const mouse_event_t *mouse, int x, int y)
 {
-    if (mouse->pressed)
+    if (mouse->pressed || mouse->released || mouse->wheel ||
+        (mouse->moved && (mouse->buttons & MOUSE_LEFT)))
         enqueue(window->priv, (tinos_gui_event_t){
-            .type = TINOS_GUI_MOUSE, .code = mouse->pressed, .x = x, .y = y,
+            .type = TINOS_GUI_MOUSE, .code = mouse->pressed,
+            .mods = mouse->buttons | (mouse->released << 8),
+            .ch = (uint32_t)mouse->wheel, .x = x, .y = y,
         });
     return true;
 }

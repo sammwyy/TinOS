@@ -4,14 +4,22 @@
 
 #include <tinos/desktop.h>
 #include <tinos/audio.h>
+#include <tinos/settings.h>
 #include <tinos/syscall.h>
 
 int tinos_open(const char *path);
 int tinos_open_flags(const char *path, unsigned flags);
 int tinos_mkdir(const char *path);
 int tinos_unlink(const char *path);
+/* No-overwrite path operations; return -1 when the target already exists. */
+int tinos_rename(const char *source, const char *destination);
+int tinos_copy(const char *source, const char *destination);
+int tinos_clipboard_set(const void *data, unsigned length, unsigned kind);
+int tinos_clipboard_get(void *data, unsigned capacity, unsigned *kind);
 int tinos_close(int fd);
 int tinos_read(int fd, void *buffer, unsigned length);
+/* Absolute SEEK_SET on an open read-only file descriptor. */
+int tinos_seek(int fd, unsigned offset);
 int tinos_write(int fd, const void *buffer, unsigned length);
 int tinos_spawn(const char *path, unsigned argc, const char *const argv[]);
 int tinos_wait(int pid, int *status);

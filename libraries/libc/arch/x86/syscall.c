@@ -54,6 +54,35 @@ int tinos_unlink(const char *path)
     return length ? invoke(TINOS_SYS_UNLINK, (unsigned)path, length, 0) : -1;
 }
 
+int tinos_rename(const char *source, const char *destination)
+{
+    unsigned a = path_length(source), b = path_length(destination);
+    if (!a || !b)
+        return -1;
+    return invoke4(TINOS_SYS_RENAME, (unsigned)source, a,
+                   (unsigned)destination, b);
+}
+
+int tinos_copy(const char *source, const char *destination)
+{
+    unsigned a = path_length(source), b = path_length(destination);
+    if (!a || !b)
+        return -1;
+    return invoke4(TINOS_SYS_COPY, (unsigned)source, a,
+                   (unsigned)destination, b);
+}
+
+int tinos_clipboard_set(const void *data, unsigned length, unsigned kind)
+{
+    return invoke(TINOS_SYS_CLIPBOARD_SET, (unsigned)data, length, kind);
+}
+
+int tinos_clipboard_get(void *data, unsigned capacity, unsigned *kind)
+{
+    return invoke(TINOS_SYS_CLIPBOARD_GET, (unsigned)data, capacity,
+                  (unsigned)kind);
+}
+
 int tinos_close(int fd)
 {
     return invoke(TINOS_SYS_CLOSE, (unsigned)fd, 0, 0);
@@ -62,6 +91,11 @@ int tinos_close(int fd)
 int tinos_read(int fd, void *buffer, unsigned length)
 {
     return invoke(TINOS_SYS_READ, (unsigned)fd, (unsigned)buffer, length);
+}
+
+int tinos_seek(int fd, unsigned offset)
+{
+    return invoke(TINOS_SYS_SEEK, (unsigned)fd, offset, 0);
 }
 
 int tinos_write(int fd, const void *buffer, unsigned length)

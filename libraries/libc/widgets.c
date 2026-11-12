@@ -288,6 +288,7 @@ int tinos_widget_open(tinos_widget_view_t *view, const char *title,
     if (!view || tinos_gui_theme(&view->theme) < 0)
         return -1;
     view->handle = -1;
+    unsigned configured_width = 0, configured_height = 0;
     for (unsigned attempt = 0; attempt < 3; attempt++) {
         int handle = tinos_gui_open(title, width, height);
         if (handle >= 0) {
@@ -297,6 +298,10 @@ int tinos_widget_open(tinos_widget_view_t *view, const char *title,
                     minimum(size.width, TINOS_GUI_SURFACE_MAX_WIDTH),
                     minimum(size.height, TINOS_GUI_SURFACE_MAX_HEIGHT)) == 0) {
                 view->handle = handle;
+                configured_width = minimum(size.width,
+                                           TINOS_GUI_SURFACE_MAX_WIDTH);
+                configured_height = minimum(size.height,
+                                            TINOS_GUI_SURFACE_MAX_HEIGHT);
                 break;
             }
             tinos_gui_close(handle);
@@ -306,7 +311,8 @@ int tinos_widget_open(tinos_widget_view_t *view, const char *title,
     }
     if (view->handle < 0)
         return -1;
-    view->width = view->height = 0;
+    view->width = configured_width;
+    view->height = configured_height;
     view->count = 1;
     view->focused = -1;
     view->dirty = true;

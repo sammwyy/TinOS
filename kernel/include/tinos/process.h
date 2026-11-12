@@ -53,10 +53,13 @@ bool process_active(void);
 bool process_user_buffer(uintptr_t address, size_t length, bool writable);
 int process_file_open(const char *path, uint32_t flags);
 int process_file_read(int fd, void *buffer, size_t length);
+int process_file_seek(int fd, uint32_t offset);
 int process_file_write(int fd, const void *buffer, size_t length);
 int process_file_close(int fd);
 int process_file_mkdir(const char *path);
 int process_file_unlink(const char *path);
+int process_file_transfer(const char *source, const char *destination,
+                          bool copy);
 int process_library_open(const char *name);
 int process_library_close(int handle);
 int process_library_prepare_close(int handle);

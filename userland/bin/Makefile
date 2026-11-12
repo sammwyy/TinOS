@@ -4,7 +4,7 @@ ROOT := $(abspath ../..)
 BUILD := $(ROOT)/build/userland
 LIBC_BUILD := $(ROOT)/build/libc
 LIB_BUILD := $(ROOT)/build/userland/lib
-LIBC_APPS := cat fdtest spin spawn spawn_badarg multi gui_security surfaceprobe stream \
+LIBC_APPS := cat fdtest spin spawn spawn_badarg multi gui_security surfaceprobe actionsprobe stream \
              libprobe libtamper pcm_demo chainopen chainclose tlsprobe gdprobe \
              gd_consumer_probe versionopen largeprobe
 LIBC_ELFS := $(addprefix $(BUILD)/,$(addsuffix .elf,$(LIBC_APPS)))

@@ -213,6 +213,25 @@ can still stall this loop.
   stereo frames per syscall to a single-owner PCM audio stream. GUI timer
   events pace its playback without busy-waiting in the kernel. The audio
   stream is stopped when its process exits, even on a fault or kill.
+  The userspace player indexes up to twelve WAV files beside the opened
+  track and controls pause, seek, volume, and previous/next entirely in
+  ring 3. The compositor now coalesces pending timer and drag-motion
+  events in a bounded queue so these do not displace interactive keys.
+  Explorer implements navigation history, creation, no-overwrite rename,
+  same-window drag-to-folder, deletion confirmation, and typed file
+  clipboard data. Editor uses a separate text clipboard type, bounded
+  document snapshots for undo/redo, mouse/Shift selection and saving.
+  The clipboard is a 2048-byte kernel-owned copy; user pointers are
+  validated before any bytes cross the ABI.
+  File copy/move syscalls check both paths and forbid writes into `/apps`;
+  recursive copy is bounded to 128 nodes, 16 levels and 256 KiB, and
+  FAT-backed source bytes can be read in chunks rather than cached whole.
+  Control Panel uses fixed-size settings requests for network status/manual
+  IPv4, audio volume/mute, wallpaper and supported display modes. Values
+  and user buffers are validated, but there is no per-app authorization for
+  changing global settings yet. Its network diagnostics and DHCP request
+  are currently synchronous and bounded; moving those operations to an
+  asynchronous settings service remains work.
   Other clients can open the same raw PCM device with a fixed-width format
   (U8/S16, mono/stereo, 8–48 kHz). Each syscall validates and copies up to
   256 frames; the trusted audio boundary converts them to stereo S16

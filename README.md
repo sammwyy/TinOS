@@ -123,9 +123,11 @@ not been migrated to userspace.
 
 Media Player decodes standard 16-bit mono/stereo PCM WAV in ring 3 and
 submits bounded stereo frames through an audio handle. The ISO includes
-`/apps/media/demo.wav`; QEMU AC'97 supports playback at 8 MiB. Its window
-accepts Space to pause/resume and R to restart. Ogg/Vorbis decoding and
-playlists from the former player have not been ported.
+`/apps/media/demo.wav`; QEMU AC'97 supports playback at 8 MiB. The player
+lists up to 12 `.wav` files beside the opened file, allows clicking tracks,
+scrolling the playlist, previous/next, stop, Space to pause/resume, R to
+restart, timeline seeking and system volume changes. Ogg/Vorbis decoding
+and richer playlist formats are not yet ported.
 
 Other ring-3 applications can play raw PCM through
 `libraries/libc/include/tinos/libc.h`:
@@ -221,10 +223,12 @@ submit bounded text-cell frames or tiled XRGB8888 surfaces, and block while
 awaiting keyboard/mouse/resize events. Terminal supports `ls`, `cd`, `pwd`,
 `cat`, `echo`, `touch`, `mkdir`,
 `rm`, `edit`, `view`, `play`, `run`, `clear` and `exit`. Explorer browses directories,
-previews text, opens `.bmp` in Image Viewer, `.wav` in Media Player and files in the editor
-with `E`; the editor saves
-ramfs files with `Ctrl+S`. These are new userspace implementations, not
-the old kernel-callback GUI apps; their advanced controls are not yet ported.
+previews text, opens `.bmp` in Image Viewer, `.wav` in Media Player and files
+in the editor with `E`. It now creates, renames, copies, moves and removes
+ramfs entries through bounded userspace calls. The editor supports
+multiline selection, a shared text clipboard, bounded undo/redo and saving
+with `Ctrl+S`. These are new userspace implementations, not old
+kernel-callback GUI apps.
 `run /apps/echo.elf` demonstrates interactive child I/O in the GUI;
 `run /apps/cat.elf /README.txt` displays child output, and Ctrl+C cancels
 `run /apps/spin.elf`. The child stdout queue blocks writers when full and
@@ -232,6 +236,9 @@ wakes them when Terminal reads it, without busy-waiting in the kernel.
 Calculator handles bounded integer arithmetic; System Information reads
 system status through a validated syscall. Control Panel changes the
 keyboard between US and ES through an `ioctl` on the console descriptor.
+It also reads/configures network addresses, tests connectivity on request,
+controls AC'97 volume/mute and switches wallpaper or supported display
+modes. Configuration requests accept fixed-size values, not app callbacks.
 
 `libraries/libc/include/tinos/widgets.h` provides a ring-3 UI toolkit:
 column/row layouts, banners, panels, labels, editable fields, selectable
@@ -252,9 +259,11 @@ each copied 64x64-maximum pixel tile. A surface can reach 800x600 (about
 the old surface, and an initial allocation failure retries at smaller window
 sizes. Existing text and BMP image APIs remain available. The
 palette syscall negotiates its struct size so earlier 40-byte clients remain
-safe. This is not React or CSS: system-wide theme switching and some former
-app actions still need ports (Explorer rename/clipboard, Editor undo/selection,
-Control Panel network configuration, media playlists and formats).
+safe. A shared clipboard copies at most 2048 bytes with a text/file
+type, and the compositor coalesces timers and drag motion rather than
+letting them crowd out keyboard input. This is not React or CSS:
+live system-wide theme switching, general Unicode input, scalable fonts
+and additional media formats still need work.
 
 The mouse (if present - QEMU provides a PS/2 mouse by default) can click the
 Start button and menu entries, focus windows, drag them by the title bar,
@@ -301,20 +310,25 @@ The mouse wheel scrolls the scrollback (3 lines per notch).
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | copy / cut / paste |
 | `Ctrl+N` / `Ctrl+T` | new folder / new file |
 
-Every action also has a toolbar button. Double-clicking a row opens it;
-clicking and dragging a row onto a folder row moves it there (in the same
-window or a different one). The mouse wheel scrolls the list. In a rename box
-the old name starts out selected, so typing replaces it; `Esc` cancels any
-prompt.
+The toolbar covers navigation, creation, rename, delete, copy/paste and
+refresh. `E` opens a selected file in the editor; Enter previews a text
+file or opens a matching image/audio viewer. Double-click opens a row,
+and dragging an item onto a folder row moves it within the same window.
+Click the location bar to enter an absolute directory. The mouse wheel
+scrolls the list. Prompts accept `Ctrl+A` to replace an existing name;
+`Esc` cancels. Deletion asks for confirmation. Paste and rename refuse
+to overwrite an existing path; same-directory copy appends `-copy`.
 
 ### Text editor
 
 Ordinary typing, arrow keys, `Home`/`End`, `PageUp`/`PageDown`, `Tab`,
-`Enter`, `Backspace`, `Delete`, and `Ctrl+S` to save. The title shows `*`
-while there are unsaved changes. Click and drag to select text (shown
-highlighted); `Ctrl+C`/`Ctrl+X`/`Ctrl+V` copy, cut and paste it, and typing
-over a selection replaces it. The clipboard is shared with every other
-editor window.
+`Enter`, `Backspace`, `Delete`, `Ctrl+S` to save, `Ctrl+N` for a new file
+and `Ctrl+Z`/`Ctrl+Y` for undo/redo. The status line shows `*` for unsaved
+changes. Shift+arrows or a mouse drag selects text (shown highlighted);
+`Ctrl+A` selects all, `Ctrl+C`/`Ctrl+X`/`Ctrl+V` copy, cut and paste, and
+typing over a selection replaces it. The clipboard works between editor
+windows; `New` requires a second activation before discarding unsaved
+changes. Undo keeps the last eight document snapshots.
 
 ## Shell
 
@@ -710,7 +724,16 @@ through copied pixel tiles; no pointer to app code enters the compositor.
 Filesystem calls use file
 descriptors and path-based metadata. Writes are limited to
 64 KiB per file, the installed `/apps` tree is read-only to userspace,
+as are `/system` and read-only `/drive` mounts,
 and persistent disk writes, pipes and PTYs are not yet implemented.
+`tinos_rename()` (also moves paths) and `tinos_copy()` reject an existing
+target instead of replacing it; copying is bounded to 128 nodes, 16
+levels and 256 KiB per operation to protect small machines. Read-only
+FAT-backed source files are copied in chunks without populating a full
+read cache. `tinos_seek()` implements absolute offsets on read-only
+snapshot descriptors. The global settings `ioctl`s validate scalar values
+and copied structures but do not provide user accounts or per-app
+permissions yet.
 
 **Shared libraries.** The ELF32 loader follows bounded `DT_NEEDED` chains
 and resolves `R_386_RELATIVE`, `R_386_32`, `R_386_GLOB_DAT` and
@@ -819,23 +842,20 @@ make check     # the above plus the scripted QEMU boot/GUI session
 
 ## Known limitations
 
-* Resizing only grows or shrinks from the bottom-right corner (no dragging
-  the other three edges or corners), and toolbar buttons in the file
-  explorer aren't responsive - shrink the window enough and they clip.
+* Resizing only grows or shrinks from the bottom-right corner; toolbar
+  buttons in a very narrow Explorer window still clip.
 * The font covers ASCII, a few hand-drawn UI symbols, and the Latin-1
   Supplement (0xA0-0xFF: accented Western European letters). No Unicode
   beyond that, and there is no keyboard layout that can type those bytes -
   they only render if a file already contains them.
 * The filesystem is session-oriented: imported FAT volumes are read-only and
   the writable base tree is not persisted back to disk.
-* There are no user accounts or permissions, userspace signals or kill syscall,
-  per-CPU run queues,
-  NTFS support, or USB host controllers beyond the current UHCI path.
-  The ring-3 syscall ABI has console I/O, read-only access to memory-backed
-  files, `getpid`, `spawn`, `wait`, and `exit`; it has no writable files or
-  graphical APIs. Up to four processes share the boot processor while its
-  kernel-owned loop runs. Ring-3 floating-point instructions currently trap;
-  an independent FPU context is still pending.
+* There are no user accounts, per-app settings permissions, userspace
+  signals, per-CPU run queues, NTFS or USB host controllers beyond UHCI.
+  The ring-3 ABI includes writable session files, window surfaces, audio,
+  dynamic libraries and bounded settings requests; it does not yet provide
+  POSIX compatibility. Up to four processes share the boot processor
+  while its kernel-owned loop runs. Per-process FPU context is still pending.
 * The RTC is read directly, so the taskbar clock follows the host clock via
   `-rtc base=localtime`; without that flag QEMU reports UTC.
 * Only the Bochs/QEMU DISPI graphics interface is supported. On hardware or
