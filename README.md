@@ -700,13 +700,17 @@ privately. The bounded cache remains in RAM until reboot; on a system
 without an initrd, no objects are loaded. QEMU tests cover reusing a
 library at 8 and 16 MiB, private state across processes, dependency
 resolution, rejection of malformed relocation targets and missing
-dependencies, and a ring-3 write to shared code.
+dependencies, and a ring-3 write to shared code. `DT_INIT` and
+`DT_INIT_ARRAY` constructors run in dependency order through the TinOS
+userspace startup or `tinos_dlopen()` wrapper, never inside the kernel.
 
 This is an initial ELF dynamic-linking subset, not a Linux/glibc loader:
-TLS, constructors, symbol versioning, text relocations, lazy binding and
-`dlclose` are not supported; their ELF requirements are rejected instead of
-running them incorrectly. Executables still use a fixed load address, and
-the small shared-object cache is pinned until reboot.
+shared libraries can import symbols from supported `.so` dependencies, but
+not from the executable or host libc. TLS, destructors, symbol versioning,
+text relocations, lazy binding and `dlclose` remain unsupported; their ELF
+requirements are rejected instead of running them incorrectly. Executables
+still use a fixed load address and TinOS startup code; the small shared-object
+cache is pinned until reboot.
 
 ## Error handling
 

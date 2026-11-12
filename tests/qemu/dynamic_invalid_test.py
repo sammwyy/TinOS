@@ -39,6 +39,15 @@ def missing_dependency(image):
     assert len(before) == len(after) and image.count(before) >= 1
     return image.replace(before, after)
 
+def invalid_initializer(image):
+    dynamic = next(ph for ph in program_headers(image) if ph[0] == 2)
+    for i in range(dynamic[4] // 8):
+        entry = dynamic[1] + i * 8
+        if struct.unpack_from("<I", image, entry)[0] == 27:
+            struct.pack_into("<I", image, entry + 4, 4096)
+            return image
+    raise AssertionError("library has no initializer array")
+
 
 def boot_variant(source, kernel, loader, mode, temp):
     archive_path = temp / "ramfs.tar"
@@ -48,8 +57,12 @@ def boot_variant(source, kernel, loader, mode, temp):
             data = archive.extractfile(member).read()
             if member.name == "lib/libtinoschain.so":
                 modified = bytearray(data)
-                data = (invalid_relocation(modified) if mode == "relocation"
-                        else missing_dependency(modified))
+                if mode == "relocation":
+                    data = invalid_relocation(modified)
+                elif mode == "dependency":
+                    data = missing_dependency(modified)
+                else:
+                    data = invalid_initializer(modified)
             output.addfile(member, io.BytesIO(data))
 
     image = temp / "tinos-boot.img"
@@ -93,11 +106,11 @@ def main():
     parser.add_argument("--initrd", default="build/ramfs.tar")
     parser.add_argument("--loader", default="boot/x86/loader.asm")
     args = parser.parse_args()
-    for mode in ("relocation", "dependency"):
+    for mode in ("relocation", "dependency", "initializer"):
         with tempfile.TemporaryDirectory(prefix="tinos-invalid-so-") as path:
             boot_variant(args.initrd, pathlib.Path(args.kernel),
                          pathlib.Path(args.loader), mode, pathlib.Path(path))
-    print("invalid library relocation and dependency rejected: OK")
+    print("invalid library relocation, dependency and initializer rejected: OK")
 
 
 if __name__ == "__main__":

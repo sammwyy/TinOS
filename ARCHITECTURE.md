@@ -150,7 +150,10 @@ can still stall this loop.
   `kernel/arch/x86/paging.c` maps their cached read-only physical frames
   into each process and gives each process private writable pages. Code
   cache frames remain pinned until reboot; user processes cannot modify
-  `/apps/lib` or write to the shared code pages. TLS, constructors,
+  `/apps/lib` or write to the shared code pages. The loader validates
+  `DT_INIT`/`DT_INIT_ARRAY` and queues at most 32 user entry points per
+  process. `crt0` and the libc `dlopen` wrapper consume that queue in ring 3
+  after relocation and dependency initialization. TLS, destructors,
   symbol versions, lazy binding and unload remain unsupported.
 - The initrd is imported as read-only backing for files in `/apps`. A
   write detaches the file into private heap storage. The module stays

@@ -286,6 +286,9 @@ void syscall_dispatch(regs_t *frame)
         frame->eax = (uint32_t)process_library_symbol((int)frame->ebx, name);
         return;
     }
+    case TINOS_SYS_DL_INIT_NEXT:
+        frame->eax = (uint32_t)process_library_initializer();
+        return;
     case TINOS_SYS_GUI_CONSOLE_ATTACH:
         frame->eax = (uint32_t)desktop_user_window_console_attach(
             process_current_pid(), frame->ebx);

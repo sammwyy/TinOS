@@ -2,6 +2,7 @@
 
 extern unsigned tinos_chain_next(void);
 extern unsigned tinos_chain_object_next(void);
+extern unsigned tinos_chain_initial_value(void);
 
 typedef unsigned *(*state_pointer_t)(void);
 
@@ -11,9 +12,9 @@ int main(void)
     state_pointer_t state = (state_pointer_t)tinos_dlsym(
         handle, "tinos_state_pointer");
     unsigned *object = tinos_dlsym(handle, "tinos_state_shared_symbol");
-    if (handle <= 0 || !state || *state() != 7 ||
-        tinos_chain_next() != 8 || *state() != 8 ||
-        tinos_chain_next() != 9 || *state() != 9 ||
+    if (handle <= 0 || !state || tinos_chain_initial_value() != 8 ||
+        *state() != 8 || tinos_chain_next() != 9 ||
+        *state() != 9 || tinos_chain_next() != 10 || *state() != 10 ||
         !object || *object != 30 ||
         tinos_chain_object_next() != 31 || *object != 31)
         return 1;

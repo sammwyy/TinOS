@@ -1,6 +1,11 @@
-static unsigned counter = 7;
+static unsigned counter = 5;
 static unsigned * volatile active_counter = &counter;
 unsigned tinos_state_shared_symbol = 30;
+
+__attribute__((constructor)) static void initialize_state(void)
+{
+    *active_counter = 7;
+}
 
 unsigned tinos_state_next(void)
 {

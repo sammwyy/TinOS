@@ -82,7 +82,10 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
       to private writable pages. Verify a PIC library with initialized
       pointers and another library importing both code and mutable data;
       reject invalid relocation targets and missing dependencies in QEMU.
-- [ ] Extend the dynamic ABI with ring-3 constructors/destructors, TLS,
+- [x] Execute bounded `DT_INIT`/`DT_INIT_ARRAY` constructors from TinOS
+      `crt0` or `dlopen` in ring 3, after relocating dependencies, with
+      malformed initializer rejection and 8/16 MiB tests.
+- [ ] Extend the dynamic ABI with ring-3 destructors, TLS,
       symbol versions, optional unload and more flexible address-space
       allocation. Reject unsupported ELF metadata instead of skipping it.
 - [x] Bridge a Terminal's child stdin/stdout through bounded queues and

@@ -195,7 +195,19 @@ int tinos_pcm_wait(int handle, unsigned maximum_queued_frames)
 int tinos_dlopen(const char *name)
 {
     unsigned length = path_length(name);
-    return length ? invoke(TINOS_SYS_DLOPEN, (unsigned)name, length, 0) : -1;
+    if (!length)
+        return -1;
+    int handle = invoke(TINOS_SYS_DLOPEN, (unsigned)name, length, 0);
+    if (handle > 0) {
+        for (;;) {
+            void (*initializer)(void) = (void (*)(void))(unsigned)
+                invoke(TINOS_SYS_DL_INIT_NEXT, 0, 0, 0);
+            if (!initializer)
+                break;
+            initializer();
+        }
+    }
+    return handle;
 }
 
 void *tinos_dlsym(int handle, const char *symbol)
