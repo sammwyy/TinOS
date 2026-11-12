@@ -58,6 +58,19 @@ def main():
         time.sleep(0.4)
         vm.screenshot(path)
         assert Screen(path).has("BMP 24/32-bit"), "image viewer failed at 8 MiB"
+        vm.key("alt", "f4")
+        assert vm.wait_for_serial("closed window 2 'Image Viewer'", timeout=15)
+        vm.key("ctrl", "esc")
+        time.sleep(0.4)
+        vm.screenshot(path)
+        matches = Screen(path).find("media_player.elf")
+        assert matches, "media player missing at 8 MiB"
+        x, y = matches[0]
+        vm.mouse_click(x + 20, y + 6)
+        assert vm.wait_for_serial("opened window 3 'Media Player'",
+                                  timeout=15), vm.serial()
+        assert vm.wait_for_serial("opened stereo PCM at 22050 Hz",
+                                  timeout=15), vm.serial()
         assert "KERNEL PANIC" not in vm.serial()
         print("8 MiB desktop and ring-3 menu launch: OK")
     finally:

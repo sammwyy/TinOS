@@ -3,6 +3,7 @@
 #define TINOS_LIBC_H
 
 #include <tinos/desktop.h>
+#include <tinos/audio.h>
 #include <tinos/syscall.h>
 
 int tinos_open(const char *path);
@@ -26,6 +27,10 @@ int tinos_gui_event(int handle, tinos_gui_event_t *event);
 int tinos_gui_close(int handle);
 int tinos_gui_blit(int handle, const uint32_t *pixels,
                    unsigned width, unsigned height);
+int tinos_gui_timer(int handle, unsigned interval_ms);
+int tinos_audio_open(unsigned sample_rate);
+int tinos_audio_write(int handle, const int16_t *samples, unsigned frames);
+int tinos_audio_control(int handle, unsigned command);
 int tinos_gui_console_attach(int handle);
 int tinos_gui_console_read(int handle, char *buffer, unsigned length);
 int tinos_tty_send(int child_pid, char ch);

@@ -37,7 +37,7 @@ exit without blocking the boot processor.
 | Threads             | Kernel threads, `THREAD_MAX` = 32, 16 KiB stacks             |
 | SMP                 | APs brought up via ACPI MADT + LAPIC INIT/SIPI               |
 | Interrupts          | 8259 PIC, PIT timer                                          |
-| Syscalls            | `int 0x80`: I/O, ramfs, process lifecycle, GUI handles/events, sysinfo, keyboard ioctl |
+| Syscalls            | `int 0x80`: I/O, ramfs, process lifecycle, GUI handles/events, sysinfo, keyboard ioctl, PCM audio |
 | Filesystem          | In-memory node tree; FAT16/FAT32 imported read-only          |
 | Network             | Polling Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS in the kernel |
 | Graphics            | Bochs/QEMU DISPI only, software framebuffer in the kernel    |
@@ -138,8 +138,8 @@ can still stall this loop.
 - `libraries/image` and `libraries/audio` (stb_image, simplewebp, stb_vorbis
   wrappers) are also linked into the kernel, with per-directory SSE2 flags.
 - `userland/bin/` produces freestanding ELF32 programs against
-  `libraries/libc/`; the boot image packages these binaries and a sample
-  BMP resource. The older ring-0 native app ABI is never packed.
+  `libraries/libc/`; the boot image packages these binaries and sample
+  BMP/WAV resources. The older ring-0 native app ABI is never packed.
 - The initrd is imported as read-only backing for files in `/apps`. A
   write detaches the file into private heap storage. The module stays
   reserved while borrowed data exists.
@@ -153,10 +153,15 @@ can still stall this loop.
 - The trusted compositor offers one window handle per process, text-cell
   frame submission (bounded copy-in) and blocking keyboard/mouse/resize/close
   events. The process table wakes only the blocked owner of a window.
-  Terminal, Explorer, Editor, Image Viewer, Calculator, System Information,
-  Control Panel and About are ring-3 programs using this ABI. Image Viewer
+  Terminal, Explorer, Editor, Image Viewer, Media Player, Calculator,
+  System Information, Control Panel and About are ring-3 programs using
+  this ABI. Image Viewer
   decodes BMP in its own address space and submits a validated, copied pixel
   surface (at most 320x192); the compositor owns the resulting buffer.
+  Media Player decodes standard PCM WAV in userspace and sends at most 256
+  stereo frames per syscall to a single-owner PCM audio stream. GUI timer
+  events pace its playback without busy-waiting in the kernel. The audio
+  stream is stopped when its process exits, even on a fault or kill.
   The terminal handles simple commands itself and bridges its children's
   fd 0/1/2 to a bounded parent-owned byte stream and input queue. Full
   streams block child writers; the compositor wakes them when the terminal

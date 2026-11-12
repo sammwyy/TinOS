@@ -8,6 +8,7 @@
 #include <tinos/syscall.h>
 #include <tinos/string.h>
 #include <tinos/user_window.h>
+#include <tinos/user_audio.h>
 #include <uapi/tinos/desktop.h>
 #include <uapi/tinos/syscall.h>
 
@@ -220,6 +221,31 @@ void syscall_dispatch(regs_t *frame)
             (const uint32_t *)(uintptr_t)frame->ecx, frame->edx, frame->esi);
         return;
     }
+    case TINOS_SYS_GUI_TIMER:
+        frame->eax = (uint32_t)desktop_user_window_timer(
+            process_current_pid(), frame->ebx, frame->ecx);
+        return;
+    case TINOS_SYS_AUDIO_OPEN:
+        frame->eax = (uint32_t)user_audio_open(process_current_pid(), frame->ebx);
+        return;
+    case TINOS_SYS_AUDIO_WRITE: {
+        if (!frame->edx || frame->edx > 256 ||
+            !process_user_buffer(frame->ecx, frame->edx * 2u * sizeof(int16_t),
+                                 false)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        int16_t samples[256 * 2];
+        memcpy(samples, (const void *)(uintptr_t)frame->ecx,
+               frame->edx * 2u * sizeof(int16_t));
+        frame->eax = (uint32_t)user_audio_write(process_current_pid(), frame->ebx,
+                                                samples, frame->edx);
+        return;
+    }
+    case TINOS_SYS_AUDIO_CONTROL:
+        frame->eax = (uint32_t)user_audio_control(process_current_pid(),
+                                                  frame->ebx, frame->ecx);
+        return;
     case TINOS_SYS_GUI_CONSOLE_ATTACH:
         frame->eax = (uint32_t)desktop_user_window_console_attach(
             process_current_pid(), frame->ebx);

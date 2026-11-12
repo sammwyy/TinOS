@@ -16,9 +16,11 @@ def main():
         names = archive.getnames()
         assert names and "hello.elf" in names, names
         assert "media/demo.bmp" in names, names
+        assert "media/demo.wav" in names, names
         assert archive.extractfile("media/demo.bmp").read(2) == b"BM"
+        assert archive.extractfile("media/demo.wav").read(4) == b"RIFF"
         assert all(member.isfile() and (
-            member.name == "media/demo.bmp" or
+            member.name in ("media/demo.bmp", "media/demo.wav") or
             ("/" not in member.name or member.name.startswith("gui/")) and
             member.name.endswith(".elf")) for member in archive), names
     symbols = subprocess.check_output(["nm", "-g", args.kernel], text=True)

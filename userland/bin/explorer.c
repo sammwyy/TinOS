@@ -109,6 +109,11 @@ static void enter_selected(void)
             tinos_spawn(args[0], 2, args);
             return;
         }
+        if (length >= 4 && strcmp(path + length - 4, ".wav") == 0) {
+            const char *args[] = { "/apps/gui/media_player.elf", path };
+            tinos_spawn(args[0], 2, args);
+            return;
+        }
         tinos_strlcpy(preview_path, path, sizeof(preview_path));
         preview = 1;
     }

@@ -1,0 +1,10 @@
+#ifndef TINOS_UAPI_AUDIO_H
+#define TINOS_UAPI_AUDIO_H
+
+#define TINOS_AUDIO_PAUSE  1u
+#define TINOS_AUDIO_RESUME 2u
+#define TINOS_AUDIO_DRAIN  3u
+#define TINOS_AUDIO_QUEUED 4u
+#define TINOS_AUDIO_CLOSE  5u
+
+#endif

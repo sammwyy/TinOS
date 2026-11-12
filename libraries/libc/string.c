@@ -27,6 +27,15 @@ int strncmp(const char *a, const char *b, size_t n)
     return n ? (unsigned char)*a - (unsigned char)*b : 0;
 }
 
+int memcmp(const void *a, const void *b, size_t n)
+{
+    const unsigned char *left = a, *right = b;
+    for (size_t i = 0; i < n; i++)
+        if (left[i] != right[i])
+            return (int)left[i] - (int)right[i];
+    return 0;
+}
+
 void *memcpy(void *dst, const void *src, size_t n)
 {
     unsigned char *d = dst;

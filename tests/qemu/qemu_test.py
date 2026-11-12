@@ -826,6 +826,24 @@ def run_scenario(iso, shots_dir):
                     "copied pixel surface composites into the window")
             vm.key("alt", "f4")
         vm.key("ctrl", "esc")
+        menu = shot("menu-media")
+        hits = menu.find("media_player.elf")
+        if c.check(bool(hits), "media player listed in the menu"):
+            x, y = hits[0]
+            vm.mouse_click(x + 20, y + 6)
+            c.check(vm.wait_for_serial("opened window 8 'Media Player'",
+                                       timeout=15), "media player opens in ring 3")
+            c.check(vm.wait_for_serial("opened stereo PCM at 22050 Hz",
+                                       timeout=15), "WAV player acquires the PCM device")
+            player = shot("media-player")
+            c.check(player.has("PCM WAV") and not player.has("unavailable"),
+                    "userspace WAV decoder streams to the audio driver")
+            vm.key("r")
+            vm.key("spc")
+            c.check(shot("media-pause").has("Paused"),
+                    "player can pause PCM playback through its handle")
+            vm.key("alt", "f4")
+        vm.key("ctrl", "esc")
         after = shot("desktop-after-process")
         c.check(after.has("Programs"), "desktop accepts input after client exits")
         c.check("KERNEL PANIC" not in vm.serial(), "no kernel panic")

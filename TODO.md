@@ -66,12 +66,16 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
       About to ELF32 ring-3 clients using libc.
 - [x] Add copied pixel surfaces (320x192 maximum, allocated per client)
       and a ring-3 BMP decoder for Image Viewer, including an 8 MiB GUI test.
+- [x] Provide a process-owned stereo PCM device with validated, copied
+      buffers and cleanup on exit; port Media Player with userspace PCM WAV
+      decoding and GUI timer events, including an 8 MiB test.
 - [x] Bridge a Terminal's child stdin/stdout through bounded queues and
       process-scoped events. Block full writers, wake them when drained,
       report child exit, and allow a parent to kill its own child with Ctrl+C.
-- [ ] Port the remaining Media Player and advanced controls. Move PNG/JPEG/
-      WebP and audio decoding out of ring 0; add audio device handles and
-      PTYs/pipes for arbitrary programs and shell pipelines.
+- [ ] Port the advanced features of the former GUI apps: PNG/JPEG/WebP and
+      Ogg/Vorbis userspace decoders, playlists and controls. Remove the
+      unused ring-0 codec implementations; add PTYs/pipes for arbitrary
+      programs and shell pipelines.
 - [ ] Add heap canaries / redzones and a `heap_check()` callable from the
       self-test and from the panic path (`kernel/mm/heap.c`).
 - [ ] Add stack guard words to thread stacks and check them on context switch

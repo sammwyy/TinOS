@@ -12,6 +12,7 @@
 #include <tinos/thread.h>
 #include <tinos/user_vm.h>
 #include <tinos/user_window.h>
+#include <tinos/user_audio.h>
 #include <uapi/tinos/syscall.h>
 
 extern int arch_enter_user(uintptr_t entry, uintptr_t stack);
@@ -440,6 +441,7 @@ static bool prepare_user_stack(int argc, const char *const argv[],
 
 static void release_process(process_t *p)
 {
+    user_audio_release(p->pid);
     desktop_user_window_release(p->pid);
     for (size_t i = 3; i < ARRAY_SIZE(p->files); i++)
         kfree(p->files[i].owned);

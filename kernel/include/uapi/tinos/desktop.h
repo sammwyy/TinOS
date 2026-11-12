@@ -17,6 +17,7 @@
 #define TINOS_GUI_MOUSE  4u
 #define TINOS_GUI_OUTPUT 5u
 #define TINOS_GUI_CHILD_EXIT 6u
+#define TINOS_GUI_TIMER  7u
 
 #define TINOS_KEY_BACKSPACE 8u
 #define TINOS_KEY_TAB 9u

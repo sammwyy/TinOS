@@ -6,7 +6,7 @@ LIBC_BUILD := $(ROOT)/build/libc
 LIBC_APPS := cat fdtest spin spawn spawn_badarg multi gui_security stream
 LIBC_ELFS := $(addprefix $(BUILD)/,$(addsuffix .elf,$(LIBC_APPS)))
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
-            image_viewer
+            image_viewer media_player
 GUI_ELFS := $(addprefix $(BUILD)/gui/,$(addsuffix .elf,$(GUI_APPS)))
 CFLAGS := -m32 -std=gnu11 -O2 -ffreestanding -fno-builtin \
           -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables \

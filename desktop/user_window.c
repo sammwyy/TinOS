@@ -1,3 +1,4 @@
+#include <tinos/arch.h>
 #include <tinos/gfx.h>
 #include <tinos/heap.h>
 #include <tinos/process.h>
@@ -20,6 +21,8 @@ typedef struct {
     bool console_attached;
     uint32_t *pixels;
     uint32_t pixel_width, pixel_height;
+    uint32_t timer_interval;
+    uint64_t next_timer;
 } gui_client_t;
 
 static gui_client_t clients[PROCESS_MAX];
@@ -38,7 +41,7 @@ static void enqueue(gui_client_t *client, tinos_gui_event_t event)
     unsigned next = (client->tail + 1) % GUI_QUEUE;
     if (next == client->head) {
         if (event.type == TINOS_GUI_KEY || event.type == TINOS_GUI_MOUSE ||
-            event.type == TINOS_GUI_RESIZE)
+            event.type == TINOS_GUI_RESIZE || event.type == TINOS_GUI_TIMER)
             return;
         client->head = (client->head + 1) % GUI_QUEUE;
     }
@@ -95,6 +98,17 @@ static void user_resize(window_t *window, rect_t area)
     });
 }
 
+static bool user_tick(window_t *window)
+{
+    gui_client_t *client = window->priv;
+    uint64_t now = timer_ticks();
+    if (client->timer_interval && now >= client->next_timer) {
+        client->next_timer = now + client->timer_interval;
+        enqueue(client, (tinos_gui_event_t){ .type = TINOS_GUI_TIMER });
+    }
+    return false;
+}
+
 static void user_close(window_t *window)
 {
     gui_client_t *client = window->priv;
@@ -110,7 +124,7 @@ static void user_close(window_t *window)
 static const app_class_t user_class = {
     .name = "Userspace window", .on_draw = user_draw,
     .on_key = user_key, .on_mouse = user_mouse,
-    .on_resize = user_resize, .on_close = user_close,
+    .on_resize = user_resize, .on_close = user_close, .on_tick = user_tick,
 };
 
 void desktop_user_window_init(void)
@@ -211,6 +225,17 @@ int desktop_user_window_blit(uint32_t pid, int handle, const uint32_t *pixels,
     }
     memcpy(client->pixels, pixels, (size_t)width * height * sizeof(uint32_t));
     wm_invalidate(client->window);
+    return 0;
+}
+
+int desktop_user_window_timer(uint32_t pid, int handle, uint32_t interval_ms)
+{
+    gui_client_t *client = client_for(pid);
+    if (handle != 1 || !client || !client->window ||
+        (interval_ms && (interval_ms < 20 || interval_ms > 1000)))
+        return -1;
+    client->timer_interval = interval_ms;
+    client->next_timer = timer_ticks() + interval_ms;
     return 0;
 }
 

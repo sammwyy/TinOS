@@ -167,12 +167,17 @@ RAMFS := $(BUILD)/ramfs.tar
 USERLAND_APPS := hello fault badptr echo fpu io df textwrite cat fdtest \
                  spin spawn spawn_badarg multi gui_security stream
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
-            image_viewer
+            image_viewer media_player
 SAMPLE_BMP := $(BUILD)/userland/media/demo.bmp
+SAMPLE_WAV := $(BUILD)/userland/media/demo.wav
 
 $(SAMPLE_BMP): tools/gen_sample_bmp.py
 	@mkdir -p $(dir $@)
 	python3 tools/gen_sample_bmp.py $@
+
+$(SAMPLE_WAV): tools/gen_sample_wav.py
+	@mkdir -p $(dir $@)
+	python3 tools/gen_sample_wav.py $@
 
 .PHONY: native-apps
 native-apps:
@@ -187,12 +192,13 @@ userland-apps:
 # --mtime/--owner/--group/--sort keep the archive's bytes independent of
 # build-machine clock and user IDs, matching the ISO's own reproducibility
 # guarantees below.
-$(RAMFS): userland-apps $(SAMPLE_BMP)
+$(RAMFS): userland-apps $(SAMPLE_BMP) $(SAMPLE_WAV)
 	@mkdir -p $(dir $@)
 	@cd $(BUILD)/userland && tar --format=ustar --sort=name --mtime=@0 \
 		--owner=0 --group=0 --numeric-owner -cf $(abspath $@) \
 		$(addsuffix .elf,$(USERLAND_APPS)) \
-		$(addprefix gui/,$(addsuffix .elf,$(GUI_APPS))) media/demo.bmp
+		$(addprefix gui/,$(addsuffix .elf,$(GUI_APPS))) \
+		media/demo.bmp media/demo.wav
 
 # --- BIOS El Torito ISO ------------------------------------------------
 $(BOOT_IMAGE): $(KERNEL) $(RAMFS) boot/x86/loader.asm boot/x86/build_image.py

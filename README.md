@@ -61,8 +61,8 @@ kernel; Ctrl+C stops that reader. The desktop and text shell remain kernel
 services, but application ELF files can execute only in ring 3.
 
 At 8 MiB of QEMU RAM the graphical desktop can launch Terminal, File
-Explorer, Text Editor, Image Viewer, Calculator, System Information,
-Control Panel and About as separate ring-3 ELF programs with their own
+Explorer, Text Editor, Image Viewer, Media Player, Calculator, System
+Information, Control Panel and About as separate ring-3 ELF programs with their own
 windows. Terminal
 connects its child processes to a bounded stdin/stdout channel, so `run`
 shows their output and forwards keyboard input; `Ctrl+C` stops a running
@@ -113,11 +113,18 @@ shell atlas.  The legacy `icon_t` values remain as compatibility handles, but
 custom code can use `widget_icon_name(x, y, size, "name")` directly.
 
 The current File Explorer browses directories, previews text and launches
-Image Viewer for `.bmp` files. Image Viewer decodes uncompressed 24/32-bit
+Image Viewer for `.bmp` files and Media Player for `.wav` files.
+Image Viewer decodes uncompressed 24/32-bit
 BMPs (up to 320x192) in ring 3 and submits copied pixels to its own window;
 `/apps/media/demo.bmp` is a sample. The former multi-format Image Viewer
 remains under `apps/` as a porting reference; PNG/JPEG/WebP decoders have
 not been migrated to userspace.
+
+Media Player decodes standard 16-bit mono/stereo PCM WAV in ring 3 and
+submits bounded stereo frames through an audio handle. The ISO includes
+`/apps/media/demo.wav`; QEMU AC'97 supports playback at 8 MiB. Its window
+accepts Space to pause/resume and R to restart. Ogg/Vorbis decoding and
+playlists from the former player have not been ported.
 
 For temporary artwork, create a numbered placeholder with:
 
@@ -196,8 +203,8 @@ The start menu lists `/apps/gui/*.elf` under *Programs* and launches each
 through the process loader. Applications use `int 0x80` to open a window,
 submit bounded text-cell frames and block while awaiting keyboard/mouse
 events. Terminal supports `ls`, `cd`, `pwd`, `cat`, `echo`, `touch`, `mkdir`,
-`rm`, `edit`, `view`, `run`, `clear` and `exit`. Explorer browses directories,
-previews text, opens `.bmp` in Image Viewer and opens files in the editor
+`rm`, `edit`, `view`, `play`, `run`, `clear` and `exit`. Explorer browses directories,
+previews text, opens `.bmp` in Image Viewer, `.wav` in Media Player and files in the editor
 with `E`; the editor saves
 ramfs files with `Ctrl+S`. These are new userspace implementations, not
 the old kernel-callback GUI apps; their advanced controls are not yet ported.

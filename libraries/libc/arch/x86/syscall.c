@@ -154,6 +154,27 @@ int tinos_gui_blit(int handle, const uint32_t *pixels,
                    width, height);
 }
 
+int tinos_gui_timer(int handle, unsigned interval_ms)
+{
+    return invoke(TINOS_SYS_GUI_TIMER, (unsigned)handle, interval_ms, 0);
+}
+
+int tinos_audio_open(unsigned sample_rate)
+{
+    return invoke(TINOS_SYS_AUDIO_OPEN, sample_rate, 0, 0);
+}
+
+int tinos_audio_write(int handle, const int16_t *samples, unsigned frames)
+{
+    return invoke(TINOS_SYS_AUDIO_WRITE, (unsigned)handle,
+                  (unsigned)samples, frames);
+}
+
+int tinos_audio_control(int handle, unsigned command)
+{
+    return invoke(TINOS_SYS_AUDIO_CONTROL, (unsigned)handle, command, 0);
+}
+
 int tinos_gui_console_attach(int handle)
 {
     return invoke(TINOS_SYS_GUI_CONSOLE_ATTACH, (unsigned)handle, 0, 0);
