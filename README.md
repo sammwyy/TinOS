@@ -734,7 +734,10 @@ weak-version fallbacks, text relocations and lazy binding remain
 unsupported; their ELF
 requirements are rejected instead of running them incorrectly. Executables
 still use a fixed load address and TinOS startup code; the small shared-object
-cache is pinned until reboot.
+cache is pinned until reboot. `PT_INTERP`, Linux syscalls, glibc's thread,
+signal, memory-mapping and file-descriptor contracts are not implemented:
+these features make ELF linking more capable, but do not make unmodified
+glibc binaries runnable on TinOS.
 
 ## Error handling
 

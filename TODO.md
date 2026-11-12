@@ -110,6 +110,23 @@ Placeholder directories that stay empty until their phase: `kernel/ipc`,
       weak-version fallbacks, eviction of globally cached read-only pages
       and more flexible address-space allocation. Reject unsupported ELF
       metadata instead of skipping it.
+- [ ] Define the target for glibc compatibility: a TinOS source port or
+      unmodified Linux/i386 binaries. The latter needs a Linux-compatible
+      syscall, process, signal, filesystem and threading ABI, not just ELF
+      metadata or matching libc function names.
+- [ ] Support the executable-side loader ABI needed by larger programs:
+      `PT_INTERP`, position-independent executables, relocated executable
+      data, remaining safe i386 relocation types, weak symbols, symbol
+      scope/interposition and validated RELRO. Keep application loaders
+      and constructors in ring 3.
+- [ ] Provide the userspace services a glibc port needs: bounded
+      `mmap`/`brk`, file descriptor and TTY/pipe semantics, clocks,
+      signals, per-thread TLS, `clone`/`futex` equivalents, and errno.
+      Test an actual glibc-built program before claiming compatibility.
+- [ ] Measure a real glibc image against the 4–16 MiB boot targets.
+      Replace fixed 64 KiB shared-object slots and the pinned code cache
+      with bounded virtual-space allocation and reclaim before enabling
+      libraries that cannot fit in the current low-memory profile.
 - [x] Bridge a Terminal's child stdin/stdout through bounded queues and
       process-scoped events. Block full writers, wake them when drained,
       report child exit, and allow a parent to kill its own child with Ctrl+C.
