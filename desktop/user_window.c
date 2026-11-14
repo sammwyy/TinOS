@@ -23,6 +23,7 @@ typedef struct {
     uint32_t pixel_width, pixel_height;
     uint32_t *surface;
     uint32_t surface_width, surface_height;
+    bool surface_updating;
     uint32_t timer_interval;
     uint64_t next_timer;
 } gui_client_t;
@@ -73,12 +74,14 @@ static void enqueue(gui_client_t *client, tinos_gui_event_t event)
 static void user_draw(window_t *window, rect_t area)
 {
     gui_client_t *client = window->priv;
+    if (client->surface_updating && wm_window_cached(window)) {
+        wm_blit_window(window);
+        return;
+    }
     gfx_fill_rect(area.x, area.y, area.w, area.h, COLOR_TERMINAL_BG);
     if (client->surface) {
-        gfx_blit_image(rect_make(area.x, area.y, client->surface_width,
-                                 client->surface_height),
-                       client->surface, client->surface_width,
-                       client->surface_height);
+        gfx_blit_opaque(area.x, area.y, client->surface,
+                        client->surface_width, client->surface_height);
         return;
     }
     if (client->pixels)
@@ -275,7 +278,8 @@ int desktop_user_window_surface_config(uint32_t pid, int handle,
     client->surface = replacement;
     client->surface_width = width;
     client->surface_height = height;
-    wm_invalidate(client->window);
+    if (!client->surface_updating)
+        wm_invalidate(client->window);
     return 0;
 }
 
@@ -299,7 +303,26 @@ int desktop_user_window_surface_tile(uint32_t pid,
             client->surface[(size_t)(tile->y + row) *
                             client->surface_width + tile->x + col] =
                 pixels[(size_t)row * tile->width + col] | 0xff000000u;
-    wm_invalidate(client->window);
+    if (!client->surface_updating)
+        wm_invalidate(client->window);
+    return 0;
+}
+
+int desktop_user_window_surface_update(uint32_t pid, int handle,
+                                       uint32_t commit)
+{
+    gui_client_t *client = client_for(pid);
+    if (handle != 1 || !client || !client->window || !client->surface ||
+        commit > 1)
+        return -1;
+    if (commit) {
+        if (!client->surface_updating)
+            return -1;
+        client->surface_updating = false;
+        wm_invalidate(client->window);
+    } else {
+        client->surface_updating = true;
+    }
     return 0;
 }
 

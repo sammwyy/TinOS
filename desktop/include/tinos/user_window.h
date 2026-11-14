@@ -28,6 +28,8 @@ int desktop_user_window_surface_config(uint32_t pid, int handle,
 int desktop_user_window_surface_tile(uint32_t pid,
                                      const tinos_gui_tile_t *tile,
                                      const uint32_t *pixels);
+int desktop_user_window_surface_update(uint32_t pid, int handle,
+                                       uint32_t commit);
 void desktop_user_window_theme(tinos_gui_theme_t *theme);
 
 #endif

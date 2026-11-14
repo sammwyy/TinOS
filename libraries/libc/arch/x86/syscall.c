@@ -209,6 +209,11 @@ int tinos_gui_surface_tile(int handle, unsigned x, unsigned y,
     return invoke(TINOS_SYS_GUI_SURFACE_TILE, (unsigned)&tile, 0, 0);
 }
 
+int tinos_gui_surface_update(int handle, unsigned commit)
+{
+    return invoke(TINOS_SYS_GUI_SURFACE_UPDATE, (unsigned)handle, commit, 0);
+}
+
 int tinos_gui_theme(tinos_gui_theme_t *theme)
 {
     return invoke(TINOS_SYS_GUI_THEME, (unsigned)theme, sizeof(*theme), 0);

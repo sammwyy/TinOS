@@ -337,6 +337,20 @@ void gfx_blend_rect(int x, int y, int w, int h, color_t color, uint8_t alpha)
     gfx_mark_dirty(r.x, r.y, r.w, r.h);
 }
 
+void gfx_blit_opaque(int x, int y, const uint32_t *pixels, int width, int height)
+{
+    if (!fb.active || !pixels || width <= 0 || height <= 0)
+        return;
+    rect_t r = rect_intersect(rect_make(x, y, width, height), clip);
+    if (rect_empty(r))
+        return;
+    for (int py = r.y; py < r.y + r.h; py++)
+        memcpy(fb.back + (size_t)py * fb.width + r.x,
+               pixels + (size_t)(py - y) * width + r.x - x,
+               (size_t)r.w * sizeof(uint32_t));
+    gfx_mark_dirty(r.x, r.y, r.w, r.h);
+}
+
 void gfx_blit_image(rect_t dst, const uint32_t *pixels, int width, int height)
 {
     if (!fb.active || !pixels || width <= 0 || height <= 0 || dst.w <= 0 ||

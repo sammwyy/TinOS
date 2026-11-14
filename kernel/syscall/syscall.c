@@ -416,6 +416,10 @@ void syscall_dispatch(regs_t *frame)
             (const uint32_t *)(uintptr_t)tile.pixels);
         return;
     }
+    case TINOS_SYS_GUI_SURFACE_UPDATE:
+        frame->eax = (uint32_t)desktop_user_window_surface_update(
+            process_current_pid(), frame->ebx, frame->ecx);
+        return;
     case TINOS_SYS_GUI_THEME: {
         unsigned bytes = frame->ecx ? frame->ecx : TINOS_GUI_THEME_V1_SIZE;
         if (bytes != TINOS_GUI_THEME_V1_SIZE &&

@@ -68,9 +68,11 @@ static void fill(tinos_widget_view_t *view, int tx, int ty, int tw, int th,
     int bottom = minimum(y + h, ty + th);
     if (right <= left || bottom <= top)
         return;
-    for (int py = top; py < bottom; py++)
+    for (int py = top; py < bottom; py++) {
+        uint32_t *row = view->tile + (py - ty) * tw + left - tx;
         for (int px = left; px < right; px++)
-            view->tile[(py - ty) * tw + px - tx] = color;
+            *row++ = color;
+    }
 }
 
 static void text(tinos_widget_view_t *view, int tx, int ty, int tw, int th,
@@ -390,11 +392,16 @@ int tinos_widget_flush(tinos_widget_view_t *view)
     unsigned height = minimum(size.height, TINOS_GUI_SURFACE_MAX_HEIGHT);
     if (!width || !height)
         return -1;
+    if (!view->dirty && view->width == width && view->height == height)
+        return 0;
+    if (tinos_gui_surface_update(view->handle, 0) < 0)
+        return -1;
     if (view->width != width || view->height != height) {
         if (tinos_gui_surface_config(view->handle, width, height) == 0) {
             view->width = width;
             view->height = height;
         } else if (!view->width || !view->height) {
+            tinos_gui_surface_update(view->handle, 1);
             return -1;
         }
         /* An existing surface remains usable if a larger allocation fails. */
@@ -402,8 +409,6 @@ int tinos_widget_flush(tinos_widget_view_t *view)
     }
     width = view->width;
     height = view->height;
-    if (!view->dirty)
-        return 0;
     view->nodes[0].x = view->nodes[0].y = 0;
     view->nodes[0].width = width;
     view->nodes[0].height = height;
@@ -417,6 +422,8 @@ int tinos_widget_flush(tinos_widget_view_t *view)
                                        view->tile) < 0)
                 return -1;
         }
+    if (tinos_gui_surface_update(view->handle, 1) < 0)
+        return -1;
     view->dirty = false;
     return 0;
 }
