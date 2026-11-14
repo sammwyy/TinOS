@@ -4,6 +4,7 @@
 #include <tinos/io.h>
 #include <tinos/kernel.h>
 #include <tinos/process.h>
+#include <tinos/runloop.h>
 #include <tinos/string.h>
 #include <tinos/syscall.h>
 #include <tinos/thread.h>
@@ -173,6 +174,7 @@ regs_t *isr_dispatch(regs_t *regs)
             irq_handlers[irq](regs);
         pic_send_eoi(irq);
         if (irq == 0) {
+            kernel_loop_account_tick();
             process_on_tick(regs);
             return thread_preempt(regs);
         }

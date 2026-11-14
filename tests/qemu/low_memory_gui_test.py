@@ -5,7 +5,7 @@ import argparse
 import os
 import time
 
-from qemu_test import Screen, Tinos
+from qemu_test import Screen, Tinos, menu_launch
 
 
 def main():
@@ -25,11 +25,9 @@ def main():
         vm.screenshot(path)
         screen = Screen(path)
         assert screen.size in ((640, 480), (800, 600), (1024, 768)), screen.size
-        assert screen.has("Programs"), "start menu not visible"
-        matches = screen.find("terminal.elf")
-        assert matches, "ring-3 program not visible"
-        x, y = matches[0]
-        vm.mouse_click(x + 20, y + 6)
+        assert screen.has("Accessories"), "start menu not visible"
+        vm.key("esc")
+        assert menu_launch(vm, "terminal"), "ring-3 program not visible"
         assert vm.wait_for_serial("opened window 1 'Terminal'",
                                   timeout=15), vm.serial()
         vm.line("ls /")
@@ -46,13 +44,7 @@ def main():
         assert Screen(path).has("ring3 echo: eight megabytes"), "child input failed"
         vm.key("alt", "f4")
         assert vm.wait_for_serial("closed window 1 'Terminal'", timeout=15)
-        vm.key("ctrl", "esc")
-        time.sleep(0.4)
-        vm.screenshot(path)
-        matches = Screen(path).find("image_viewer.elf")
-        assert matches, "image viewer missing at 8 MiB"
-        x, y = matches[0]
-        vm.mouse_click(x + 20, y + 6)
+        assert menu_launch(vm, "image_viewer"), "image viewer missing at 8 MiB"
         assert vm.wait_for_serial("opened window 2 'Image Viewer'",
                                   timeout=15), vm.serial()
         time.sleep(0.4)
@@ -60,13 +52,7 @@ def main():
         assert Screen(path).has("BMP 24/32-bit"), "image viewer failed at 8 MiB"
         vm.key("alt", "f4")
         assert vm.wait_for_serial("closed window 2 'Image Viewer'", timeout=15)
-        vm.key("ctrl", "esc")
-        time.sleep(0.4)
-        vm.screenshot(path)
-        matches = Screen(path).find("media_player.elf")
-        assert matches, "media player missing at 8 MiB"
-        x, y = matches[0]
-        vm.mouse_click(x + 20, y + 6)
+        assert menu_launch(vm, "media_player"), "media player missing at 8 MiB"
         assert vm.wait_for_serial("opened window 3 'Media Player'",
                                   timeout=15), vm.serial()
         assert vm.wait_for_serial("opened stereo PCM at 22050 Hz",

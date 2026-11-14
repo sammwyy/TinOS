@@ -35,9 +35,43 @@ static unsigned last_click = MAX_ENTRIES, last_click_ms;
 static char form[PATH_CAP], notice[96];
 static void refresh(void);
 
+static bool has_suffix(const char *name, const char *suffix)
+{
+    size_t n = strlen(name), m = strlen(suffix);
+    if (n < m)
+        return false;
+    for (size_t i = 0; i < m; i++) {
+        char c = name[n - m + i];
+        if (c >= 'A' && c <= 'Z')
+            c = (char)(c - 'A' + 'a');
+        if (c != suffix[i])
+            return false;
+    }
+    return true;
+}
+
+static const char *file_icon(const char *name)
+{
+    static const struct {
+        const char *suffix, *icon;
+    } types[] = {
+        { ".txt", "text" }, { ".md", "text" }, { ".c", "text" },
+        { ".h", "text" }, { ".log", "text" }, { ".conf", "text" },
+        { ".bmp", "image_file" }, { ".png", "image_file" },
+        { ".jpg", "image_file" }, { ".jpeg", "image_file" },
+        { ".webp", "image_file" }, { ".wav", "audio_file" },
+        { ".ogg", "audio_file" }, { ".elf", "app" }, { ".so", "chip" },
+        { ".app", "settings" },
+    };
+    for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++)
+        if (has_suffix(name, types[i].suffix))
+            return types[i].icon;
+    return "file";
+}
+
 static const char *const toolbar_icons[] = {
-    "back", "forward", "up", "home", "folder", "new",
-    "editor", "power", "file", "file", "refresh",
+    "back", "forward", "up", "home", "new_folder", "new",
+    "rename", "delete", "copy", "paste", "refresh",
 };
 
 static void join_path(const char *name, char path[PATH_CAP])
@@ -259,7 +293,7 @@ static void paint(tinos_widget_view_t *view, tinos_canvas_t *canvas,
             continue;
         }
         bool dir = entries[index].type == TINOS_DIRENT_DIR;
-        tinos_canvas_icon(canvas, dir ? "folder" : "file",
+        tinos_canvas_icon(canvas, dir ? "folder" : file_icon(entries[index].name),
                           sidebar + 4, y + 2, 16);
         tinos_canvas_text(canvas, sidebar + 26, y + 2, list_w - 142,
                           entries[index].name,

@@ -6,6 +6,9 @@
 
 /* Trusted compositor service. Handles are scoped to the caller's PID. */
 void desktop_user_window_init(void);
+struct window;
+/* PID owning a userspace window, or 0 for a kernel-side window. */
+uint32_t desktop_user_window_pid(const struct window *window);
 int desktop_user_window_open(uint32_t pid, const char *title, int width, int height);
 int desktop_user_window_present(uint32_t pid, int handle, const char *cells,
                                 size_t length, size_t columns);

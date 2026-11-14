@@ -64,29 +64,29 @@ typedef struct {
 } panel_page_t;
 
 static const panel_page_t network_pages[] = {
-    { "Status", "Current address and adapter state", "info" },
-    { "IP Configuration", "DHCP or a manual address", "chip" },
-    { "Connectivity", "DNS resolution and ping", "terminal" },
+    { "Status", "Current address and adapter state", "network" },
+    { "IP Configuration", "DHCP or a manual address", "settings" },
+    { "Connectivity", "DNS resolution and ping", "search" },
 };
 static const panel_page_t display[] = {
-    { "Resolution", "Screen mode and text scale", "chip" },
-    { "Appearance", "Desktop colours and wallpaper", "tinos" },
+    { "Resolution", "Screen mode and text scale", "display" },
+    { "Appearance", "Desktop colours and wallpaper", "wallpaper" },
 };
 static const panel_page_t sound[] = {
-    { "Output", "Audio device and playback settings", "file" },
+    { "Output", "Audio device and playback settings", "volume" },
 };
 static const panel_page_t keyboard[] = {
-    { "Layout", "Keyboard language and keymap", "editor" },
+    { "Layout", "Keyboard language and keymap", "keyboard" },
 };
 static const struct {
     const char *name, *summary, *icon;
     const panel_page_t *pages;
     unsigned count;
 } categories[] = {
-    { "Network", "Connections, IP and diagnostics", "chip", network_pages, 3 },
-    { "Display", "Resolution and desktop presentation", "info", display, 2 },
-    { "Sound", "Audio output and volume", "file", sound, 1 },
-    { "Keyboard", "Layout and input behaviour", "editor", keyboard, 1 },
+    { "Network", "Connections, IP and diagnostics", "network", network_pages, 3 },
+    { "Display", "Resolution and desktop presentation", "display", display, 2 },
+    { "Sound", "Audio output and volume", "volume", sound, 1 },
+    { "Keyboard", "Layout and input behaviour", "keyboard", keyboard, 1 },
 };
 
 static int sidebar_width(void)
@@ -187,7 +187,7 @@ static void paint(tinos_widget_view_t *view, tinos_canvas_t *canvas,
                               theme->muted);
         }
     } else if (category == 3) {
-        tinos_canvas_icon(canvas, "editor", x, 78, 32);
+        tinos_canvas_icon(canvas, "keyboard", x, 78, 32);
         tinos_canvas_text(canvas, x + 44, 83, content - 72,
                           "Keyboard layout", theme->foreground);
         tinos_canvas_text(canvas, x, 130, content - 44,

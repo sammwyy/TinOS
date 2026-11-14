@@ -19,7 +19,7 @@ code.
 The kernel, text shell, desktop and codecs still share ring 0. No application
 ELF executes there: the former native GUI apps are disabled, their ABI is
 not linked and the initrd contains only `userland/bin/` executables.
-They run in ring 3 through `run <path>` or the desktop menu. Up to four jobs can be
+They run in ring 3 through `run <path>` or the desktop menu. Up to eight jobs can be
 resident on the boot processor; PIT preemption lets the console run even
 when a user program loops. They have console I/O and filesystem access
 through private integer descriptors; writable files are limited to ramfs.
@@ -33,11 +33,11 @@ exit without blocking the boot processor.
 | Privilege           | Kernel/shell/desktop ring 0; executable apps ring 3          |
 | Paging              | Supervisor identity map (PSE); 4 KiB user pages per process  |
 | Memory isolation    | Ring-3 programs cannot access the kernel or each other       |
-| Processes           | Four slots, distinct address spaces and kernel stacks; BSP-only scheduling |
+| Processes           | Eight slots, distinct address spaces and kernel stacks; BSP-only scheduling |
 | Threads             | Kernel threads, `THREAD_MAX` = 32, 16 KiB stacks             |
 | SMP                 | APs brought up via ACPI MADT + LAPIC INIT/SIPI               |
 | Interrupts          | 8259 PIC, PIT timer                                          |
-| Syscalls            | `int 0x80`: I/O, ramfs, process lifecycle, GUI handles/events/surfaces/theme, sysinfo, keyboard ioctl, PCM audio |
+| Syscalls            | `int 0x80`: I/O, ramfs, process lifecycle and listing, GUI handles/events/surfaces/theme/icons, sysinfo and load counters, keyboard ioctl, PCM audio |
 | Filesystem          | In-memory node tree; FAT16/FAT32 imported read-only          |
 | Network             | Polling Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS in the kernel |
 | Graphics            | Bochs/QEMU DISPI only, software framebuffer in the kernel    |

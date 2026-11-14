@@ -60,11 +60,19 @@ typedef struct {
     uint64_t deadline;
     char input[PROCESS_INPUT_SIZE];
     unsigned input_head, input_tail;
+    uint32_t cpu_ticks;
+    char path[64];
 } process_t;
 
 static process_t *running;
 static process_t processes[PROCESS_MAX];
 static uint32_t next_pid = 1;
+static uint32_t retired_ms;
+
+uint32_t process_retired_ms(void)
+{
+    return retired_ms;
+}
 static size_t next_slot;
 
 static bool pid_in_use(uint32_t pid)
@@ -314,13 +322,28 @@ size_t process_list(process_info_t *out, size_t capacity)
         process_t *p = &processes[i];
         if (p->state == PROCESS_UNUSED)
             continue;
-        if (count < capacity)
+        if (count < capacity) {
             out[count] = (process_info_t){
-                p->pid, p->parent_pid, p->state, p->status
+                .pid = p->pid, .parent_pid = p->parent_pid,
+                .state = p->state, .status = p->status,
+                .pages = p->state == PROCESS_EXITED ? 0 :
+                         (uint32_t)user_space_pages(&p->space),
+                .cpu_ticks = p->cpu_ticks,
             };
+            strlcpy(out[count].path, p->path, sizeof(out[count].path));
+        }
         count++;
     }
     return count;
+}
+
+const char *process_path(uint32_t pid)
+{
+    for (size_t i = 0; pid && i < PROCESS_MAX; i++)
+        if (processes[i].pid == pid && processes[i].state != PROCESS_UNUSED &&
+            processes[i].state != PROCESS_EXITED)
+            return processes[i].path;
+    return NULL;
 }
 
 static bool writable_path(const char *path)
@@ -576,6 +599,8 @@ static bool prepare_user_stack(int argc, const char *const argv[],
 
 static void release_process(process_t *p)
 {
+    retired_ms += p->cpu_ticks * (1000u / TIMER_HZ);
+    p->cpu_ticks = 0;
     user_audio_release(p->pid);
     desktop_user_window_release(p->pid);
     for (size_t i = 3; i < ARRAY_SIZE(p->files); i++)
@@ -674,6 +699,7 @@ int process_spawn(const void *image, size_t length, int argc,
     }
     p->entry = (uintptr_t)entry;
     p->parent_pid = parent ? parent->pid : 0;
+    strlcpy(p->path, argv[0], sizeof(p->path));
     do {
         p->pid = next_pid;
         next_pid = next_pid == INT32_MAX ? 1 : next_pid + 1;
@@ -719,6 +745,8 @@ void process_maybe_preempt(regs_t *frame)
 
 void process_on_tick(regs_t *frame)
 {
+    if (running)
+        running->cpu_ticks++;
     process_maybe_preempt(frame);
 }
 

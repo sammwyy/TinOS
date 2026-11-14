@@ -41,6 +41,7 @@ enum {
 #define KMOD_CTRL  0x02
 #define KMOD_ALT   0x04
 #define KMOD_CAPS  0x08
+#define KMOD_SUPER 0x10
 
 typedef struct {
     uint16_t code; /* KEY_* or the ASCII code of a printable key */

@@ -6,7 +6,7 @@ import os
 import re
 import time
 
-from qemu_test import Screen, Tinos
+from qemu_test import Screen, Tinos, menu_launch
 
 
 def shot(vm):
@@ -50,10 +50,7 @@ def wait_delete_prompt(vm, window_height):
 def launch(vm, name, title):
     pattern = rf"opened window (\d+) '{re.escape(title)}'"
     before = len(re.findall(pattern, vm.serial()))
-    vm.key("ctrl", "esc")
-    matches = shot(vm).find(name + ".elf")
-    assert matches, "missing %s in desktop menu" % name
-    vm.mouse_click(matches[0][0] + 20, matches[0][1] + 6)
+    assert menu_launch(vm, name), "missing %s in desktop menu" % name
     deadline = time.time() + 15
     while len(re.findall(pattern, vm.serial())) <= before:
         assert time.time() < deadline, vm.serial()

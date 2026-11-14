@@ -5,7 +5,7 @@ import argparse
 import os
 import time
 
-from qemu_test import Screen, Tinos
+from qemu_test import Screen, Tinos, menu_launch
 
 
 def capture(vm, path):
@@ -15,12 +15,7 @@ def capture(vm, path):
 
 
 def launch(vm, path, name, number):
-    vm.key("ctrl", "esc")
-    menu = capture(vm, path)
-    matches = menu.find(name + ".elf")
-    assert matches, vm.serial()
-    x, y = matches[0]
-    vm.mouse_click(x + 20, y + 6)
+    assert menu_launch(vm, name), vm.serial()
     title = {"calculator": "Calculator", "about": "About TinOS",
              "explorer": "File Explorer",
              "control_panel": "Control Panel"}[name]
@@ -38,12 +33,7 @@ def main():
         vm.start()
         assert vm.wait_for_serial("desktop starting", timeout=30), vm.serial()
         path = os.path.join(vm.tmp, "surface.png")
-        vm.key("ctrl", "esc")
-        menu = capture(vm, path)
-        matches = menu.find("terminal.elf")
-        assert matches
-        x, y = matches[0]
-        vm.mouse_click(x + 20, y + 6)
+        assert menu_launch(vm, "terminal"), vm.serial()
         assert vm.wait_for_serial("opened window 1 'Terminal'", timeout=15)
         vm.line("run /apps/surfaceprobe.elf")
         assert vm.wait_for_serial("opened window 2 'Surface test'",

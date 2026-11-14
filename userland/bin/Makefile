@@ -9,7 +9,7 @@ LIBC_APPS := cat fdtest spin spawn spawn_badarg multi gui_security surfaceprobe 
              gd_consumer_probe versionopen largeprobe
 LIBC_ELFS := $(addprefix $(BUILD)/,$(addsuffix .elf,$(LIBC_APPS)))
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
-            image_viewer media_player
+            image_viewer media_player taskmgr
 GUI_ELFS := $(addprefix $(BUILD)/gui/,$(addsuffix .elf,$(GUI_APPS)))
 DYNAMIC_ELFS := $(BUILD)/chainprobe.elf $(BUILD)/versionprobe.elf
 DYNAMIC_APPS := image_viewer media_player

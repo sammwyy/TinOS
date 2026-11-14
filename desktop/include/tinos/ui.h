@@ -69,6 +69,8 @@ struct window {
     rect_t              restore_frame;
     bool                maximized;
     bool                minimized;
+    bool                desktop_hidden; /* minimised by "show desktop" */
+    const char         *icon_name;      /* titlebar/taskbar icon, or NULL */
     bool                needs_redraw;
     uint32_t           *surface;
     size_t              surface_words;
@@ -95,6 +97,9 @@ bool      wm_take_full_redraw(void);
  * the wallpaper (and anything else under them) needs repainting there.
  * Returns the number written to `out` (capped at `max`) and clears them. */
 size_t    wm_take_exposed(rect_t *out, size_t max);
+/* Repaint `r` from the wallpaper up on the next frame, e.g. after an overlay
+ * drawn on top of the windows (menu, tooltip) goes away. */
+void      wm_expose_rect(rect_t r);
 void      wm_draw_window(window_t *win); /* frame + client contents */
 bool      wm_window_cached(const window_t *win);
 void      wm_blit_window(window_t *win);
@@ -102,6 +107,13 @@ rect_t    wm_client_rect(const window_t *win);
 void      wm_set_title(window_t *win, const char *title);
 void      wm_cycle_focus(void);
 void      wm_toggle_minimize(window_t *win);
+void      wm_toggle_maximize(window_t *win);
+/* Fill the workspace (also from a snapped half). */
+void      wm_maximize(window_t *win);
+/* Tile into the left (side < 0) or right (side > 0) half of the workspace. */
+void      wm_snap(window_t *win, int side);
+/* Minimise every window, or restore the ones that call minimised. */
+void      wm_show_desktop(void);
 
 /* Iteration in z-order, bottom first. */
 window_t *wm_bottom(void);
@@ -140,9 +152,34 @@ typedef enum {
     ICON_PLAY,
     ICON_PAUSE,
     ICON_VOLUME,
+    ICON_VOLUME_MUTE,
+    ICON_NETWORK,
+    ICON_NETWORK_OFF,
+    ICON_MEMORY,
+    ICON_SETTINGS,
+    ICON_TASKMGR,
+    ICON_COMPUTER,
+    ICON_APP,
+    ICON_MENU_FOLDER,
+    ICON_MUSIC,
+    ICON_IMAGE,
+    ICON_CALCULATOR,
+    ICON_CALENDAR,
+    ICON_CLOCK,
+    ICON_DESKTOP,
+    ICON_LOGOUT,
+    ICON_USER,
+    ICON_WARNING,
+    ICON_ERROR,
+    ICON_COUNT,
 } icon_t;
 
 void widget_icon(int x, int y, int size, icon_t icon);
+/* Resource name of a built-in icon, or NULL. */
+const char *widget_icon_resource(icon_t icon);
+/* Render a named icon as non-premultiplied ARGB into size*size words.
+ * Returns false when no such icon exists. */
+bool icon_render(const char *name, int size, uint32_t *out);
 /* Draw a build-time resource icon by its BMP filename stem (e.g. "test").
  * Returns false when no such resource exists. */
 bool widget_icon_name(int x, int y, int size, const char *name);
@@ -182,11 +219,15 @@ typedef struct {
     const char *summary;
     const char *category;
     const char *path; /* userspace ELF pathname, never a kernel entry point */
+    const char *icon_name; /* resources/icons name, preferred over icon */
     icon_t      icon;
     image_t     custom_icon;
+    bool        desktop;   /* manifest asks for a desktop shortcut */
 } app_entry_t;
 
 const app_entry_t *apps_registry(size_t *count);
+/* The registered application whose executable is `path`, or NULL. */
+const app_entry_t *apps_find_path(const char *path);
 void apps_discover(void);
 /* Draws app->custom_icon if it decoded one, else falls back to app->icon. */
 void app_icon_draw(int x, int y, int size, const app_entry_t *app);

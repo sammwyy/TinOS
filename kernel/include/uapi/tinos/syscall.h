@@ -49,6 +49,16 @@
 #define TINOS_SYS_CLIPBOARD_GET 45u
 #define TINOS_SYS_SEEK 46u
 #define TINOS_SYS_GUI_SURFACE_UPDATE 47u
+/* icon: EBX NUL-terminated name, ECX edge in pixels (1..64), EDX buffer of
+ * ECX*ECX non-premultiplied ARGB words. Returns 0, or -1 if unknown. */
+#define TINOS_SYS_ICON 48u
+#define TINOS_ICON_MAX 64u
+/* proclist: EBX index, ECX tinos_process_info_t; 1 = filled, 0 = end. */
+#define TINOS_SYS_PROCLIST 49u
+/* terminate: EBX PID of any other running process (task manager). */
+#define TINOS_SYS_TERMINATE 50u
+/* loadinfo: EBX tinos_load_info_t. */
+#define TINOS_SYS_LOADINFO 51u
 
 #define TINOS_CLIPBOARD_MAX 2048u
 #define TINOS_CLIPBOARD_TEXT 1u

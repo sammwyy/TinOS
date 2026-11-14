@@ -317,7 +317,7 @@ static void paint(tinos_widget_view_t *view, tinos_canvas_t *canvas,
     int transport_x = w / 2 - 70;
     const int offsets[] = { 0, 40, 88, 128 };
     const char *const icons[] = {
-        "back", paused || finished ? "play" : "pause", "power", "forward",
+        "prev", paused || finished ? "play" : "pause", "stop", "next",
     };
     for (int i = 0; i < 4; i++) {
         int size = i == 1 ? 42 : 34;

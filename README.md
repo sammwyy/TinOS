@@ -107,10 +107,18 @@ target implemented today. The build picks its sources from
 an `ARCH` with no matching directory fails the build immediately with a
 clear error instead of a wall of missing-symbol linker errors.
 
-The desktop icons live in `resources/icons/` and are always compiled into the
-shell atlas.  The legacy `icon_t` values remain as compatibility handles, but
-`widget_icon()` resolves them exclusively to those named bitmap resources;
-custom code can use `widget_icon_name(x, y, size, "name")` directly.
+The icon gallery is drawn by `tools/draw_icons.py`: about 65 icons described
+as anti-aliased vector shapes and rendered at 16 and 32 px (48 px for the
+logo, dialog and media icons) into `resources/icons/<name>[@size].bmp`. The
+BMPs are committed, so the build only needs the script after an icon is
+edited (`python3 tools/draw_icons.py resources/icons`).
+`tools/gen_icons.py` packs every variant into one 8-bit palettised atlas
+(about 115 KiB in the kernel image). Drawing picks the exact size, centres a
+slightly smaller variant, or box-filters a larger one down, and blends the
+alpha edges. `widget_icon()` maps the legacy `icon_t` handles to names;
+`widget_icon_name(x, y, size, "name")` draws any icon. Ring-3 programs do not
+link a copy of the atlas: `tinos_canvas_icon()` fetches the pixels through
+`TINOS_SYS_ICON` and keeps a 16 KiB per-process cache.
 
 The current File Explorer opens the user's home directory, browses other
 directories, previews text and launches
@@ -143,15 +151,10 @@ and U8 input to stereo S16, owns the DMA buffer and releases the stream
 if the process exits or faults. This API currently provides playback only,
 not capture or a `/dev` audio node.
 
-For temporary artwork, create a numbered placeholder with:
-
-```sh
-python3 tools/make_icon_placeholder.py my-icon 21
-python3 tools/make_icon_placeholder.py next-icon
-```
-
-Without a number, the script assigns the next number after counting the BMPs
-already present in `resources/icons/`.
+To add an icon, add a function decorated with `@icon("name")` to
+`tools/draw_icons.py` and rerun it. A numbered placeholder BMP for quick
+experiments can still be made with
+`python3 tools/make_icon_placeholder.py my-icon 21`.
 | `make check` | host tests **and** the scripted QEMU boot/GUI test |
 | `make verify-reproducible` | build twice from clean and compare the kernel and ISO |
 | `make clean` | delete `build/` |
@@ -209,16 +212,47 @@ The TinOS boot menu has three selections (Down/Up, then Enter):
 
 | Key | Action |
 |-----|--------|
-| `Win`, `Ctrl+Esc` or `F12` | open / close the start menu |
+| `Win` (tap), `Ctrl+Esc` or `F12` | open / close the start menu |
 | `Up` `Down` | move through the focused categories or apps |
 | `Enter` | expand / collapse a category, launch the selected app |
 | `Right` / `Left` | focus the category's apps / return to the categories |
-| `Esc` | close the start menu |
+| `Esc` | close the start menu or a context menu |
 | `Alt+Tab` | switch to the next window |
 | `Alt+F4` | close the focused window |
+| `Ctrl+Shift+Esc` | Task Manager |
+| `Win+D`, `Ctrl+Alt+D` | show the desktop / restore the windows |
+| `Win+E`, `Ctrl+Alt+F` | Files |
+| `Win+T`, `Ctrl+Alt+T` | Terminal |
+| `Win+I` | Settings |
+| `Win+Left` / `Win+Right` | tile the focused window into a screen half |
+| `Win+Up` / `Win+Down` | maximise / restore or minimise |
 
-The start menu lists `/apps/gui/*.elf` under *Programs* and launches each
-through the process loader. Applications use `int 0x80` to open a window,
+Each `/apps/gui/<app>.elf` may ship a `<app>.app` manifest
+(`userland/manifests/`) with `name=`, `category=`, `icon=`, `summary=` and
+`desktop=1` lines. The start menu groups programs by category
+(Accessories, Multimedia, System, then any other), shows the manifest's name
+and icon, and launches each through the process loader; executables without
+a manifest appear under *Programs* with a name derived from the file. Apps
+marked `desktop=1` also get a desktop shortcut (double-click or Enter opens
+it, right-click offers a menu). Right-clicking the wallpaper or an empty part
+of the taskbar opens a desktop menu; right-clicking a taskbar button offers
+minimise/maximise/close, and a middle click closes it. Task Manager,
+Settings, About and System Information are single instance: launching them
+again raises the open window.
+
+The taskbar tray shows the network state, the sound state (click mutes,
+the wheel changes the volume), a memory gauge (click opens Task Manager) and
+the clock (click opens a month calendar). Hovering any of them, a taskbar
+button or a desktop icon shows a tooltip. Each window title bar and taskbar
+button shows the icon of the program that owns it; double-clicking a title
+bar maximises, and dragging a maximised window restores it.
+
+Task Manager (`/apps/gui/taskmgr.elf`) samples once a second: a minute of
+CPU and memory history, every process with its state, mapped user memory and
+CPU share, and *End task* (or `Delete`) for any other process. It reads
+`TINOS_SYS_PROCLIST`, `TINOS_SYS_LOADINFO` and ends tasks with
+`TINOS_SYS_TERMINATE`; CPU load is measured from the ticks the kernel loop
+spends halted. Applications use `int 0x80` to open a window,
 submit bounded text-cell frames or tiled XRGB8888 surfaces, and block while
 awaiting keyboard/mouse/resize events. Terminal supports `ls`, `cd`, `pwd`,
 `cat`, `echo`, `touch`, `mkdir`,
@@ -254,10 +288,11 @@ application drawing callbacks in ring 0. Explorer, Calculator, Editor, About,
 System Information, Control Panel, Image Viewer and Media Player now paint
 their old-style views through this toolkit; Terminal keeps its dark,
 text-cell console. The compositor validates window ownership, geometry, and
-each copied 64x64-maximum pixel tile. A surface can reach 800x600 (about
-1.83 MiB), but apps open smaller windows at 8 MiB; failed growth preserves
-the old surface, and an initial allocation failure retries at smaller window
-sizes. Existing text and BMP image APIs remain available. The
+each copied 64x64-maximum pixel tile. A surface can reach 1024x768 (3 MiB)
+so maximised and tiled windows fill the screen, but growth is refused when it
+would leave the kernel less than 2 MiB; the old surface is then kept and
+framed with the window colour. Apps open smaller windows at 8 MiB, and an
+initial allocation failure retries at smaller window sizes. Existing text and BMP image APIs remain available. The
 palette syscall negotiates its struct size so earlier 40-byte clients remain
 safe. A shared clipboard copies at most 2048 bytes with a text/file
 type, and the compositor coalesces timers and drag motion rather than
@@ -268,8 +303,8 @@ and additional media formats still need work.
 The mouse (if present - QEMU provides a PS/2 mouse by default) can click the
 Start button and menu entries, focus windows, drag them by the title bar,
 resize them by dragging the grip in the bottom-right corner, press the
-minimise and close buttons in the title bar, and click taskbar buttons to
-raise or minimise a window.
+minimise, maximise and close buttons in the title bar, and click taskbar
+buttons to raise or minimise a window.
 
 ### Historical Graphical App Features
 
@@ -839,6 +874,10 @@ make check     # the above plus the scripted QEMU boot/GUI session
   captures screenshots and *reads the text off them*: `tests/qemu/screen_ocr.py`
   template-matches the screen against the kernel's own 8x16 font, so a check
   like "the terminal shows `kernel test`" is verified against real pixels.
+  `menu_launch(vm, "terminal")` opens a program through its start-menu
+  category using the names in `MENU_APPS`; `shell_features_test.py` covers
+  desktop shortcuts, context menus, Win shortcuts, the calendar and Task
+  Manager's End task at 8 and 16 MiB.
 
 ## Known limitations
 
@@ -854,7 +893,7 @@ make check     # the above plus the scripted QEMU boot/GUI session
   signals, per-CPU run queues, NTFS or USB host controllers beyond UHCI.
   The ring-3 ABI includes writable session files, window surfaces, audio,
   dynamic libraries and bounded settings requests; it does not yet provide
-  POSIX compatibility. Up to four processes share the boot processor
+  POSIX compatibility. Up to eight processes share the boot processor
   while its kernel-owned loop runs. Per-process FPU context is still pending.
 * The RTC is read directly, so the taskbar clock follows the host clock via
   `-rtc base=localtime`; without that flag QEMU reports UTC.

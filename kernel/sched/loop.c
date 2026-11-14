@@ -22,11 +22,27 @@ bool kernel_loop_step(kernel_ui_tick_t ui_tick, void *context)
     return ui_tick && ui_tick(context);
 }
 
+static volatile bool loop_halted;
+static volatile uint32_t idle_ticks;
+
+void kernel_loop_account_tick(void)
+{
+    if (loop_halted)
+        idle_ticks++;
+}
+
+uint32_t kernel_loop_idle_ticks(void)
+{
+    return idle_ticks;
+}
+
 void kernel_loop_run(kernel_ui_tick_t ui_tick, void *context)
 {
     for (;;) {
         if (kernel_loop_step(ui_tick, context))
             return;
+        loop_halted = true;
         arch_idle();
+        loop_halted = false;
     }
 }

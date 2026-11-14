@@ -5,6 +5,7 @@
  * dragging - and delegates the client area to the application class.
  */
 
+#include <tinos/arch.h>
 #include <tinos/gfx.h>
 #include <tinos/heap.h>
 #include <tinos/kernel.h>
@@ -26,6 +27,11 @@ static bool      full_redraw;
 #define WM_MAX_EXPOSED 16
 static rect_t exposed_rects[WM_MAX_EXPOSED];
 static size_t exposed_count;
+
+/* Last titlebar press, for double-click maximise. */
+static window_t *last_title_window;
+static uint64_t  last_title_click;
+#define DOUBLE_CLICK_MS 450
 
 /* Drag state */
 static window_t *dragging;
@@ -227,6 +233,12 @@ static void wm_expose(rect_t r)
     any_dirty = true;
 }
 
+void wm_expose_rect(rect_t r)
+{
+    wm_expose(r);
+    wm_invalidate_rect(r);
+}
+
 size_t wm_take_exposed(rect_t *out, size_t max)
 {
     size_t n = exposed_count < max ? exposed_count : max;
@@ -266,6 +278,7 @@ void wm_toggle_minimize(window_t *win)
     if (!win)
         return;
     if (win->minimized) {
+        win->desktop_hidden = false;
         wm_focus(win); /* restoring changes z-order: a full repaint is simplest */
     } else {
         rect_t old     = win->frame;
@@ -282,6 +295,86 @@ void wm_toggle_minimize(window_t *win)
         wm_expose(old);
         wm_invalidate_rect(old);
     }
+}
+
+void wm_toggle_maximize(window_t *win)
+{
+    if (!win)
+        return;
+    if (win->maximized) {
+        win->frame = win->restore_frame;
+        win->maximized = false;
+    } else {
+        win->restore_frame = win->frame;
+        win->frame = wm_workspace();
+        win->maximized = true;
+    }
+    if (win->cls->on_resize)
+        win->cls->on_resize(win, wm_client_rect(win));
+    wm_invalidate_all();
+}
+
+void wm_maximize(window_t *win)
+{
+    if (!win)
+        return;
+    rect_t space = wm_workspace();
+    if (!win->maximized)
+        win->restore_frame = win->frame;
+    if (win->maximized && win->frame.w == space.w && win->frame.h == space.h)
+        return;
+    win->frame = space;
+    win->maximized = true;
+    if (win->cls->on_resize)
+        win->cls->on_resize(win, wm_client_rect(win));
+    wm_invalidate_all();
+}
+
+void wm_snap(window_t *win, int side)
+{
+    if (!win || !side)
+        return;
+    rect_t space = wm_workspace();
+    if (!win->maximized)
+        win->restore_frame = win->frame;
+    int half = space.w / 2;
+    win->frame = rect_make(side < 0 ? 0 : half, 0,
+                           side < 0 ? half : space.w - half, space.h);
+    win->maximized = true;
+    if (win->cls->on_resize)
+        win->cls->on_resize(win, wm_client_rect(win));
+    wm_invalidate_all();
+}
+
+void wm_show_desktop(void)
+{
+    bool any_visible = false;
+    for (window_t *w = bottom_window; w; w = w->above)
+        any_visible |= !w->minimized;
+    /* Restore walks bottom to top so the stacking order is preserved; each
+     * wm_focus() lifts its window above the ones restored before it. */
+    window_t *next;
+    for (window_t *w = bottom_window; w; w = next) {
+        next = w->above;
+        if (any_visible && !w->minimized) {
+            w->minimized = true;
+            w->desktop_hidden = true;
+        }
+    }
+    if (any_visible) {
+        wm_invalidate_all();
+        return;
+    }
+    window_t *order[32];
+    size_t count = 0;
+    for (window_t *w = bottom_window; w && count < ARRAY_SIZE(order); w = w->above)
+        if (w->desktop_hidden)
+            order[count++] = w;
+    for (size_t i = 0; i < count; i++) {
+        order[i]->desktop_hidden = false;
+        wm_focus(order[i]);
+    }
+    wm_invalidate_all();
 }
 
 window_t *wm_open(const app_class_t *cls, int width, int height,
@@ -324,6 +417,8 @@ void wm_close(window_t *win)
         return;
     if (dragging == win)
         dragging = NULL;
+    if (last_title_window == win)
+        last_title_window = NULL;
     if (resizing == win)
         resizing = NULL;
     if (win->cls->on_close)
@@ -392,6 +487,9 @@ void wm_draw_window(window_t *win)
     /* Center the caption in the frame, independently of the controls. */
     rect_t title_area = rect_make(win->frame.x + 8, win->frame.y,
                                   win->frame.w - 16, TITLEBAR_HEIGHT);
+    if (win->icon_name)
+        widget_icon_name(win->frame.x + 4, win->frame.y + 2, 16,
+                         win->icon_name);
     gfx_clip_push(title_area);
     int title_x = win->frame.x + (win->frame.w - gfx_text_width(win->title)) / 2;
     gfx_text(title_x, win->frame.y + (TITLEBAR_HEIGHT - FONT_H) / 2,
@@ -583,15 +681,7 @@ bool wm_handle_mouse(const mouse_event_t *ev)
             return true;
         }
         if (rect_contains(maximize_button_rect(win), ev->x, ev->y)) {
-            if (win->maximized) {
-                win->frame = win->restore_frame;
-                win->maximized = false;
-            } else {
-                win->restore_frame = win->frame;
-                win->frame = wm_workspace();
-                win->maximized = true;
-            }
-            wm_invalidate_all();
+            wm_toggle_maximize(win);
             return true;
         }
         if (rect_contains(minimize_button_rect(win), ev->x, ev->y)) {
@@ -607,6 +697,29 @@ bool wm_handle_mouse(const mouse_event_t *ev)
             return true;
         }
         if (rect_contains(titlebar_rect(win), ev->x, ev->y)) {
+            uint64_t now = timer_ticks();
+            if (last_title_window == win &&
+                now - last_title_click < DOUBLE_CLICK_MS) {
+                last_title_window = NULL;
+                wm_toggle_maximize(win);
+                return true;
+            }
+            last_title_window = win;
+            last_title_click  = now;
+            if (win->maximized) {
+                /* Dragging a maximised window restores it under the
+                 * cursor, keeping the grab point proportional. */
+                rect_t restored = win->restore_frame;
+                int offset = (ev->x - win->frame.x) * restored.w /
+                             MAX(1, win->frame.w);
+                restored.x = ev->x - offset;
+                restored.y = MAX(0, ev->y - TITLEBAR_HEIGHT / 2);
+                win->frame = restored;
+                win->maximized = false;
+                if (win->cls->on_resize)
+                    win->cls->on_resize(win, wm_client_rect(win));
+                wm_invalidate_all();
+            }
             dragging      = win;
             drag_offset_x = ev->x - win->frame.x;
             drag_offset_y = ev->y - win->frame.y;

@@ -1,6 +1,7 @@
 #include <tinos/arch.h>
 #include <tinos/gfx.h>
 #include <tinos/heap.h>
+#include <tinos/mm.h>
 #include <tinos/process.h>
 #include <tinos/string.h>
 #include <tinos/ui.h>
@@ -8,6 +9,7 @@
 
 #define GUI_QUEUE 64
 #define GUI_CONSOLE_BUFFER 4096
+#define SURFACE_RESERVE (2u * 1024u * 1024u)
 
 typedef struct {
     uint32_t pid;
@@ -28,15 +30,25 @@ typedef struct {
     uint64_t next_timer;
 } gui_client_t;
 
-static gui_client_t clients[PROCESS_MAX];
+/* Allocated when a process opens its window: idle processes and text-mode
+ * boots pay nothing for the ~8 KiB of cells, events and console buffer. */
+static gui_client_t *clients[PROCESS_MAX];
 static bool available;
 
 static gui_client_t *client_for(uint32_t pid)
 {
-    for (size_t i = 0; i < ARRAY_SIZE(clients); i++)
-        if (clients[i].pid == pid && pid)
-            return &clients[i];
+    for (size_t i = 0; pid && i < ARRAY_SIZE(clients); i++)
+        if (clients[i] && clients[i]->pid == pid)
+            return clients[i];
     return NULL;
+}
+
+uint32_t desktop_user_window_pid(const struct window *window)
+{
+    for (size_t i = 0; window && i < ARRAY_SIZE(clients); i++)
+        if (clients[i] && clients[i]->window == window)
+            return clients[i]->pid;
+    return 0;
 }
 
 static void enqueue(gui_client_t *client, tinos_gui_event_t event)
@@ -78,12 +90,15 @@ static void user_draw(window_t *window, rect_t area)
         wm_blit_window(window);
         return;
     }
-    gfx_fill_rect(area.x, area.y, area.w, area.h, COLOR_TERMINAL_BG);
     if (client->surface) {
+        /* A surface smaller than the client area (growth refused for lack
+         * of memory) is framed by the window colour, not a black band. */
+        gfx_fill_rect(area.x, area.y, area.w, area.h, COLOR_WINDOW_BG);
         gfx_blit_opaque(area.x, area.y, client->surface,
                         client->surface_width, client->surface_height);
         return;
     }
+    gfx_fill_rect(area.x, area.y, area.w, area.h, COLOR_TERMINAL_BG);
     if (client->pixels)
         gfx_blit_image(rect_make(area.x + 8, area.y + 2 * FONT_H,
                                 client->pixel_width, client->pixel_height),
@@ -164,7 +179,6 @@ static const app_class_t user_class = {
 
 void desktop_user_window_init(void)
 {
-    memset(clients, 0, sizeof(clients));
     available = true;
 }
 
@@ -174,23 +188,28 @@ int desktop_user_window_open(uint32_t pid, const char *title, int width, int hei
         width < WINDOW_MIN_W || width > 800 ||
         height < WINDOW_MIN_H || height > 600)
         return -1;
-    gui_client_t *client = NULL;
-    for (size_t i = 0; i < ARRAY_SIZE(clients); i++)
-        if (!clients[i].pid) {
-            client = &clients[i];
-            break;
-        }
+    size_t slot = ARRAY_SIZE(clients);
+    for (size_t i = 0; i < ARRAY_SIZE(clients) && slot == ARRAY_SIZE(clients); i++)
+        if (!clients[i])
+            slot = i;
+    if (slot == ARRAY_SIZE(clients))
+        return -1;
+    gui_client_t *client = kcalloc(1, sizeof(*client));
     if (!client)
         return -1;
-    memset(client, 0, sizeof(*client));
     client->pid = pid;
+    clients[slot] = client;
     window_t *window = wm_open(&user_class, width, height, title, NULL);
     if (!window) {
-        client->pid = 0;
+        clients[slot] = NULL;
+        kfree(client);
         return -1;
     }
     client->window = window;
     window->priv = client;
+    const app_entry_t *app = apps_find_path(process_path(pid));
+    window->icon_name = app && app->icon_name ? app->icon_name : "app";
+    wm_invalidate(window);
     return 1;
 }
 
@@ -240,7 +259,10 @@ void desktop_user_window_release(uint32_t pid)
         wm_close(client->window);
     kfree(client->pixels);
     kfree(client->surface);
-    memset(client, 0, sizeof(*client));
+    for (size_t i = 0; i < ARRAY_SIZE(clients); i++)
+        if (clients[i] == client)
+            clients[i] = NULL;
+    kfree(client);
 }
 
 int desktop_user_window_size(uint32_t pid, int handle,
@@ -271,6 +293,20 @@ int desktop_user_window_surface_config(uint32_t pid, int handle,
         client->surface_height == height)
         return 0;
     size_t bytes = (size_t)width * height * sizeof(uint32_t);
+    size_t old_bytes = (size_t)client->surface_width *
+                       client->surface_height * sizeof(uint32_t);
+    if (client->surface && bytes > old_bytes) {
+        /* Growing also grows the compositor's cached window copy, so keep
+         * a reserve for the kernel instead of running it out of memory. */
+        heap_stats_t heap;
+        heap_get_stats(&heap);
+        uint64_t available = pmm_free_bytes() + heap.heap_free;
+        if (available < 2 * (uint64_t)(bytes - old_bytes) + SURFACE_RESERVE) {
+            klog("[gui ] pid %u surface %ux%u refused: %u KiB available\n",
+                 pid, width, height, (uint32_t)(available / 1024));
+            return -1;
+        }
+    }
     uint32_t *replacement = krealloc(client->surface, bytes);
     if (!replacement)
         return -1;

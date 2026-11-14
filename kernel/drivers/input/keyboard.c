@@ -21,6 +21,7 @@ static volatile key_event_t queue[QUEUE_SIZE];
 static volatile uint32_t    q_head, q_tail;
 static uint8_t              mods;
 static bool                 extended;
+static bool                 super_combo; /* a key was pressed while Win was held */
 static keyboard_layout_t    layout = KEYBOARD_LAYOUT_US;
 
 /* Unshifted characters for scancode set 1, index = make code. */
@@ -83,6 +84,8 @@ static void push_event(uint16_t code, char ch)
     queue[q_head].ch   = ch;
     queue[q_head].mods = mods;
     q_head             = next;
+    if ((mods & KMOD_SUPER) && code != KEY_SUPER)
+        super_combo = true;
 }
 
 static uint16_t extended_key(uint8_t code)
@@ -145,6 +148,20 @@ static void keyboard_isr(regs_t *regs)
                 mods &= (uint8_t)~KMOD_ALT;
             else
                 mods |= KMOD_ALT;
+            return;
+        case 0x5B: /* left/right Windows key */
+        case 0x5C:
+            /* A lone tap is KEY_SUPER (the start menu); held, it is a
+             * modifier for Win+<key> shortcuts. */
+            if (!released) {
+                if (!(mods & KMOD_SUPER))
+                    super_combo = false;
+                mods |= KMOD_SUPER;
+            } else {
+                mods &= (uint8_t)~KMOD_SUPER;
+                if (!super_combo)
+                    push_event(KEY_SUPER, 0);
+            }
             return;
         default:
             break;

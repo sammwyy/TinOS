@@ -42,6 +42,57 @@ SHIFTED = {
 }
 
 
+# Start-menu placement of each GUI program: (category, display name), as
+# declared by userland/manifests/<program>.app.
+MENU_APPS = {
+    "about": ("System", "About TinOS"),
+    "calculator": ("Accessories", "Calculator"),
+    "control_panel": ("System", "Settings"),
+    "editor": ("Accessories", "Text Editor"),
+    "explorer": ("System", "Files"),
+    "image_viewer": ("Multimedia", "Image Viewer"),
+    "media_player": ("Multimedia", "Media Player"),
+    "sysinfo": ("System", "System Information"),
+    "taskmgr": ("System", "Task Manager"),
+    "terminal": ("System", "Terminal"),
+}
+MENU_SUBMENU_X = 168  # the submenu column starts right of the categories
+
+
+def menu_find(vm, program, path=None):
+    """Open the start menu on `program`'s category and return the screen
+    position of its entry in the submenu, or None."""
+    category, name = MENU_APPS[program]
+    path = path or os.path.join(vm.tmp, "menu.png")
+    vm.key("ctrl", "esc")
+    time.sleep(0.4)
+    vm.screenshot(path)
+    # Search only inside the menu columns: desktop shortcut labels can show
+    # the same words in light-on-dark text elsewhere on the screen.
+    screen = Screen(path)
+    height = screen.size[1]
+    cats = screen.find(category, region=(0, 0, MENU_SUBMENU_X, height))
+    if not cats:
+        return None
+    # Two moves inside the row always produce a hover event, even if the
+    # pointer was already resting on this category.
+    vm.mouse_move(cats[0][0] + 60, cats[0][1] + 6)
+    vm.mouse_move(cats[0][0] + 10, cats[0][1] + 6)
+    time.sleep(0.3)
+    vm.screenshot(path)
+    hits = Screen(path).find(name, region=(MENU_SUBMENU_X, 0,
+                                           MENU_SUBMENU_X + 240, height))
+    return hits[0] if hits else None
+
+
+def menu_launch(vm, program):
+    """Click `program` in the start menu; True when its entry was found."""
+    hit = menu_find(vm, program)
+    if hit:
+        vm.mouse_click(hit[0] + 20, hit[1] + 6)
+    return hit is not None
+
+
 def char_to_keys(ch):
     """Return the list of qcodes needed to type `ch`."""
     if ch.isalpha():
@@ -710,15 +761,17 @@ def run_scenario(iso, shots_dir):
 
         vm.key("ctrl", "esc")
         menu = shot("programs")
-        for label in ("Programs", "terminal.elf", "explorer.elf",
-                      "editor.elf", "about.elf", "calculator.elf",
-                      "sysinfo.elf", "control_panel.elf", "Restart", "Shut Down"):
+        for label in ("Accessories", "Multimedia", "System", "Calculator",
+                      "Text Editor", "Task Manager", "Restart", "Shut Down"):
             c.check(menu.has(label), "start menu shows " + label)
+        c.check(menu.missing("terminal.elf"),
+                "start menu shows manifest names, not file names")
+        vm.key("esc")
+        desk = shot("desktop-icons")
+        for label in ("Files", "Terminal", "Settings"):
+            c.check(desk.has(label), "desktop shortcut " + label)
 
-        hits = menu.find("terminal.elf")
-        if c.check(bool(hits), "ring-3 executable is selectable"):
-            x, y = hits[0]
-            vm.mouse_click(x + 20, y + 6)
+        if c.check(menu_launch(vm, "terminal"), "ring-3 executable is selectable"):
             c.check(vm.wait_for_serial("opened window 1 'Terminal'", timeout=15),
                     "terminal opens from an isolated process")
             terminal = shot("terminal")
@@ -768,12 +821,7 @@ def run_scenario(iso, shots_dir):
             c.check(vm.wait_for_serial("closed window 1 'Terminal'",
                                        timeout=15), "terminal exits after close")
 
-        vm.key("ctrl", "esc")
-        menu = shot("menu-explorer")
-        hits = menu.find("explorer.elf")
-        if c.check(bool(hits), "file explorer listed in the menu"):
-            x, y = hits[0]
-            vm.mouse_click(x + 20, y + 6)
+        if c.check(menu_launch(vm, "explorer"), "file explorer listed in the menu"):
             c.check(vm.wait_for_serial("opened window 3 'File Explorer'",
                                        timeout=15), "explorer opens in ring 3")
             explorer = shot("explorer")
@@ -781,12 +829,7 @@ def run_scenario(iso, shots_dir):
                     explorer.has("Home Folder"),
                     "explorer opens in the original home-folder layout")
             vm.key("alt", "f4")
-        vm.key("ctrl", "esc")
-        menu = shot("menu-calculator")
-        hits = menu.find("calculator.elf")
-        if c.check(bool(hits), "calculator listed in the menu"):
-            x, y = hits[0]
-            vm.mouse_click(x + 20, y + 6)
+        if c.check(menu_launch(vm, "calculator"), "calculator listed in the menu"):
             c.check(vm.wait_for_serial("opened window 4 'Calculator'", timeout=15),
                     "calculator opens in ring 3")
             vm.type("2+3*4")
@@ -796,24 +839,14 @@ def run_scenario(iso, shots_dir):
                         for x, y in calc.find("14")),
                     "calculator evaluates arithmetic in userspace")
             vm.key("alt", "f4")
-        vm.key("ctrl", "esc")
-        menu = shot("menu-sysinfo")
-        hits = menu.find("sysinfo.elf")
-        if c.check(bool(hits), "system information listed in the menu"):
-            x, y = hits[0]
-            vm.mouse_click(x + 20, y + 6)
+        if c.check(menu_launch(vm, "sysinfo"), "system information listed in the menu"):
             c.check(vm.wait_for_serial("opened window 5 'System Information'",
                                        timeout=15), "sysinfo opens in ring 3")
             info = shot("sysinfo")
             c.check(info.has("RAM total") and info.has("CPU"),
                     "system information comes through a validated syscall")
             vm.key("alt", "f4")
-        vm.key("ctrl", "esc")
-        menu = shot("menu-settings")
-        hits = menu.find("control_panel.elf")
-        if c.check(bool(hits), "control panel listed in the menu"):
-            x, y = hits[0]
-            vm.mouse_click(x + 20, y + 6)
+        if c.check(menu_launch(vm, "control_panel"), "control panel listed in the menu"):
             c.check(vm.wait_for_serial("opened window 6 'Control Panel'",
                                        timeout=15), "settings app opens in ring 3")
             vm.type("2")
@@ -823,12 +856,7 @@ def run_scenario(iso, shots_dir):
             c.check(shot("keyboard-us", contains="English").has("English"),
                     "keyboard setting can be restored")
             vm.key("alt", "f4")
-        vm.key("ctrl", "esc")
-        menu = shot("menu-image")
-        hits = menu.find("image_viewer.elf")
-        if c.check(bool(hits), "image viewer listed in the menu"):
-            x, y = hits[0]
-            vm.mouse_click(x + 20, y + 6)
+        if c.check(menu_launch(vm, "image_viewer"), "image viewer listed in the menu"):
             c.check(vm.wait_for_serial("opened window 7 'Image Viewer'",
                                        timeout=15), "image viewer runs in ring 3")
             viewer = shot("image-viewer", contains="BMP 24/32-bit")
@@ -838,12 +866,7 @@ def run_scenario(iso, shots_dir):
                     viewer.image.getpixel((60, 120)),
                     "copied pixel surface composites into the window")
             vm.key("alt", "f4")
-        vm.key("ctrl", "esc")
-        menu = shot("menu-media")
-        hits = menu.find("media_player.elf")
-        if c.check(bool(hits), "media player listed in the menu"):
-            x, y = hits[0]
-            vm.mouse_click(x + 20, y + 6)
+        if c.check(menu_launch(vm, "media_player"), "media player listed in the menu"):
             c.check(vm.wait_for_serial("opened window 8 'Media Player'",
                                        timeout=15), "media player opens in ring 3")
             c.check(vm.wait_for_serial("opened stereo PCM at 22050 Hz",
@@ -858,7 +881,7 @@ def run_scenario(iso, shots_dir):
             vm.key("alt", "f4")
         vm.key("ctrl", "esc")
         after = shot("desktop-after-process")
-        c.check(after.has("Programs"), "desktop accepts input after client exits")
+        c.check(after.has("Accessories"), "desktop accepts input after client exits")
         c.check("KERNEL PANIC" not in vm.serial(), "no kernel panic")
     finally:
         vm.stop()

@@ -26,5 +26,7 @@ void user_space_readonly(user_space_t *space, uintptr_t address);
 void user_space_activate(const user_space_t *space);
 void user_space_kernel(void);
 void user_space_destroy(user_space_t *space);
+/* Number of present user pages, shared mappings included. */
+size_t user_space_pages(const user_space_t *space);
 
 #endif /* TINOS_USER_VM_H */

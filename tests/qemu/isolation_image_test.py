@@ -32,8 +32,17 @@ def main():
                    struct.unpack_from("<H", header, 16)[0] == 3, library
         assert archive.extractfile("media/demo.bmp").read(2) == b"BM"
         assert archive.extractfile("media/demo.wav").read(4) == b"RIFF"
+        manifests = [m for m in archive
+                     if m.name.startswith("gui/") and m.name.endswith(".app")]
+        for manifest in manifests:
+            # Start-menu metadata is plain key=value text, never code.
+            text = archive.extractfile(manifest).read()
+            assert not text.startswith(b"\x7fELF"), manifest.name
+            assert b"name=" in text, manifest.name
+            assert manifest.name[:-4] + ".elf" in names, manifest.name
         assert all(member.isfile() and (
             member.name in (*libraries, "media/demo.bmp", "media/demo.wav") or
+            member in manifests or
             ("/" not in member.name or member.name.startswith("gui/")) and
             member.name.endswith(".elf")) for member in archive), names
     symbols = subprocess.check_output(["nm", "-g", args.kernel], text=True)

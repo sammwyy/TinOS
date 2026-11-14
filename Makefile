@@ -170,7 +170,7 @@ USERLAND_APPS := hello fault badptr echo fpu io df textwrite cat fdtest \
                  tlsprobe gdprobe gd_consumer_probe versionprobe versionopen \
                  largeprobe
 GUI_APPS := about terminal explorer editor calculator sysinfo control_panel \
-            image_viewer media_player
+            image_viewer media_player taskmgr
 USERLAND_LIBS := libtinosbmp.so libtinoswav.so \
                  libtinostate.so libtinoschain.so libtinostls.so \
                  libtinosrt.so libtinosgd.so libtinosconsumer.so \
@@ -198,15 +198,23 @@ userland-apps:
 	$(MAKE) -C userland/lib
 	$(MAKE) -C userland/bin
 
+# Start-menu metadata (display name, category, icon) shipped beside each
+# GUI executable as /apps/gui/<app>.app.
+GUI_MANIFESTS := $(addprefix $(BUILD)/userland/gui/,$(addsuffix .app,$(GUI_APPS)))
+$(BUILD)/userland/gui/%.app: userland/manifests/%.app
+	@mkdir -p $(dir $@)
+	cp $< $@
+
 # --mtime/--owner/--group/--sort keep the archive's bytes independent of
 # build-machine clock and user IDs, matching the ISO's own reproducibility
 # guarantees below.
-$(RAMFS): userland-apps $(SAMPLE_BMP) $(SAMPLE_WAV)
+$(RAMFS): userland-apps $(SAMPLE_BMP) $(SAMPLE_WAV) $(GUI_MANIFESTS)
 	@mkdir -p $(dir $@)
 	@cd $(BUILD)/userland && tar --format=ustar --sort=name --mtime=@0 \
 		--owner=0 --group=0 --numeric-owner -cf $(abspath $@) \
 		$(addsuffix .elf,$(USERLAND_APPS)) \
 		$(addprefix gui/,$(addsuffix .elf,$(GUI_APPS))) \
+		$(addprefix gui/,$(addsuffix .app,$(GUI_APPS))) \
 		$(addprefix lib/,$(USERLAND_LIBS)) \
 		media/demo.bmp media/demo.wav
 
@@ -268,6 +276,8 @@ check: test $(ISO)
 	python3 tests/qemu/actions_test.py --iso $(ISO) --mem 8
 	python3 tests/qemu/actions_test.py --iso $(ISO) --mem 16
 	python3 tests/qemu/settings_media_test.py --iso $(ISO)
+	python3 tests/qemu/shell_features_test.py --iso $(ISO) --mem 8
+	python3 tests/qemu/shell_features_test.py --iso $(ISO) --mem 16
 	python3 tests/qemu/bootloader_test.py --iso $(ISO)
 	python3 tests/qemu/user_process_test.py --iso $(ISO)
 	python3 tests/qemu/process_preemption_test.py --iso $(ISO)

@@ -214,6 +214,26 @@ int tinos_gui_surface_update(int handle, unsigned commit)
     return invoke(TINOS_SYS_GUI_SURFACE_UPDATE, (unsigned)handle, commit, 0);
 }
 
+int tinos_icon(const char *name, unsigned size, uint32_t *pixels)
+{
+    return invoke(TINOS_SYS_ICON, (unsigned)name, size, (unsigned)pixels);
+}
+
+int tinos_proclist(unsigned index, tinos_process_info_t *info)
+{
+    return invoke(TINOS_SYS_PROCLIST, index, (unsigned)info, 0);
+}
+
+int tinos_terminate(int pid)
+{
+    return invoke(TINOS_SYS_TERMINATE, (unsigned)pid, 0, 0);
+}
+
+int tinos_loadinfo(tinos_load_info_t *info)
+{
+    return invoke(TINOS_SYS_LOADINFO, (unsigned)info, 0, 0);
+}
+
 int tinos_gui_theme(tinos_gui_theme_t *theme)
 {
     return invoke(TINOS_SYS_GUI_THEME, (unsigned)theme, sizeof(*theme), 0);

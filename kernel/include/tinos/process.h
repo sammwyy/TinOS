@@ -7,7 +7,7 @@
 #include <tinos/types.h>
 #include <uapi/tinos/desktop.h>
 
-#define PROCESS_MAX 4
+#define PROCESS_MAX 8
 #define PROCESS_INPUT_WAIT (-2)
 
 typedef enum {
@@ -23,6 +23,9 @@ typedef struct {
     uint32_t parent_pid;
     process_state_t state;
     int status;
+    uint32_t pages;     /* user pages currently mapped */
+    uint32_t cpu_ticks; /* PIT ticks spent running, at TIMER_HZ */
+    char path[64];      /* argv[0] at spawn */
 } process_info_t;
 
 int process_spawn(const void *image, size_t length, int argc,
@@ -31,6 +34,10 @@ uint32_t process_current_pid(void);
 int process_wait(uint32_t pid, uintptr_t status_address, regs_t *frame);
 void process_schedule(void);
 size_t process_list(process_info_t *out, size_t capacity);
+/* argv[0] of a live process, or NULL. */
+const char *process_path(uint32_t pid);
+/* Milliseconds of CPU time consumed by processes that have exited. */
+uint32_t process_retired_ms(void);
 bool process_kill(uint32_t pid);
 bool process_reap(uint32_t pid, int *status);
 bool process_wants_input(void);

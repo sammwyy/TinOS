@@ -135,6 +135,15 @@ void user_space_kernel(void)
     __asm__ volatile("movl %0, %%cr3" : : "r"(page_directory) : "memory");
 }
 
+size_t user_space_pages(const user_space_t *space)
+{
+    size_t count = 0;
+    for (size_t i = 0; space->table && i < 1024; i++)
+        if (space->table[i] & PDE_PRESENT)
+            count++;
+    return count;
+}
+
 void user_space_destroy(user_space_t *space)
 {
     if (!space->directory)

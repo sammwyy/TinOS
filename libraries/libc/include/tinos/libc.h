@@ -43,6 +43,11 @@ int tinos_gui_surface_tile(int handle, unsigned x, unsigned y,
                            const uint32_t *pixels);
 int tinos_gui_surface_update(int handle, unsigned commit);
 int tinos_gui_theme(tinos_gui_theme_t *theme);
+/* Copy a system icon, rendered at size x size, as ARGB words. */
+int tinos_icon(const char *name, unsigned size, uint32_t *pixels);
+int tinos_proclist(unsigned index, tinos_process_info_t *info);
+int tinos_terminate(int pid);
+int tinos_loadinfo(tinos_load_info_t *info);
 int tinos_audio_open(unsigned sample_rate);
 int tinos_audio_write(int handle, const int16_t *samples, unsigned frames);
 int tinos_audio_control(int handle, unsigned command);

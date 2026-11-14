@@ -7,8 +7,14 @@ CFLAGS := -m32 -std=gnu11 -O2 -ffreestanding -fno-builtin \
           -mno-sse -mno-sse2 -Wall -Wextra \
           -I$(ROOT)/kernel/include/uapi -I$(ROOT)/libraries/libc/include
 
+UAPI_HEADERS := $(wildcard $(ROOT)/kernel/include/uapi/tinos/*.h)
+
 .PHONY: all
 all: $(BUILD)/libtinos.a $(BUILD)/crt0.o
+
+# Every object sees the kernel ABI headers through libc.h.
+$(BUILD)/syscall.o $(BUILD)/ui.o $(BUILD)/widgets.o $(BUILD)/widgets_icons.o \
+$(BUILD)/string.o: $(UAPI_HEADERS)
 
 $(BUILD)/syscall.o: arch/x86/syscall.c include/tinos/libc.h \
                      $(ROOT)/kernel/include/uapi/tinos/syscall.h
@@ -32,16 +38,9 @@ $(BUILD)/widgets.o: widgets.c include/tinos/widgets.h include/tinos/libc.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD)/ui_icons.c: $(ROOT)/tools/gen_user_icons.py \
-                     $(ROOT)/tools/gen_icons.py \
-                     $(wildcard $(ROOT)/resources/icons/*.bmp)
-	@mkdir -p $(BUILD)
-	python3 $(ROOT)/tools/gen_user_icons.py $(ROOT)/resources/icons $@
-
-$(BUILD)/ui_icons.o: $(BUILD)/ui_icons.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD)/widgets_icons.o: widgets_icons.c include/tinos/widgets.h
+$(BUILD)/widgets_icons.o: widgets_icons.c include/tinos/widgets.h \
+                          include/tinos/libc.h \
+                          $(ROOT)/kernel/include/uapi/tinos/syscall.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -51,5 +50,5 @@ $(BUILD)/string.o: string.c include/tinos/string.h
 
 $(BUILD)/libtinos.a: $(BUILD)/syscall.o $(BUILD)/ui.o $(BUILD)/string.o \
                      $(BUILD)/widgets.o $(BUILD)/widget_font.o \
-                     $(BUILD)/widgets_icons.o $(BUILD)/ui_icons.o
+                     $(BUILD)/widgets_icons.o
 	$(AR) rcsD $@ $^

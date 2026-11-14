@@ -1,266 +1,136 @@
 /* Reusable interface pieces: icons, buttons, panels, scrollbars and a
  * single line text field.  Everything is drawn with the primitives in
- * gfx.c - there are no bitmaps beyond the font. */
+ * gfx.c; icons come from the generated resources/icons atlas. */
 
 #include <tinos/gfx.h>
 #include <tinos/string.h>
 #include <tinos/ui.h>
 #include "icons_generated.h"
 
-/* Shapes */
-
 /* Icons */
 
-#if 0 /* Legacy hardcoded icon table; resources/icons is authoritative. */
-typedef struct {
-    icon_t   icon;
-    uint16_t mask[16];
-} builtin_icon_t;
-
-/* One-bit 16x16 sprites. Zeroes are transparent, so the same small raster
- * assets work on the lavender shell, light panels and dark terminal. */
-static const builtin_icon_t builtin_icons[] = {
-    { ICON_FOLDER, { 0x0000, 0x0000, 0x1f00, 0x3f80, 0x7fff, 0x7fff,
-                     0x7fff, 0x7fff, 0x7fff, 0x7fff, 0x7fff, 0x7fff,
-                     0x7fff, 0x7fff, 0x7fff, 0x0000 } },
-    { ICON_FILE, { 0x0ff0, 0x1ff8, 0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc,
-                   0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc,
-                   0x3ffc, 0x3ffc, 0x3ffc, 0x0000 } },
-    { ICON_DRIVE, { 0x0000, 0x0ff0, 0x1ff8, 0x3ffc, 0x3ffc, 0x3ffc,
-                    0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc, 0x3ffc,
-                    0x3ffc, 0x3ffc, 0x1ff8, 0x0000 } },
-    { ICON_TERMINAL, { 0x7ffe, 0x4002, 0x4802, 0x5402, 0x6202, 0x4002,
-                       0x4002, 0x4002, 0x4002, 0x4002, 0x4002, 0x4002,
-                       0x4002, 0x4002, 0x7ffe, 0x0000 } },
-};
-
-static color_t builtin_icon_color(icon_t icon)
+/* The atlas stores each icon at a few hand-tuned sizes. Pick the variant
+ * that looks best at `size`: an exact match, a slightly smaller one drawn
+ * centred (crisper than resampling), a larger one box-filtered down, or as
+ * a last resort the largest one scaled up. *drawn is the edge length that
+ * ends up on screen. */
+static const custom_icon_t *icon_pick(const char *name, int size, int *drawn)
 {
-    switch (icon) {
-    case ICON_FOLDER:
-        return COLOR_FOLDER;
-    case ICON_FILE:
-        return COLOR_TEXT_DIM;
-    case ICON_HOME:
-        return COLOR_ACCENT_DARK;
-    case ICON_DRIVE:
-        return COLOR_ACCENT_DARK;
-    case ICON_TERMINAL:
-        return COLOR_TERMINAL_TEXT;
-    default:
-        return COLOR_TEXT;
-    }
-}
-
-static bool draw_builtin_icon(int x, int y, int size, icon_t icon)
-{
-    const builtin_icon_t *sprite = NULL;
-    for (size_t i = 0; i < ARRAY_SIZE(builtin_icons); i++)
-        if (builtin_icons[i].icon == icon) {
-            sprite = &builtin_icons[i];
+    size_t first = custom_icon_count;
+    for (size_t i = 0; i < custom_icon_count; i++)
+        if (strcmp(custom_icons[i].name, name) == 0) {
+            first = i;
             break;
         }
-    if (!sprite)
-        return false;
+    if (first == custom_icon_count)
+        return NULL;
+    size_t last = first;
+    while (last + 1 < custom_icon_count &&
+           strcmp(custom_icons[last + 1].name, name) == 0)
+        last++;
 
-    color_t color = builtin_icon_color(icon);
-    for (int py = 0; py < size; py++) {
-        int sy = py * 16 / size;
-        for (int px = 0; px < size; px++) {
-            int sx = px * 16 / size;
-            if (sprite->mask[sy] & (uint16_t)(0x8000u >> sx))
-                gfx_pixel(x + px, y + py, color);
+    const custom_icon_t *below = NULL, *above = NULL;
+    for (size_t i = first; i <= last; i++) {
+        const custom_icon_t *v = &custom_icons[i];
+        if (v->size == size) {
+            *drawn = size;
+            return v;
         }
+        if (v->size < size)
+            below = v;
+        else if (!above)
+            above = v;
     }
+    if (below && size - below->size <= MAX(2, size / 8)) {
+        *drawn = below->size;
+        return below;
+    }
+    *drawn = size;
+    return above ? above : &custom_icons[last];
+}
+
+static uint32_t icon_texel(const custom_icon_t *v, int x, int y)
+{
+    return custom_icon_palette[custom_icon_atlas[
+        (size_t)(v->y + y) * custom_icon_atlas_width + v->x + x]];
+}
+
+/* Non-premultiplied ARGB of output pixel (px, py) of `v` drawn at `size`. */
+static uint32_t icon_sample(const custom_icon_t *v, int size, int px, int py)
+{
+    int vs = v->size;
+    if (vs == size)
+        return icon_texel(v, px, py);
+    if (vs < size)
+        return icon_texel(v, px * vs / size, py * vs / size);
+    int x0 = px * vs / size, x1 = MAX(x0 + 1, (px + 1) * vs / size);
+    int y0 = py * vs / size, y1 = MAX(y0 + 1, (py + 1) * vs / size);
+    uint32_t a = 0, r = 0, g = 0, b = 0, n = 0;
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++, n++) {
+            uint32_t t = icon_texel(v, x, y);
+            uint32_t ta = t >> 24;
+            a += ta;
+            r += ((t >> 16) & 0xff) * ta;
+            g += ((t >> 8) & 0xff) * ta;
+            b += (t & 0xff) * ta;
+        }
+    if (!a)
+        return 0;
+    return ((a / n) << 24) | ((r / a) << 16) | ((g / a) << 8) | (b / a);
+}
+
+bool icon_render(const char *name, int size, uint32_t *out)
+{
+    int drawn;
+    const custom_icon_t *v;
+    if (!name || size <= 0 || !(v = icon_pick(name, size, &drawn)))
+        return false;
+    int offset = (size - drawn) / 2;
+    memset(out, 0, (size_t)size * size * sizeof(uint32_t));
+    for (int y = 0; y < drawn; y++)
+        for (int x = 0; x < drawn; x++)
+            out[(size_t)(y + offset) * size + x + offset] =
+                icon_sample(v, drawn, x, y);
     return true;
 }
-#endif
 
 bool widget_icon_name(int x, int y, int size, const char *name)
 {
-    if (!name || size <= 0)
+    int drawn;
+    const custom_icon_t *v;
+    if (!name || size <= 0 || !gfx_active() ||
+        !(v = icon_pick(name, size, &drawn)))
         return false;
-    const custom_icon_t *icon = NULL;
-    for (size_t i = 0; i < custom_icon_count; i++) {
-        if (strcmp(custom_icons[i].name, name) == 0) {
-            icon = &custom_icons[i];
-            break;
+    x += (size - drawn) / 2;
+    y += (size - drawn) / 2;
+    const fb_info_t *fb = gfx_info();
+    rect_t area = rect_intersect(rect_make(x, y, drawn, drawn),
+                                 gfx_clip_current());
+    if (rect_empty(area))
+        return true;
+    for (int py = area.y; py < area.y + area.h; py++) {
+        uint32_t *row = fb->back + (size_t)py * fb->width;
+        for (int px = area.x; px < area.x + area.w; px++) {
+            uint32_t s = icon_sample(v, drawn, px - x, py - y);
+            uint32_t alpha = s >> 24;
+            if (alpha == 255) {
+                row[px] = s & 0x00ffffffu;
+            } else if (alpha) {
+                uint32_t d = row[px];
+                row[px] = RGB((RGB_R(s) * alpha + RGB_R(d) * (255 - alpha)) / 255,
+                              (RGB_G(s) * alpha + RGB_G(d) * (255 - alpha)) / 255,
+                              (RGB_B(s) * alpha + RGB_B(d) * (255 - alpha)) / 255);
+            }
         }
     }
-    if (!icon)
-        return false;
-
-    for (int py = 0; py < size; py++) {
-        int sy = py * icon->height / size;
-        for (int px = 0; px < size; px++) {
-            int sx = px * icon->width / size;
-            uint32_t pixel = custom_icon_atlas[(size_t)(icon->y + sy) *
-                                               custom_icon_atlas_width +
-                                               icon->x + sx];
-            if ((pixel >> 24) != 0)
-                gfx_pixel(x + px, y + py, pixel & 0x00ffffffu);
-        }
-    }
+    gfx_mark_dirty(area.x, area.y, area.w, area.h);
     return true;
 }
 
-#if 0
-void widget_icon(int x, int y, int size, icon_t icon)
+const char *widget_icon_resource(icon_t icon)
 {
-    int s = size;
-
-    if (draw_builtin_icon(x, y, size, icon))
-        return;
-
-    switch (icon) {
-    case ICON_TERMINAL:
-        gfx_fill_rect(x, y, s, s, RGB(0x11, 0x16, 0x20));
-        gfx_rect(x, y, s, s, RGB(0x4a, 0x5a, 0x76));
-        gfx_hline(x + 1, y + 1, s - 2, RGB(0x2a, 0x35, 0x48));
-        gfx_hline(x + 1, y + 2, s - 2, RGB(0x2a, 0x35, 0x48));
-        gfx_text(x + 3, y + (s - FONT_H) / 2 + 2, ">", COLOR_TERMINAL_PROMPT);
-        gfx_fill_rect(x + 11, y + s - 7, 6, 2, COLOR_TERMINAL_TEXT);
-        break;
-
-    case ICON_FOLDER:
-        gfx_fill_rect(x, y + 3, s / 2, 3, RGB(0xd8, 0xa8, 0x3c));
-        gfx_fill_rect(x, y + 5, s, s - 8, COLOR_FOLDER);
-        gfx_hline(x, y + 5, s, RGB(0xff, 0xdd, 0x8a));
-        gfx_rect(x, y + 5, s, s - 8, RGB(0xb8, 0x8a, 0x22));
-        break;
-
-    case ICON_FILE:
-    case ICON_EDITOR:
-        gfx_fill_rect(x + 2, y + 1, s - 5, s - 2, COLOR_FILE);
-        gfx_rect(x + 2, y + 1, s - 5, s - 2, RGB(0x8a, 0x93, 0xa4));
-        for (int i = 0; i < 4; i++)
-            gfx_hline(x + 5, y + 5 + i * 3, s - 11, RGB(0x8a, 0x93, 0xa4));
-        if (icon == ICON_EDITOR) {
-            /* a little pencil across the corner */
-            for (int i = 0; i < 7; i++)
-                gfx_pixel(x + s - 8 + i, y + 9 - i, RGB(0xf0, 0x9a, 0x3c));
-        }
-        break;
-
-    case ICON_INFO:
-        fill_circle(x + s / 2, y + s / 2, s / 2 - 1, COLOR_ACCENT);
-        gfx_fill_rect(x + s / 2 - 1, y + s / 2 - 5, 2, 2, COLOR_TEXT);
-        gfx_fill_rect(x + s / 2 - 1, y + s / 2 - 1, 2, 6, COLOR_TEXT);
-        break;
-
-    case ICON_CHIP:
-        gfx_fill_rect(x + 3, y + 3, s - 6, s - 6, RGB(0x35, 0x74, 0x9a));
-        gfx_rect(x + 3, y + 3, s - 6, s - 6, RGB(0x9a, 0xd4, 0xf0));
-        gfx_fill_rect(x + 6, y + 6, s - 12, s - 12, RGB(0x14, 0x2a, 0x3c));
-        for (int i = 0; i < 3; i++) {
-            gfx_hline(x, y + 6 + i * 4, 3, RGB(0x9a, 0xd4, 0xf0));
-            gfx_hline(x + s - 3, y + 6 + i * 4, 3, RGB(0x9a, 0xd4, 0xf0));
-            gfx_vline(x + 6 + i * 4, y, 3, RGB(0x9a, 0xd4, 0xf0));
-            gfx_vline(x + 6 + i * 4, y + s - 3, 3, RGB(0x9a, 0xd4, 0xf0));
-        }
-        break;
-
-    case ICON_POWER:
-        ring(x + s / 2, y + s / 2 + 1, s / 2 - 2, 2, COLOR_DANGER);
-        gfx_fill_rect(x + s / 2 - 1, y + 1, 2, s / 2 - 1, COLOR_DANGER);
-        gfx_fill_rect(x + s / 2 - 3, y + 1, 6, 2, COLOR_WINDOW_BG);
-        break;
-
-    case ICON_RESTART:
-        ring(x + s / 2, y + s / 2, s / 2 - 2, 2, COLOR_OK);
-        gfx_fill_rect(x + s / 2, y + 1, s / 2, 5, COLOR_PANEL);
-        for (int i = 0; i < 5; i++)
-            gfx_hline(x + s / 2 + 1, y + 2 + i, 5 - i, COLOR_OK);
-        break;
-
-    case ICON_BACK:
-    case ICON_FORWARD:
-    case ICON_UP: {
-        color_t c = COLOR_ACCENT_DARK;
-        int cy = y + s / 2;
-        if (icon == ICON_BACK || icon == ICON_FORWARD) {
-            int dir = icon == ICON_BACK ? -1 : 1;
-            gfx_hline(x + 4, cy, s - 8, c);
-            gfx_hline(x + (dir < 0 ? 3 : s - 4), cy, 1, c);
-            for (int i = 0; i < 5; i++) {
-                gfx_pixel(x + (dir < 0 ? 4 + i : s - 5 - i), cy - i, c);
-                gfx_pixel(x + (dir < 0 ? 4 + i : s - 5 - i), cy + i, c);
-            }
-        } else {
-            gfx_vline(x + s / 2, y + 4, s - 8, c);
-            for (int i = 0; i < 5; i++) {
-                gfx_pixel(x + s / 2 - i, y + 4 + i, c);
-                gfx_pixel(x + s / 2 + i, y + 4 + i, c);
-            }
-        }
-        break;
-    }
-
-    case ICON_HOME:
-        gfx_fill_rect(x + 4, y + 8, s - 8, s - 5, RGB(0xf3, 0xf2, 0xf5));
-        gfx_rect(x + 4, y + 8, s - 8, s - 5, COLOR_BORDER);
-        for (int i = 0; i < s / 2; i++) {
-            gfx_pixel(x + s / 2 - i, y + 7 - i, RGB(0xb8, 0x4f, 0x58));
-            gfx_pixel(x + s / 2 + i, y + 7 - i, RGB(0xb8, 0x4f, 0x58));
-        }
-        gfx_fill_rect(x + s / 2 - 2, y + s - 7, 4, 5, COLOR_ACCENT_DARK);
-        break;
-
-    case ICON_REFRESH:
-        ring(x + s / 2, y + s / 2, s / 2 - 3, 2, COLOR_ACCENT_DARK);
-        gfx_fill_rect(x + s / 2 + 2, y + 2, 5, 5, COLOR_PANEL);
-        gfx_hline(x + s - 7, y + 3, 4, COLOR_ACCENT_DARK);
-        gfx_vline(x + s - 4, y + 3, 4, COLOR_ACCENT_DARK);
-        break;
-
-    case ICON_SAVE:
-        gfx_fill_rect(x + 3, y + 2, s - 6, s - 4, COLOR_ACCENT_DARK);
-        gfx_rect(x + 3, y + 2, s - 6, s - 4, COLOR_BORDER);
-        gfx_fill_rect(x + 6, y + 3, s - 12, 5, COLOR_PANEL_LIGHT);
-        gfx_fill_rect(x + 6, y + s - 8, s - 12, 5, COLOR_PANEL_LIGHT);
-        break;
-
-    case ICON_NEW:
-        gfx_fill_rect(x + 3, y + 2, s - 6, s - 4, COLOR_FILE);
-        gfx_rect(x + 3, y + 2, s - 6, s - 4, COLOR_BORDER);
-        gfx_hline(x + 6, y + 6, s - 12, COLOR_BORDER);
-        gfx_hline(x + 6, y + 10, s - 12, COLOR_BORDER);
-        break;
-
-    case ICON_UNDO:
-    case ICON_REDO:
-        gfx_hline(x + 4, y + s / 2, s - 8, COLOR_ACCENT_DARK);
-        gfx_vline(icon == ICON_UNDO ? x + 4 : x + s - 5, y + 5, s - 10,
-                  COLOR_ACCENT_DARK);
-        gfx_hline(x + 4, y + 5, s - 9, COLOR_ACCENT_DARK);
-        break;
-
-    case ICON_TINOS:
-    default: {
-        /* Four pointed star: the half width of each row falls off
-         * quadratically, which gives the concave sides of a spark. */
-        int r  = s / 2;
-        int cx = x + r;
-        int cy = y + r;
-        for (int dy = -r; dy <= r; dy++) {
-            int d  = r - (dy < 0 ? -dy : dy);
-            int hw = d * d / (r ? r : 1);
-            if (hw <= 0)
-                continue;
-            color_t shade = (dy > -r / 3 && dy < r / 3)
-                                ? RGB(0xdc, 0xea, 0xff)
-                                : COLOR_ACCENT;
-            gfx_hline(cx - hw, cy + dy, hw * 2 + 1, shade);
-        }
-        break;
-    }
-    }
-}
-#endif
-
-static const char *icon_resource_name(icon_t icon)
-{
-    static const char *const names[] = {
+    static const char *const names[ICON_COUNT] = {
         [ICON_TERMINAL] = "terminal",
         [ICON_FOLDER] = "folder",
         [ICON_FILE] = "file",
@@ -280,39 +150,35 @@ static const char *icon_resource_name(icon_t icon)
         [ICON_NEW] = "new",
         [ICON_UNDO] = "undo",
         [ICON_REDO] = "redo",
+        [ICON_PLAY] = "play",
+        [ICON_PAUSE] = "pause",
+        [ICON_VOLUME] = "volume",
+        [ICON_VOLUME_MUTE] = "volume_mute",
+        [ICON_NETWORK] = "network",
+        [ICON_NETWORK_OFF] = "network_off",
+        [ICON_MEMORY] = "memory",
+        [ICON_SETTINGS] = "settings",
+        [ICON_TASKMGR] = "taskmgr",
+        [ICON_COMPUTER] = "computer",
+        [ICON_APP] = "app",
+        [ICON_MENU_FOLDER] = "menu_folder",
+        [ICON_MUSIC] = "music",
+        [ICON_IMAGE] = "image",
+        [ICON_CALCULATOR] = "calculator",
+        [ICON_CALENDAR] = "calendar",
+        [ICON_CLOCK] = "clock",
+        [ICON_DESKTOP] = "desktop",
+        [ICON_LOGOUT] = "logout",
+        [ICON_USER] = "user",
+        [ICON_WARNING] = "warning",
+        [ICON_ERROR] = "error",
     };
-    return icon >= 0 && (size_t)icon < ARRAY_SIZE(names) ? names[icon] : NULL;
-}
-
-static bool draw_media_icon(int x, int y, int size, icon_t icon)
-{
-    if (icon != ICON_PLAY && icon != ICON_PAUSE && icon != ICON_VOLUME)
-        return false;
-    color_t color = COLOR_TEXT;
-    int s = MAX(12, size);
-    if (icon == ICON_PLAY) {
-        for (int row = 0; row < s; row++) {
-            int width = row < s / 2 ? row * 2 / 3 + 2 : (s - row) * 2 / 3 + 2;
-            gfx_fill_rect(x + 3, y + row, width, 1, color);
-        }
-    } else if (icon == ICON_PAUSE) {
-        gfx_fill_rect(x + 3, y + 2, 4, s - 4, color);
-        gfx_fill_rect(x + s - 7, y + 2, 4, s - 4, color);
-    } else {
-        gfx_fill_rect(x + 2, y + 6, 4, 5, color);
-        gfx_fill_rect(x + 6, y + 4, 3, 9, color);
-        gfx_hline(x + 10, y + 3, 2, color);
-        gfx_hline(x + 10, y + s - 5, 2, color);
-        gfx_vline(x + 12, y + 4, s - 8, color);
-    }
-    return true;
+    return icon >= 0 && icon < ICON_COUNT ? names[icon] : NULL;
 }
 
 void widget_icon(int x, int y, int size, icon_t icon)
 {
-    if (draw_media_icon(x, y, size, icon))
-        return;
-    const char *name = icon_resource_name(icon);
+    const char *name = widget_icon_resource(icon);
     if (name)
         (void)widget_icon_name(x, y, size, name);
 }

@@ -13,8 +13,8 @@
 #define TINOS_GUI_TEXT_SIZE (TINOS_GUI_COLS * TINOS_GUI_ROWS)
 #define TINOS_GUI_IMAGE_WIDTH 320u
 #define TINOS_GUI_IMAGE_HEIGHT 192u
-#define TINOS_GUI_SURFACE_MAX_WIDTH 800u
-#define TINOS_GUI_SURFACE_MAX_HEIGHT 600u
+#define TINOS_GUI_SURFACE_MAX_WIDTH 1024u
+#define TINOS_GUI_SURFACE_MAX_HEIGHT 768u
 #define TINOS_GUI_TILE_MAX_WIDTH 64u
 #define TINOS_GUI_TILE_MAX_HEIGHT 64u
 #define TINOS_GUI_THEME_V1_SIZE 40u
@@ -99,5 +99,28 @@ typedef struct {
     char platform[48];
     char clock[32];
 } tinos_system_info_t;
+
+#define TINOS_PROC_READY   1u
+#define TINOS_PROC_RUNNING 2u
+#define TINOS_PROC_BLOCKED 3u
+#define TINOS_PROC_EXITED  4u
+
+typedef struct {
+    uint32_t pid, parent_pid;
+    uint32_t state;   /* TINOS_PROC_* */
+    int32_t status;   /* exit status once EXITED */
+    uint32_t pages;   /* mapped 4 KiB user pages */
+    uint32_t cpu_ms;  /* time spent running */
+    char path[64];
+} tinos_process_info_t;
+
+/* Memory and CPU counters; *_ms values are monotonic since boot. */
+typedef struct {
+    uint32_t uptime_ms, idle_ms, user_ms;
+    uint32_t memory_total_kib, memory_free_kib;
+    uint32_t heap_total_kib, heap_used_kib;
+    uint32_t user_kib;
+    uint32_t processes, process_max;
+} tinos_load_info_t;
 
 #endif

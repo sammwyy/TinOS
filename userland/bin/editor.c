@@ -175,7 +175,7 @@ static void move_vertical(int down)
 }
 
 static const char *const toolbar_icons[] = {
-    "save", "new", "undo", "redo", "file", "editor", "file",
+    "save", "new", "undo", "redo", "cut", "copy", "paste",
 };
 static const char *const toolbar_labels[] = {
     "Save", "New", "Undo", "Redo", "Cut", "Copy", "Paste",

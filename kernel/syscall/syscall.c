@@ -6,7 +6,10 @@
 #include <tinos/kernel.h>
 #include <tinos/input.h>
 #include <tinos/net.h>
+#include <tinos/heap.h>
+#include <tinos/mm.h>
 #include <tinos/process.h>
+#include <tinos/runloop.h>
 #include <tinos/sh.h>
 #include <tinos/syscall.h>
 #include <tinos/string.h>
@@ -420,6 +423,79 @@ void syscall_dispatch(regs_t *frame)
         frame->eax = (uint32_t)desktop_user_window_surface_update(
             process_current_pid(), frame->ebx, frame->ecx);
         return;
+    case TINOS_SYS_ICON: {
+        char name[64];
+        uint32_t size = frame->ecx;
+        if (!size || size > TINOS_ICON_MAX ||
+            !copy_user_symbol(frame->ebx, name) ||
+            !process_user_buffer(frame->edx, size * size * sizeof(uint32_t),
+                                 true)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        frame->eax = icon_render(name, (int)size,
+                                 (uint32_t *)(uintptr_t)frame->edx) ? 0
+                                                                    : (uint32_t)-1;
+        return;
+    }
+    case TINOS_SYS_PROCLIST: {
+        process_info_t list[PROCESS_MAX];
+        size_t count = process_list(list, PROCESS_MAX);
+        if (!process_user_buffer(frame->ecx, sizeof(tinos_process_info_t),
+                                 true)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        if (frame->ebx >= count) {
+            frame->eax = 0;
+            return;
+        }
+        const process_info_t *p = &list[frame->ebx];
+        tinos_process_info_t info = {
+            .pid = p->pid, .parent_pid = p->parent_pid, .state = p->state,
+            .status = p->status, .pages = p->pages,
+            .cpu_ms = p->cpu_ticks * (1000u / TIMER_HZ),
+        };
+        strlcpy(info.path, p->path, sizeof(info.path));
+        memcpy((void *)(uintptr_t)frame->ecx, &info, sizeof(info));
+        frame->eax = 1;
+        return;
+    }
+    case TINOS_SYS_TERMINATE:
+        frame->eax = frame->ebx && frame->ebx != process_current_pid() &&
+                     process_kill(frame->ebx) ? 0 : (uint32_t)-1;
+        return;
+    case TINOS_SYS_LOADINFO: {
+        if (!process_user_buffer(frame->ebx, sizeof(tinos_load_info_t),
+                                 true)) {
+            frame->eax = (uint32_t)-1;
+            return;
+        }
+        process_info_t list[PROCESS_MAX];
+        size_t count = process_list(list, PROCESS_MAX);
+        uint32_t user_ticks = 0, user_pages = 0, live = 0;
+        for (size_t i = 0; i < count; i++) {
+            user_ticks += list[i].cpu_ticks;
+            user_pages += list[i].pages;
+            live += list[i].state != PROCESS_EXITED;
+        }
+        heap_stats_t heap;
+        heap_get_stats(&heap);
+        tinos_load_info_t info = {
+            .uptime_ms = (uint32_t)timer_ticks(),
+            .idle_ms = kernel_loop_idle_ticks() * (1000u / TIMER_HZ),
+            .user_ms = user_ticks * (1000u / TIMER_HZ) + process_retired_ms(),
+            .memory_total_kib = (uint32_t)(pmm_total_bytes() / 1024),
+            .memory_free_kib = (uint32_t)(pmm_free_bytes() / 1024),
+            .heap_total_kib = (uint32_t)(heap.heap_total / 1024),
+            .heap_used_kib = (uint32_t)(heap.heap_used / 1024),
+            .user_kib = user_pages * 4,
+            .processes = live, .process_max = PROCESS_MAX,
+        };
+        memcpy((void *)(uintptr_t)frame->ebx, &info, sizeof(info));
+        frame->eax = 0;
+        return;
+    }
     case TINOS_SYS_GUI_THEME: {
         unsigned bytes = frame->ecx ? frame->ecx : TINOS_GUI_THEME_V1_SIZE;
         if (bytes != TINOS_GUI_THEME_V1_SIZE &&
